@@ -72,6 +72,25 @@ func _initialize() -> void:
 			seeds, 3, [0, 1, 999999], "ROUNDS %s f%d" % [mode, friends])
 		total += int(r.checked) * 40
 		fails += (r.failures as Array).size()
+	# TODAY'S KAIJU (the first made round) over 400+ days (and the 60 from whenever this runs), in every mode and
+	# with a few / many kaiju friends (the place depends on how many are open): Seeded.validate_days.
+	var rd := Seeded.validate_days(func(date: String) -> Array:
+			var out: Array = []
+			for mf in [["gentle", 0], ["gentle", 7], ["brave", 13], ["mega", 20]]:
+				out.append([mf[1], RoundGen.make(RoundGen.LESSONS, 1, int(mf[1]), String(mf[0]), date)])
+			return out,
+		func(days: Array) -> Array:
+			var why: Array = []
+			for fm in days:
+				var m: Dictionary = fm[1]
+				for w in RoundGen.check(m, int(fm[0])):
+					why.append("%s f%d: %s" % [m.get("mode"), int(fm[0]), w])
+				if not bool(m.daily) or not bool((m.variant as Dictionary).get("golden", false)):
+					why.append("%s f%d: not a golden TODAY'S KAIJU" % [m.get("mode"), int(fm[0])])
+			return why, 400, "TODAY'S KAIJU", ["2026-11-11", "2026-11-12"])
+	total += int(rd.checked) * 4
+	fails += (rd.failures as Array).size()
+	_expect(var_to_str(RoundGen.make(RoundGen.LESSONS, 1, 3, "gentle", "2026-11-12")) != var_to_str(RoundGen.make(RoundGen.LESSONS, 1, 3, "gentle", "2026-11-13")), "TODAY'S KAIJU changes from day to day")
 	# Today's kaiju is the same whatever the session seed.
 	_expect(var_to_str(RoundGen.make(3, 1, 5)) == var_to_str(RoundGen.make(3, 777, 5)), "today's kaiju is the same for every session")
 	# Places open with friends; twins every fifth made round.

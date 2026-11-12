@@ -36,6 +36,7 @@ extends Node
 ## board that never ends.
 
 const FAKE_PAD := 40
+const BotEnd := preload("res://tests/bot_end.gd")  # check(): counted checks, so every run ends with a real BOT RESULT
 
 const STUCK_SECS := 90.0
 var main
@@ -64,7 +65,7 @@ var toy_i := 0
 var toy_t := 0.0
 var cues := {}  # simple mode: picture cues seen / learned
 var plug_phase := 0
-const WORDS := ["", "GO!", "HOORAY!", "PAUSED", "HELLO!", "Connecting to the VR player…"]
+const WORDS := ["", "GO!", "HOORAY!", "PAUSED", "HELLO!", "TODAY", "Connecting to the VR player…"]  # (TODAY: the daily maze's name)
 const HUD_WORDS := ["", "HOME!", "Syncing with the VR player…"]
 
 
@@ -96,7 +97,8 @@ func _physics_process(delta: float) -> void:
 			var c := {"mesh": 0, "multimesh": 0, "label": 0, "particles": 0}
 			_count_node(main, c)
 			print("COUNT ", c)
-			preload("res://tests/bot_end.gd").quit_quietly(get_tree())
+			BotEnd.check(int(c.mesh) + int(c.multimesh) > 0, "BOT_COUNT counted the maze's meshes")
+			BotEnd.quit_quietly(get_tree())
 		return
 	var mode: String = main.net.mode
 	simple = main.simple
@@ -725,6 +727,11 @@ func _tip_error(who: String, text: String) -> void:
 
 
 func _exit_tree() -> void:
+	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
+	if main != null and is_instance_valid(main) and not OS.has_environment("BOT_COUNT"):
+		# (A 60 s local run is still rolling through its first maze: there, the maze must be in play.)
+		BotEnd.check(cleared >= 1 or (t < 90.0 and main.state == "play"), "a maze was cleared, or a short run is playing one (mode %s, t=%.0f, level %d, state %s)" % [main.net.mode, t, main.level, main.state])
+		BotEnd.check(main.state != "over" or not main.simple, "no game over in simple mode")
 	if main != null and is_instance_valid(main) and main.simple:
 		var ks: Array = cues.keys()
 		ks.sort()

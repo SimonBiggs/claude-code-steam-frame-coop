@@ -60,14 +60,21 @@ func _initialize() -> void:
 	_expect(not G.daily_of(G.code_at(5, 1, false)), "no TODAY'S PARK once it's done")
 	_expect(G.level_of(G.code_at(5, 1, false)) == 1 and G.level_of(G.code_at(5, 2, true)) == 1, "the session starts at level 1")
 	_expect(G.level_of(G.code_at(5, 30, false)) == G.MAX_LEVEL, "levels stop at the top")
-	for date in ["2026-10-29", "2026-12-25", "2027-01-01"]:
-		var dc := G.code_at(77, 1, true, date)
-		_expect(dc == G.code_at(123456, 1, true, date), "TODAY'S PARK is the same for every session all day")
-		_expect(G.level_of(dc) == G.DAILY_LEVEL, "TODAY'S PARK is at its level")
-		var dd := G.build(dc)
-		_expect(dd.color == G.GOLD, "TODAY'S PARK is golden")
-		for why in G.check(dd):
-			_expect(false, "TODAY'S PARK %s: %s" % [date, why])
+	# TODAY'S PARK over 400+ days (Seeded.validate_days, the shared daily validator): the first round of a session
+	# when it's due (code_at(.., 1, true, date)), the same for every session and all day, golden, at its level, fair.
+	var rs := Seeded.validate_days(func(date: String) -> Dictionary:
+			var dc := G.code_at(77, 1, true, date)
+			return {"code": dc, "other": G.code_at(123456, 1, true, date), "round": G.build(dc)},
+		func(o: Dictionary) -> Array:
+			var why: Array = G.check(o.round)
+			if int(o.code) != int(o.other):
+				why.append("not the same for every session")
+			if G.level_of(int(o.code)) != G.DAILY_LEVEL or not G.daily_of(int(o.code)):
+				why.append("not at TODAY'S PARK's level")
+			if o.round.color != G.GOLD:
+				why.append("not golden")
+			return why, 400, "TODAY'S PARK", ["2026-11-11", "2026-11-12"])
+	fails += (rs.failures as Array).size()
 	_expect(G.daily_seed("2026-10-29") != G.daily_seed("2026-10-30"), "a new TODAY'S PARK each day")
 	# The fair picker and the gentle bubble.
 	var d1 := G.build(G.code_of(11, 3, false))

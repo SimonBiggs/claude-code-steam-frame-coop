@@ -68,6 +68,7 @@ func _ready() -> void:
 	var t0 := 3.0 if client else 1.0
 	kit.at(t0, "%d TV players press A on their pads" % want, _join)
 	kit.at(t0 + 4.0, "start the party", _start)
+	kit.on_cut = _cut_checks  # (a run cut before the results: the solo VR host's BOT_END=62, a 60 s local run)
 	if host:
 		kit.at(t0 + 14.0, "host: start anyway if the TV machine didn't", _start_direct)
 	kit.every(3.0, _report)
@@ -450,6 +451,22 @@ func _report() -> String:
 	return "BOT %s: %s r%d %s/%s mg=%s | %s" % [main.net.mode, String(main.net.state_get("phase", "")), int(main.net.state_get("round", 0)),
 		String(main.net.state_get("step", "")), String(main.net.state_get("mg_phase", "")),
 		String((main.net.state_get("mg", {}) as Dictionary).get("id", "-")) if main.net.state_get("mg", {}) is Dictionary else "-", ", ".join(ps)]
+
+
+## Cut short before the results (a whole party needs ~150 s): the progress it made instead.
+func _cut_checks() -> void:
+	var mode: String = main.net.mode
+	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
+	if mode != "host":
+		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
+	kit.assert_true(main.roster().size() >= 4, "%s: at least 4 players (CPUs fill up)" % mode)
+	for s in ["step:roll", "step:move", "step:land"]:
+		kit.assert_true(seen.has(s), "%s: saw %s (short run)" % [mode, s])
+	kit.assert_true(seen.has("phase:minigame"), "%s: the board went on to a minigame (short run, round %d)" % [mode, int(main.net.state_get("round", 0))])
+	if main.vr_rig != null:
+		kit.assert_true(_vr_panel_bad.is_empty(), "every VR card / menu is ~1.5 m away and above the board %s" % str(_vr_panel_bad))
+	if main.simple:
+		kit.assert_true(bad_text.is_empty(), "SIMPLE: no how-to text on this machine (%s)" % str(bad_text.keys()))
 
 
 func _checks() -> void:

@@ -20,6 +20,7 @@ const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
 
 var fails := 0
+const TurnFlow := preload("res://games/party_board/turn_flow.gd")
 
 
 func _initialize() -> void:
@@ -52,6 +53,28 @@ func _initialize() -> void:
 						var p := PartyGen.generate(data, 300 + s, sp)
 						reds[level] = int(reds.get(level, 0)) + int(p.reds)
 						seen[var_to_str(p.types) + var_to_str(p.route)] = true
+	# TODAY'S PARTY over 400+ days (and the 60 from whenever this runs), the way turn_flow _make_plan builds it:
+	# daily_seed(date), level 4, that day's board (rng "daily_board"), the SIMPLE party's rounds.
+	var t_days := Time.get_ticks_msec()
+	var rd := Seeded.validate_days(func(date: String) -> Array:
+			var sv := Seeded.daily_seed("party_board", date)
+			var bid: String = Boards.ids()[Seeded.rng(sv, "daily_board").randi() % Boards.BOARDS.size()]
+			var out: Array = []
+			for rounds in [TurnFlow.SIMPLE_ROUNDS, 3]:  # the family's SIMPLE party (turn_flow SIMPLE_ROUNDS) and the bots' 3
+				out.append(PartyGen.generate(data, sv, {"seed": sv, "level": 4, "rounds": rounds, "daily": true, "board": bid}))
+			return out,
+		func(ps: Array) -> Array:
+			var why: Array = []
+			for p in ps:
+				var d2 := BD.new()
+				d2.build_layout(p.layout)
+				d2.make_simple()
+				for w in PartyGen.check(d2, p):
+					why.append("%s r%d: %s" % [p.board, int(p.get("rounds", 0)), w])
+			return why, 400, "TODAY'S PARTY", ["2026-11-11", "2026-11-12"])
+	total += int(rd.checked) * 2
+	fails += (rd.failures as Array).size()
+	print("TODAY'S PARTY: %d days checked (%d ms)" % [int(rd.checked), Time.get_ticks_msec() - t_days])
 	for s in 200:
 		var lay := PartyGen.layout(1000 + s)
 		layouts[var_to_str(lay)] = true

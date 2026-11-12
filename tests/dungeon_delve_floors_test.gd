@@ -1,6 +1,6 @@
 extends SceneTree
 ## DUNGEON DELVE deep floors: checks the generator over many seeds (no game, no window).
-##   godot-test --headless --path . -s res://tests/dungeon_delve_floors_test.gd
+##   godot-test --headless --path . -s res://tests/dungeon_delve_floors_test.gd   (GEN_QUICK=1 = the landing sample)
 ## For every zone x floor x difficulty and SEEDS seeds:
 ##  - logic: every room can be reached from the start (keys found before their locked doors, puzzle
 ##    switches on the near side, the secret room behind its wall), the key is never behind its own door;
@@ -26,13 +26,16 @@ const Foes := preload("res://games/dungeon_delve/foes.gd")
 const Relics := preload("res://games/dungeon_delve/relics.gd")
 const Classes := preload("res://games/dungeon_delve/classes.gd")
 const Deep := preload("res://games/dungeon_delve/deep.gd")
+const Seeded := preload("res://core/seeded.gd")
 
 var fails := 0
 var checks := 0
+var collecting := false  ## _fail collects into `collected` instead (the daily validator reports them per date)
+var collected: Array = []
 
 
 func _initialize() -> void:
-	var seeds := int(OS.get_environment("SEEDS")) if OS.has_environment("SEEDS") else 60
+	var seeds := Seeded.test_count(60, 6)  # 6 + the family seeds in a landing (GEN_QUICK=1), 60 nightly
 	var t0 := Time.get_ticks_msec()
 	for heroic in [false, true]:
 		for zone in FloorGen.ZONE_COUNT:
@@ -46,6 +49,30 @@ func _initialize() -> void:
 		for fl2 in FloorGen.FLOORS_PER_ZONE:
 			for s3 in maxi(4, seeds / 6):
 				_check(5000 + s3 * 131, zone2, fl2, s3 % 2 == 0)
+	# TODAY'S DUNGEON over 400+ days (Seeded.validate_days, the shared daily validator): the run deep.gd start_run("daily")
+	# plays (Deep.daily_seed(date), BRAVE rules): every floor of all four biomes and the first endless zone, plus the camp,
+	# passes the run's fast logic checks (_run_floor_logic: every room reachable, the stairs or a fair boss room, the biome
+	# features clear of doors and walkable), the same all day. (The full _check flood fill on all 20 floors a day took
+	# minutes; the seeds above cover the geometry.)
+	var rs := Seeded.validate_days(func(date: String) -> Dictionary:
+			var ds := Deep.daily_seed(date)
+			var floors: Array = []
+			for z in FloorGen.ZONE_COUNT + 1:
+				for fl in FloorGen.FLOORS_PER_ZONE:
+					floors.append(FloorGen.generate(ds, z, fl, false))
+			return {"seed": ds, "floors": floors, "shop": FloorGen.generate(ds, 1, 2, false, "shop")},
+		func(run: Dictionary) -> Array:
+			collecting = true
+			collected.clear()
+			for f in run.floors:
+				_run_floor_logic(f, "depth %d (zone %d floor %d)" % [FloorGen.global_floor(int(f.zone), int(f.floor)) + 1, int(f.zone), int(f.floor)])
+			if (run.shop.rooms as Array).size() != 1 or not (run.shop.rooms[0] as Dictionary).has("stairs"):
+				collected.append("the camp isn't one room with stairs")
+			collecting = false
+			return collected.duplicate(), 400, "TODAY'S DUNGEON", ["2026-11-11", "2026-11-12"])
+	fails += (rs.failures as Array).size()
+	if Deep.daily_seed("2026-11-12") != absi(hash("2026-11-12")) % 1000000:
+		_fail("TODAY'S DUNGEON's seed changed (every family's best-today would reset mid-day)")
 	if FloorGen.modifier(1, 0, 0) != "" or FloorGen.modifier(1, FloorGen.ZONE_COUNT, 0) == "":
 		_fail("twists only in the endless depths")
 	for path in ["res://games/dungeon_delve/deep.gd", "res://games/dungeon_delve/deep_hud.gd", "res://games/dungeon_delve/floor_view.gd", "res://games/dungeon_delve/foes.gd"]:
@@ -71,6 +98,9 @@ func _initialize() -> void:
 
 
 func _fail(msg: String) -> void:
+	if collecting:
+		collected.append(msg)
+		return
 	fails += 1
 	if fails < 40:
 		print("SCRIPT ERROR: FLOORS %s" % msg)
@@ -198,20 +228,25 @@ func _check_run_logic() -> void:
 			for z in FloorGen.ZONE_COUNT + 2:
 				for fl in FloorGen.FLOORS_PER_ZONE:
 					var f := FloorGen.generate(seed_value, z, fl, heroic)
+					_run_floor_logic(f, "run seed %d %d-%d" % [seed_value, z + 1, fl + 1])
 					var tag := "run seed %d %d-%d" % [seed_value, z + 1, fl + 1]
-					var reach := FloorGen.solve(f)
-					if reach.size() != (f["rooms"] as Array).size():
-						_fail("%s: a room can't be reached" % tag)
-					if FloorGen.is_boss_floor(fl):
-						var why := FloorGen.boss_room_problem(f)
-						if why != "":
-							_fail("%s: unfair boss room: %s" % [tag, why])
-					elif not reach.has(int(f["exit"])):
-						_fail("%s: the stairs can't be reached" % tag)
-					_check_features(f, tag)
 					var shop := FloorGen.generate(seed_value, z, fl, heroic, "shop")
 					if not ((shop["rooms"] as Array)[0] as Dictionary).has("stairs"):
 						_fail("%s: the camp has no stairs" % tag)
+
+
+## A run's floor, the fast logic checks: every room reachable, the stairs (or a fair boss room), the biome features.
+func _run_floor_logic(f: Dictionary, tag: String) -> void:
+	var reach := FloorGen.solve(f)
+	if reach.size() != (f["rooms"] as Array).size():
+		_fail("%s: a room can't be reached" % tag)
+	if FloorGen.is_boss_floor(int(f["floor"])):
+		var why := FloorGen.boss_room_problem(f)
+		if why != "":
+			_fail("%s: unfair boss room: %s" % [tag, why])
+	elif not reach.has(int(f["exit"])):
+		_fail("%s: the stairs can't be reached" % tag)
+	_check_features(f, tag)
 
 
 func _check_features(f: Dictionary, tag: String) -> void:

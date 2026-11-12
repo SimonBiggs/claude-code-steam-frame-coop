@@ -11,6 +11,8 @@ extends SceneTree
 const RoundGen := preload("res://games/whack_a_mole/roundgen.gd")
 const Story := preload("res://games/whack_a_mole/story.gd")
 const Seeded := preload("res://core/seeded.gd")
+const Deep := preload("res://games/whack_a_mole/deep.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 
 var fails := 0
 
@@ -67,18 +69,37 @@ func _initialize() -> void:
 	for w in later.waves:
 		shapes[w[1]] = true
 	_expect(shapes.size() >= 4, "later rounds mix wave shapes (%s)" % str(shapes.keys()))
-	# TODAY'S PATCH: fair for many days, the same all day, different day to day.
+	# TODAY'S PATCH over 400+ days (and the 60 from whenever this runs), the way _start_play builds it:
+	# Story.daily_spec(players, 120 s, date) through Deep.round_spec, 1 player with no gift and 4 players with the
+	# GOLD hammer gift; RoundGen.check, and the round's warned tricks (Deep.problems) for that date's season. A round
+	# is ~3 ms, so the mode rotates with the day (150+ days each; every mode every day would add ~25 s).
 	var days := {}
-	for d in 60:
-		var date := Time.get_date_string_from_unix_time(1790000000 + d * 86400)
-		var sp := Story.daily_spec(3, 120.0, date)
-		var rd := RoundGen.generate(Story.daily_seed(date), sp)
-		for w in RoundGen.check(rd, Story.allowed(sp)):
-			_fail("daily %s: %s" % [date, w])
-		_expect(var_to_str(rd) == var_to_str(RoundGen.generate(Story.daily_seed(date), Story.daily_spec(3, 120.0, date))), "daily %s is the same all day" % date)
-		days[var_to_str(rd.spawns)] = true
-		total += 1
-	_expect(days.size() >= 58, "daily rounds differ day to day (%d unique of 60)" % days.size())
+	var t_days := Time.get_ticks_msec()
+	var rd := Seeded.validate_days(func(date: String) -> Array:
+			var season := Seeded.season(date) if Deep.SEASONS.has(Seeded.season(date)) else "spring"
+			var out: Array = []
+			var dn := int(Time.get_unix_time_from_datetime_string(date + "T12:00:00") / 86400)
+			for mode in [PickOrbs.MODE_IDS[dn % PickOrbs.MODE_IDS.size()]]:
+				for pg in [[1, ""], [4, "gold"]]:
+					var sp := Deep.round_spec(Story.daily_spec(int(pg[0]), 120.0, date), mode, String(pg[1]))
+					var r := RoundGen.generate(Story.daily_seed(date), sp)
+					var tspec := {"mode": mode, "time": float(r.time), "season": season, "extra_gold": 1 if pg[1] == "gold" else 0, "scale": 1.0}
+					out.append([sp, r, tspec, Deep.tricks(Seeded.derive(Story.daily_seed(date), "tricks1"), tspec, r)])
+			return out,
+		func(day: Array) -> Array:
+			var why: Array = []
+			for e in day:
+				var tag := "%s p%d" % [e[2].mode, int(e[0].get("players", 0))]
+				for w in RoundGen.check(e[1], Story.allowed(e[0])):
+					why.append("%s: %s" % [tag, w])
+				for x in Deep.problems(e[3], e[2], e[1]):
+					why.append("%s tricks: %s" % [tag, x])
+			days[var_to_str(day[0][1].spawns)] = true
+			return why, 400, "TODAY'S PATCH", ["2026-11-11", "2026-11-12"])
+	total += int(rd.checked)
+	fails += (rd.failures as Array).size()
+	print("TODAY'S PATCH: %d days checked (%d ms)" % [int(rd.checked), Time.get_ticks_msec() - t_days])
+	_expect(days.size() >= int(rd.checked) - 4, "daily rounds differ day to day (%d unique of %d)" % [days.size(), int(rd.checked)])
 	# Hand checks: the validator catches broken rounds.
 	var bad := {"time": 20.0, "cap": 5, "max": 3, "goal": [1, 2, 3], "spawns": [[1.0, 3, 0, 1.0], [1.5, 3, 0, 1.0], [2.0, 4, 0, 1.0]]}
 	_expect(not RoundGen.check(bad).is_empty(), "a hole used twice at once is caught")

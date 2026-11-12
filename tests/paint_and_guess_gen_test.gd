@@ -98,8 +98,17 @@ func _initialize() -> void:
 		_expect(G.themes_of(dc) == G.BASE_THEMES, "TODAY'S GALLERY uses the starting themes (same on every machine)")
 		var dd := G.build(dc)
 		_expect(str(dd.name) == "TODAY'S GALLERY", "TODAY'S GALLERY is called that")
-		for why in G.check(dd):
-			_expect(false, "TODAY'S GALLERY %s: %s" % [date, why])
+	# TODAY'S GALLERY over 400+ days (and the 60 from whenever this runs): the first game of the day the way the
+	# game builds it (code_at(..., daily_due, ...) -> build), passing the same check() as every other game.
+	var rd := Seeded.validate_days(func(date: String) -> Dictionary:
+			return G.build(G.code_at(77, 1, true, G.THEMES.size(), date)),
+		func(d: Dictionary) -> Array:
+			var why := G.check(d)
+			if not bool(d.daily) or str(d.name) != "TODAY'S GALLERY" or int(d.themes) != G.BASE_THEMES:
+				why.append("not a TODAY'S GALLERY with the starting themes")
+			return why, 400, "TODAY'S GALLERY", ["2026-11-11", "2026-11-12"])
+	gens += int(rd.checked)
+	fails += (rd.failures as Array).size()
 	_expect(G.daily_seed("2026-10-30") != G.daily_seed("2026-10-31"), "a new TODAY'S GALLERY each day")
 	# Unlocks.
 	_expect(G.themes_unlocked(0) == G.BASE_THEMES, "a new family starts with the starting themes")

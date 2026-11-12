@@ -14,7 +14,8 @@
 //   /tmp/multibot-<port>/p<k>, like real machines: a bot may change files in it to simulate a deploy reaching that
 //   machine; env BOT_OWN_COPY=1 tells the bot it may)  --late S (the LAST joiner starts S seconds after the others: a
 //   machine joining a game already running; it gets BOT_LATE=S and a deadline S shorter, so it still leaves before
-//   the host)  --expect-late KIND,KIND (default with --late: story) the late joiner must catch up on these sticky
+//   the host)  --allow-no-result REASON (a machine may end without a BOT RESULT: only
+//   for bots on brepl dev.ts NET_NO_RESULT_OK)  --expect-late KIND,KIND (default with --late: story) the late joiner must catch up on these sticky
 //   events (core/net.gd sticky_event: "Net: got <kind> <ms> ms after joining" within 4 s), or it FAILs. Needs a bot
 //   whose host stays long enough (bubble_bath_bot's host finishes at 38 s, before a late joiner's checks: use
 //   snowball_blitz / dragon_rider / rocket_workshop bots)
@@ -25,8 +26,11 @@
 // user://), DUO_MACHINE_KIND=tv unless given, BOT_DEADLINE=<--seconds> (tests/bot_end.gd ends a bot early enough for it).
 //
 // Pass per machine (the same rule as brepl dev.bots.run, docs/GAME_DEV_GUIDE.md "Testing"): exit 0 (the bot quit by
-// itself: not the timeout, not a crash), no SCRIPT ERROR, no "BOT ASSERT FAILED" / "BOT RESULT: FAIL" / "Bot ... FAIL"
-// line, and a "BOT RESULT:" line (if any) says PASS.
+// itself: not the timeout, not a crash), no SCRIPT ERROR (a bot's own "SCRIPT ERROR: BOT DEEP: ..." too), no
+// "BOT ASSERT FAILED" / "BOT RESULT: FAIL" / "Bot ... FAIL" / "BOT: ... FAIL" line, and a "BOT RESULT: PASS" line: a
+// networked machine that ends without a BOT RESULT tested nothing and FAILs (2026-11-11: penalty_shootout's host and
+// joiner "passed" that way; tests/bot_end.gd now prints one for every bot). Only --allow-no-result REASON (brepl
+// dev.ts NET_NO_RESULT_OK, a short list with a reason each) lets such a run pass.
 // Group check: a bot may print "BOT AGREE <key>=<value>" lines; every machine must print each key, with the SAME
 // value as every other machine (e.g. the arcade selection all machines settled on, the game they all started).
 // Logs: /tmp/multibot-<port>/m<k>.log (kept for 2 days: each run prunes older ones; 291 had piled up by 2026-10-30). Exit code 0 when every machine and every AGREE key passes.
@@ -42,19 +46,25 @@ export type GroupResult = { pass: boolean; port: number; scene: string; machines
   table: string };
 
 // The one shared pass rule for a bot's output (brepl dev.bots.run imports it too).
-const FAIL = /BOT ASSERT FAILED: (.*)|^Bot:? .*\bFAIL\b:? ?(.*)|BOT RESULT: FAIL(.*)/gm;
+// (Failure lines in every style the bots print, the same ones tests/bot_end.gd's Tally counts: "Bot: FAIL x",
+// "BOT: HOUSE FAIL", "BOT LEAK-CHECK FAIL", "BOT: ERROR instruction text ...", "SCRIPT ERROR: BOT DEEP: x". Before 2026-11-11 only "Bot..." with a lower
+// case "ot" counted and every "SCRIPT ERROR: BOT ..." line was ignored, so those checks could never fail a run.)
+const FAIL = /BOT ASSERT FAILED: (.*)|BOT RESULT: FAIL(.*)|^SCRIPT ERROR: (BOT\b(?! RESULT| ASSERT).*)|^((?:Bot|BOT)\b.*?\b(?:FAIL(?:ED)?|ERROR)\b.*)/gm;
+export const NO_RESULT = "NO BOT RESULT: the run ended without a verdict, so it tested nothing (tests/bot_end.gd check() / bot_kit finish())";
 /** Engine errors our own scripts caused (the GDScript backtrace starts in res://, not an addon), e.g. reading
  *  global_transform of a node outside the tree: they print "ERROR:" not "SCRIPT ERROR" but are bugs all the same. */
 const ENGINE_ERR = /^ERROR: ([^\n]*)\n\s+at: [^\n]*\n\s+GDScript backtrace[^\n]*\n\s+\[0\] ([^\n]*\(res:\/\/(?!addons\/)[^\n]*\))/gm;
 export function engineErrors(out: string): string[] {
   return [...new Set([...out.matchAll(ENGINE_ERR)].map(m => `${m[1].trim()} @ ${m[2].trim()}`))];
 }
-export function verdict(out: string, code: number) {
+/** allowNoResult: a reason this run may end without a BOT RESULT (only brepl dev.ts NET_NO_RESULT_OK gives one). */
+export function verdict(out: string, code: number, o: { allowNoResult?: string } = {}) {
   const engine = engineErrors(out);
+  const said = /BOT RESULT:/.test(out);
   return {
-    pass: code === 0 && !/SCRIPT ERROR(?!: BOT)/.test(out) && !engine.length && !out.match(FAIL) && (!/BOT RESULT:/.test(out) || /BOT RESULT: PASS/.test(out)),
-    result: out.match(/BOT RESULT: .*/)?.[0] ?? (code === 0 ? "ran to the end with NO BOT RESULT (cut off at the frame limit: tests/bot_kit.gd reports at --quit-after; others need a short mode)" : code === 124 ? "timed out: the bot never ended by itself (arm tests/bot_end.gd in its _ready, or bot_kit finish()) or needs more --seconds" : `exit ${code} (crashed?)`),
-    failed: [...out.matchAll(FAIL)].map(m => (m[1] ?? m[2] ?? m[3] ?? m[0]).trim()),
+    pass: code === 0 && !/SCRIPT ERROR/.test(out) && !engine.length && !out.match(FAIL) && (said ? /BOT RESULT: PASS/.test(out) : !!o.allowNoResult),
+    result: out.match(/BOT RESULT: .*/)?.[0] ?? (code === 0 ? (o.allowNoResult ? `no BOT RESULT (allowed: ${o.allowNoResult})` : NO_RESULT) : code === 124 ? "timed out: the bot never ended by itself (arm tests/bot_end.gd in its _ready, or bot_kit finish()) or needs more --seconds" : `exit ${code} (crashed?)`),
+    failed: [...out.matchAll(FAIL)].map(m => (m[1] ?? m[2] ?? m[3] ?? m[4] ?? m[0]).trim()),
     errors: [...new Set([...out.matchAll(/SCRIPT ERROR: (?!BOT )(.*)\n\s*at: (.*)/g)].map(m => `${m[1]} @ ${m[2]}`)), ...engine.map(e => `ERROR: ${e}`)].slice(0, 8),
   };
 }
@@ -93,7 +103,7 @@ async function waitForMemory(gb: number) {
 
 export type GroupOpts = { scene: string; joiners?: number; seconds?: number; project?: string; env?: Record<string, string>;
   hostEnv?: Record<string, string>; joinEnv?: Record<string, string>; stagger?: number; quiet?: boolean; copies?: boolean;
-  late?: number; expectLate?: string[] };
+  late?: number; expectLate?: string[]; allowNoResult?: string };
 
 /** A machine that joins late must get each expected sticky event (core/net.gd) this soon after joining. */
 export const LATE_CATCHUP_MS = 4000;
@@ -169,7 +179,7 @@ export async function runGroup(o: GroupOpts): Promise<GroupResult> {
       p.stderr.on("data", d => { out += d; });
       p.on("close", async code => {
         await writeFile(file, out);
-        const v = verdict(out, code ?? 1);
+        const v = verdict(out, code ?? 1, { allowNoResult: o.allowNoResult });
         if (isLate) {
           const bad = lateCheck(out, expectLate);
           if (bad.length) { v.pass = false; v.failed.push(...bad); v.result += " (late-join catch-up FAILED)"; }
@@ -216,6 +226,7 @@ if (import.meta.main) {
     else if (x === "--copies") o.copies = true;
     else if (x === "--late") o.late = Number(a[++i]);
     else if (x === "--expect-late") o.expectLate = a[++i].split(",").filter(Boolean);
+    else if (x === "--allow-no-result") o.allowNoResult = a[++i];
     else if (x === "-h" || x === "--help") { console.log((await readFile(import.meta.path, "utf8")).split("\nimport")[0]); process.exit(0); }
     else o.scene = x;
   }

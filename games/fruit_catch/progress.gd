@@ -9,7 +9,8 @@ const COLOR := Color(0.85, 0.45, 0.18)
 
 
 ## data: the raw save (no defaults filled in: always .get with a default). today: Seeded.today().
-## grown: every orchard tree ever planted (trees; the orchard keeps the newest 36); daily: TODAY'S HARVEST finished today.
+## grown: every orchard tree ever planted (trees; the orchard keeps the newest 36; Nutmeg's pantry grows from the same
+## dishes); daily: TODAY'S HARVEST finished today (stamped when its round ends with a dish, never when it starts).
 static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 	var orchard: Variant = data.get("orchard", [])
 	return {"grown": maxi(int(data.get("trees", 0)), (orchard as Array).size() if orchard is Array else 0),
@@ -19,4 +20,5 @@ static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 ## A save as the game writes it after a few days (tests/progress_test.gd: it must read as grown > 0, daily done).
 static func sample(today: String) -> Dictionary:
 	return {"best": 52, "orchard": [[0, 1, true, 2], [1, 1, false, 1], [2, 2, true, 3]], "trees": 3, "dishes": 6, "days": 2,
-		"last_day": today, "daily": today, "sessions": 3}
+		"last_day": today, "daily": today, "sessions": 3,
+		"mode": "brave", "last_gift": "magnet"}

@@ -1,6 +1,7 @@
 extends SceneTree
 ## KART RACE track generator: proves the seeded tracks are fair over many seeds (no game, no window).
-##   godot-test --headless --path . -s res://tests/kart_trackgen_test.gd      (SEEDS=40 for more)
+##   godot-test --headless --path . -s res://tests/kart_trackgen_test.gd      (SEEDS=40 for more; GEN_QUICK=1 = the
+##   landing sample, core/seeded.gd quick())
 ## For every Grand Tour race spec (6 places x 3 races, the story and a bonus tour) and 60 days of TODAY'S
 ## TRACK: games/kart_race/trackgen.gd check() (closed loop, never near itself, drivable bends, gentle
 ## hills, a straight flat start for the grid, fair jumps at every kart speed, things on the road and off
@@ -14,6 +15,7 @@ const Seeded := preload("res://core/seeded.gd")
 const Cups := preload("res://games/kart_race/cups.gd")
 const Items := preload("res://games/kart_race/items.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const TestTime := preload("res://tests/test_time.gd")
 
 var fails := 0
 ## core/ui_kit.gd icon kinds the cups / items use as pictures (StoryCard.picture draws them too).
@@ -21,16 +23,18 @@ const UI_ICONS: Array[String] = ["star", "flag", "fire", "clock", "crown", "trop
 
 
 func _initialize() -> void:
-	var seeds := int(OS.get_environment("SEEDS")) if OS.has_environment("SEEDS") else 12
+	var seeds := Seeded.test_count(12, 1)  # 1 + the family seeds in landings (GEN_QUICK=1), every seed nightly
 	var t0 := Time.get_ticks_msec()
 	var total := 0
 	var attempts := {}
 	var lens: Array[float] = []
-	var slowest := 0
+	var slowest := 0.0  # ms, TestTime.worst: a busy-machine spike re-times twice (1230 ms of 1500 in a nightly-style run)
 	for tour in 2:
 		for pl in Story.PLACES.size():
 			for step in Story.RACES_PER_PLACE:
 				var i := (tour * Story.PLACES.size() + pl) * Story.RACES_PER_PLACE + step
+				if not Seeded.sampled(i, 4):  # quick runs: today's quarter of the race specs, all of them nightly
+					continue
 				var sp := Story.spec(i)
 				var r := Seeded.validate(func(s: int) -> Dictionary: return TrackGen.generate(s, sp),
 					func(info: Dictionary) -> Array:
@@ -47,10 +51,11 @@ func _initialize() -> void:
 					seeds, 11 + i * 3, [0, 1, 999999], "KART TRACK race %d" % i)
 				total += int(r.checked)
 				fails += (r.failures as Array).size()
-				for s in 4:
-					var ts := Time.get_ticks_msec()
+				for s in (1 if Seeded.quick() else 4):
+					var ts := Time.get_ticks_usec()
 					var info := TrackGen.generate(500 + s * 31 + i, sp)
-					slowest = maxi(slowest, Time.get_ticks_msec() - ts)
+					var sd := 500 + s * 31 + i
+					slowest = TestTime.worst(slowest, (Time.get_ticks_usec() - ts) / 1000.0, func() -> Variant: return TrackGen.generate(sd, sp))
 					attempts[int(info.get("attempt", -1))] = int(attempts.get(int(info.get("attempt", -1)), 0)) + 1
 					var tr := TrackGen.Track.new()
 					tr.prepare(info)
@@ -79,12 +84,13 @@ func _initialize() -> void:
 						for h in hz:
 							hz_seen["%s/%s" % [info.get("hz", ""), h[2]]] = true
 						return why,
-					maxi(4, seeds / 2), 701 + c * 37 + race * 5 + (1 if m == "zoom" else 0), [3, 77], "KART CUP %s race %d %s" % [Cups.cup(c).id, race, m])
+					1 if Seeded.quick() else maxi(4, seeds / 2), 701 + c * 37 + race * 5 + (1 if m == "zoom" else 0), [] if Seeded.quick() else [3, 77], "KART CUP %s race %d %s" % [Cups.cup(c).id, race, m])
 				total += int(cr.checked)
 				fails += (cr.failures as Array).size()
-				var ts := Time.get_ticks_msec()
+				var ts := Time.get_ticks_usec()
 				var info := TrackGen.generate(9000 + c * 13 + race, sp)
-				slowest = maxi(slowest, Time.get_ticks_msec() - ts)
+				var sd := 9000 + c * 13 + race
+				slowest = TestTime.worst(slowest, (Time.get_ticks_usec() - ts) / 1000.0, func() -> Variant: return TrackGen.generate(sd, sp))
 				attempts[int(info.get("attempt", -1))] = int(attempts.get(int(info.get("attempt", -1)), 0)) + 1
 	for c in Cups.CUPS:
 		for kind in ["patch", "bump"]:
@@ -102,23 +108,28 @@ func _initialize() -> void:
 	_expect(Cups.parts_unlocked({}).is_empty() and Cups.parts_unlocked({"candy:gentle": 1, "ice:zoom": 0, "x": 3}).size() == 2, "parts_unlocked()")
 	_expect(Cups.next_part("", {"candy:gentle": 1}) == "spoiler" and Cups.next_part("spoiler", {"candy:gentle": 1}) == "", "next_part()")
 	_expect(Cups.next_cup({"candy:gentle": 2}, "gentle") == 1 and Cups.next_cup({"candy:gentle": 2}, "zoom") == 0, "next_cup()")
-	# Today's track: fair for 60 days, the same all day, different on different days.
+	# Today's track over 400+ days (Seeded.validate_days, the shared daily validator), as main.gd builds it
+	# (Story.track_for(Story.daily_desc())): never the hand-made fallback (generate() only returns a track that passed
+	# check(), so "not the fallback" IS the fair check), the day's description and spec the same all day, different
+	# day to day. A track is ~70 ms: it's built once a date (the determinism of a seed's track is proven above), the
+	# full 2x build + re-check was +60 s.
 	var day_seeds := {}
-	for d in 60:
-		var date := Time.get_date_string_from_unix_time(1790000000 + d * 86400)
-		var desc := Story.daily_desc(date)
-		var a: Array = Story.track_for(desc)
-		var info: Dictionary = a[0]
-		var why := TrackGen.check(info)
-		if info.has("fallback"):
-			why.append("fell back")
-		if var_to_str(Story.track_for(desc)[0]) != var_to_str(info):
-			why.append("not the same all day")
-		for w in why:
-			_fail("TODAY'S TRACK %s: %s" % [date, w])
-		day_seeds[int(desc[1])] = true
-		total += 1
-	_expect(day_seeds.size() >= 55, "today's tracks differ day to day (%d of 60)" % day_seeds.size())
+	var built := {}
+	var rs := Seeded.validate_days(func(date: String) -> Dictionary:
+			var desc := Story.daily_desc(date)
+			day_seeds[int(desc[1])] = true
+			if not built.has(date):
+				built[date] = Story.track_for(desc)[0]
+			return {"desc": desc, "spec": Story.desc_spec(desc), "track": built[date]},
+		func(d: Dictionary) -> Array:
+			var why: Array = []
+			if d.track.has("fallback") or not d.track.has("attempt"):
+				why.append("fell back to the hand-made track")
+			return why, 400, "TODAY'S TRACK", ["2026-11-11", "2026-11-12"])
+	built.clear()
+	total += int(rs.checked)
+	fails += (rs.failures as Array).size()
+	_expect(day_seeds.size() >= int(rs.checked) - 5, "today's tracks differ day to day (%d of %d)" % [day_seeds.size(), int(rs.checked)])
 	# Story rules.
 	_expect(Story.where(0) == [0, 0, 0] and Story.where(5) == [1, 2, 0] and Story.where(18) == [0, 0, 1], "where()")
 	_expect(Story.hats_after(1) == 0 and Story.hats_after(2) == 1 and Story.hats_after(17) == 6 and Story.hats_after(40) == 6, "hats_after()")
@@ -130,10 +141,10 @@ func _initialize() -> void:
 	for k in ["world", "story_i", "hats", "champs", "golds", "races", "tours", "daily"]:
 		_expect(d.has(k), "save default %s" % k)
 	lens.sort()
-	print("KART TRACKGEN: %d tracks checked in %d ms; lengths %.0f..%.0f m (median %.0f); attempts %s; slowest %d ms" % [
+	print("KART TRACKGEN: %d tracks checked in %d ms; lengths %.0f..%.0f m (median %.0f); attempts %s; slowest %.0f ms" % [
 		total, Time.get_ticks_msec() - t0, lens[0], lens[-1], lens[lens.size() / 2], str(attempts), slowest])
 	_expect(not attempts.has(-1), "no fallbacks")
-	_expect(slowest < 1500, "a track generates in under 1.5 s (%d ms)" % slowest)
+	_expect(slowest < 1500, "a track generates in under 1.5 s (%.0f ms)" % slowest)
 	print("KART TRACKGEN: %s (%d failures)" % ["PASS" if fails == 0 else "FAIL", fails])
 	quit(0 if fails == 0 else 1)
 

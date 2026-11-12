@@ -20,6 +20,7 @@ const NEAR := 3.6  ## a house wish: the building's middle within this many cells
 const MAX_OPEN := 2  ## wishes at once (3 in a town of 12+ houses)
 const FIRST_WAIT := 20.0  ## seconds before the first wish
 const GAP := 22.0  ## seconds between wishes
+const AGAIN_WAIT := 3.0  ## seconds until a new wish after one is dropped (its spot got built on)
 ## Granted wishes needed to open district k (k = 1..3).
 const OPEN_AT: Array[int] = [0, 3, 7, 12]
 ## What houses wish for (picked among the unlocked tray kinds).
@@ -194,6 +195,9 @@ func _drop_stale() -> void:
 		var gone := int(w["home"]) > 0 and not town.buildings.has(int(w["home"]))
 		if gone or spot_for(w).x < 0:
 			list.erase(w)
+			# Its spot got built on (the mayor put something else there) or its house went: a fresh wish soon, not a
+			# whole GAP later (a town went 22 s without any wish, so a short visit never saw one come true).
+			_t = minf(_t, AGAIN_WAIT)
 
 
 func _res_used(c: Vector2i, kind: String) -> bool:

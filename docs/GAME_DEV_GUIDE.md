@@ -85,7 +85,10 @@ score and game over. Use visual-only "ghost" copies of host objects on the clien
   turn well away (see `_lazy_follow` in duo_arena/main.gd).
 - **VR text and depth** (it hurt the family's eyes when wrong):
   - Never set `Label3D.no_depth_test = true`. Far text drawn over nearer things (hands, a fishing rod)
-    looks wrong in stereo. `duo-deploy` refuses code that sets it.
+    looks wrong in stereo. `duo-deploy` refuses code that sets it. The one exception: words and pictures ON a
+    floating VR card panel (which itself skips the depth test) match their panel, or a leaf in front hides the words
+    but not the card; vr_text_guard does that for Label3Ds on a panel, and a hand-made one marks its line
+    `# vr-depth-ok: <why>` (core/vr_view_check.gd text_problems() checks it).
   - No billboards in VR: each eye turns the label differently, which looks cross-eyed. To face the
     player, turn it on Y only. A Label3D reads from its **+Z** side, so with `d = label - head`, use
     `Basis(Vector3.UP, atan2(-d.x, -d.z))`. The other sign mirrors the text.

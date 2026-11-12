@@ -1,0 +1,56 @@
+#!/bin/bash
+# duo-nightly-tests: the FULL sweep of every tests/*_test.gd, once a night (duo-nightly-tests.timer, 03:30).
+# Landings run the generator tests in QUICK mode (dev.land sets GEN_QUICK=1: core/seeded.gd Seeded.quick() checks
+# today's sample of seeds and dates, so a landing never waits minutes on one test); this run checks every seed and
+# every date, so nothing the sample skips goes unchecked for more than a day (2026-11-12).
+# Runs on a snapshot of live main (~/.cache/duo-nightly/src, its own project name so user:// is separate), headless
+# via godot-test (no controllers, SCHED_IDLE through test-throttle), 2 at a time. Writes
+#   ~/.cache/duo-arena/nightly/latest.json (partial.json for named tests)  {"date", "commit", "secs", "tests": {name: {"pass", "secs", "tail"}}}
+# and posts a one-line summary to the brepl channel. dev.debt() reports failures and a missing/old run.
+#   duo-nightly-tests [TEST ...]     (names without .gd; default every tests/*_test.gd)
+set -u
+LIVE=~/GodotProjects/duo-arena
+SRC=~/.cache/duo-nightly/src
+OUT=~/.cache/duo-arena/nightly
+mkdir -p "$SRC" "$OUT/logs"
+# Not while a family game is on the TV/Decks is NOT required (tests are SCHED_IDLE), but skip if a sweep already runs.
+exec 9>"$OUT/.lock"; flock -n 9 || { echo "duo-nightly-tests: already running"; exit 0; }
+rsync -a --delete --exclude .git --exclude '.godot/editor' "$LIVE"/ "$SRC"/
+sed -i 's|^config/name="Duo Arena"$|config/name="Duo Arena Nightly"|' "$SRC/project.godot"
+COMMIT=$(git -C "$LIVE" rev-parse --short HEAD)
+cd "$SRC" || exit 1
+timeout 900 godot-test --headless --path . --import >/dev/null 2>&1
+if [ $# -gt 0 ]; then TESTS=("$@"); else TESTS=(); for f in tests/*_test.gd; do TESTS+=("$(basename "$f" .gd)"); done; fi
+# lan_update_test compiles a deliberately broken script (its "Parse Error" is expected); it decides by exit code.
+run_one() {
+  local t=$1 how t0 code
+  if [ -f "tests/$t.tscn" ]; then how="--fixed-fps 60 res://tests/$t.tscn"; else how="-s res://tests/$t.gd"; fi
+  t0=$(date +%s)
+  DUO_PORT=$((20000 + RANDOM % 10000)) timeout 1800 godot-test --headless --path . $how >"$OUT/logs/$t.log" 2>&1
+  code=$?
+  echo "$t $code $(( $(date +%s) - t0 ))" >>"$OUT/.results"
+}
+export -f run_one; export OUT
+rm -f "$OUT/.results"
+T0=$(date +%s)
+printf '%s\n' "${TESTS[@]}" | xargs -P 2 -I{} bash -c 'run_one {}'
+# A run of named tests (dev.nightly(["x"])) writes partial.json: only a whole sweep is "the nightly" dev.debt reads.
+NAME=latest.json; [ $# -gt 0 ] && NAME=partial.json
+python3 - "$OUT" "$COMMIT" "$(( $(date +%s) - T0 ))" "$NAME" <<'PY'
+import json, sys, os, re, datetime
+out, commit, secs = sys.argv[1], sys.argv[2], int(sys.argv[3])
+tests = {}
+for line in open(os.path.join(out, ".results")):
+    t, code, s = line.split()
+    log = open(os.path.join(out, "logs", t + ".log"), errors="replace").read()
+    lines = [l for l in log.splitlines() if "OpenXR" not in l]
+    verdict = [l for l in lines if re.search(r"PASS|FAIL|SCRIPT ERROR", l)]
+    ok = code == "0" and any("PASS" in l for l in verdict) and not any(re.search(r"\bFAIL\b|SCRIPT ERROR", l) for l in verdict)
+    if t == "lan_update_test":
+        ok = code == "0" and any("PASS" in l for l in verdict)
+    tests[t] = {"pass": ok, "secs": int(s), "code": int(code), "tail": "\n".join(verdict[-3:])[:600]}
+res = {"date": datetime.datetime.now().isoformat(timespec="minutes"), "commit": commit, "secs": secs, "tests": tests}
+json.dump(res, open(os.path.join(out, sys.argv[4]), "w"), indent=1)
+fails = sorted(t for t, r in tests.items() if not r["pass"])
+print(f"nightly full tests @{commit}: {len(tests) - len(fails)}/{len(tests)} pass in {secs // 60} min" + (f"; FAIL: {', '.join(fails)}" if fails else ""))
+PY

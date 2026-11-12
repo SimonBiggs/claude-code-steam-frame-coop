@@ -10,6 +10,8 @@ extends SceneTree
 const IslandGen := preload("res://games/treasure_dig/islandgen.gd")
 const Story := preload("res://games/treasure_dig/story.gd")
 const Seeded := preload("res://core/seeded.gd")
+const Deep := preload("res://games/treasure_dig/deep.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 
 var fails := 0
 
@@ -45,17 +47,36 @@ func _initialize() -> void:
 	var g0 := IslandGen.generate(42, {"kind": "sunny", "level": 0})
 	var g9 := IslandGen.generate(42, {"kind": "sunny", "level": 9})
 	_expect(int(g9.map_at[0]) > int(g0.map_at[0]) or int(g9.map_at[-1]) > int(g0.map_at[-1]), "map pieces lie deeper on later islands")
-	# TODAY'S ISLAND.
+	# TODAY'S ISLAND over 400+ days (and the 60 from whenever this runs), the way _begin_island builds it: the
+	# island Story.daily(date) picks at level 3 (Deep.island_spec per mode, IslandGen.check) and its warned events
+	# (Deep.problems) for that date's season, the first round of a session, with and without the PARROT's gold.
 	var days := {}
-	for d in 40:
-		var date := Time.get_date_string_from_unix_time(1790000000 + d * 86400)
-		var dl := Story.daily(date)
-		var g := IslandGen.generate(int(dl[0]), {"kind": dl[1], "level": 3})
-		for w in IslandGen.check(g):
-			_fail("daily %s: %s" % [date, w])
-		_expect(var_to_str(dl) == var_to_str(Story.daily(date)), "daily %s is the same all day" % date)
-		days[var_to_str(g.spots)] = true
-	_expect(days.size() >= 38, "daily islands differ (%d of 40)" % days.size())
+	var rd := Seeded.validate_days(func(date: String) -> Array:
+			var dl := Story.daily(date)
+			var season := Seeded.season(date) if Deep.SEASONS.has(Seeded.season(date)) else "spring"
+			var out: Array = []
+			for mode in PickOrbs.MODE_IDS:
+				var desc := Deep.island_spec({"seed": int(dl[0]), "kind": String(dl[1]), "level": 3, "daily": true}, mode)
+				var g := IslandGen.generate(int(dl[0]), desc)
+				var evs: Array = []
+				for gold in [0, Deep.PARROT_GOLD]:
+					var spec := {"mode": mode, "time": 120.0, "season": season, "kind": String(dl[1]), "rocks": g.get("rocks", []), "extra_gold": gold}
+					evs.append([spec, Deep.events(Seeded.derive(int(dl[0]), "ev1"), spec)])
+				out.append([mode, g, evs])
+			return out,
+		func(day: Array) -> Array:
+			var why: Array = []
+			for me in day:
+				for w in IslandGen.check(me[1]):
+					why.append("%s island: %s" % [me[0], w])
+				for se in me[2]:
+					for x in Deep.problems(se[1], se[0]):
+						why.append("%s events: %s" % [me[0], x])
+			days[var_to_str(day[0][1].spots)] = true
+			return why, 400, "TODAY'S ISLAND", ["2026-11-11", "2026-11-12"])
+	total += int(rd.checked)
+	fails += (rd.failures as Array).size()
+	_expect(days.size() >= int(rd.checked) - 4, "daily islands differ (%d of %d)" % [days.size(), int(rd.checked)])
 	# Hand checks.
 	var bad := g0.duplicate(true)
 	(bad.spots as Array)[1] = (bad.spots as Array)[0]

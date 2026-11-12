@@ -16,6 +16,8 @@ const Ball := preload("res://games/penalty_shootout/ball.gd")
 const Striker := preload("res://games/penalty_shootout/striker.gd")
 const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const Deep := preload("res://games/penalty_shootout/deep.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 
 var fails := 0
 
@@ -66,6 +68,26 @@ func _initialize() -> void:
 	_expect(G.daily_seed("2026-10-29") == G.daily_seed("2026-10-29"), "TODAY'S MATCH is the same all day")
 	_expect(G.daily_seed("2026-10-29") != G.daily_seed("2026-10-30"), "TODAY'S MATCH changes the next day")
 	_expect(G.daily_seed() == Seeded.daily_seed("penalty_shootout"), "TODAY'S MATCH uses the shared daily seed")
+	# TODAY'S MATCH over 400+ days (and the 60 from whenever this runs), the way _start_cup / _start_match build it:
+	# the whole cup from daily_seed(date) (check_cup: every match fair, never easier) and each match's weather in every
+	# mode for that date's season (Deep.hazards / Deep.problems, the deep test's validator).
+	var rd := Seeded.validate_days(func(date: String) -> Array:
+			var cs := G.daily_seed(date)
+			var season := Seeded.season(date) if Deep.SEASONS.has(Seeded.season(date)) else "spring"
+			var out: Array = [cs, season]
+			for mode in PickOrbs.MODE_IDS:
+				for n in range(1, G.MAX_MATCH + 1):
+					out.append([mode, n, Deep.hazards(cs, n, {"mode": mode, "season": season})])
+			return out,
+		func(day: Array) -> Array:
+			var why: Array = []
+			why.append_array(G.check_cup(int(day[0])))
+			for k in range(2, day.size()):
+				var spec := {"mode": String(day[k][0]), "season": String(day[1])}
+				for x in Deep.problems(int(day[0]), int(day[k][1]), day[k][2], spec):
+					why.append("%s match %d weather: %s" % [day[k][0], int(day[k][1]), x])
+			return why, 400, "TODAY'S MATCH", ["2026-11-11", "2026-11-12"])
+	fails += (rd.failures as Array).size()
 	# One new thing at a time.
 	var m1 := G.plan(9, 1)
 	_expect(m1.stars[0] == Vector2.INF and m1.stars[1] == Vector2.INF and m1.stars[2] != Vector2.INF, "match 1: no star for the first two kicks")

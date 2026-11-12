@@ -261,12 +261,14 @@ func finish(quit: bool = true, note := "") -> void:
 	if _finished:
 		return
 	_finished = true
-	if failures == 0:
+	if failures == 0 and checks == 0:  # a run that checked nothing tested nothing (tests/bot_end.gd's shared rule)
+		printerr("SCRIPT ERROR: BOT RESULT: FAIL (0 checks%s: this bot counted nothing before it ended)" % note)
+	elif failures == 0:
 		info("BOT RESULT: PASS (%d checks%s)" % [checks, note])
 	else:
 		printerr("SCRIPT ERROR: BOT RESULT: FAIL (%d of %d checks failed)" % [failures, checks])
 	if quit:
-		preload("res://tests/bot_end.gd").quit_quietly(get_tree(), 1 if failures > 0 else 0)
+		preload("res://tests/bot_end.gd").quit_quietly(get_tree(), 1 if failures > 0 or checks == 0 else 0)
 
 
 # --- Pause guard ----------------------------------------------------------------------------
@@ -467,7 +469,15 @@ func vr_head_height(rig: Node, h: float) -> void:
 	cam.position.y = h * float(rig.world_scale)
 
 
-## core/quit_after.gd calls this just before --quit-after ends a local run: report the checks so far, so a long bot
-## cut off by dev.bots' frame limit still prints a BOT RESULT (2026-10-31: party_board needs ~9000 frames).
-func on_frame_limit() -> void:
-	finish(false, ", stopped at the --quit-after frame limit")
+## tests/bot_end.gd quit_quietly calls this when a bot that hasn't finished is ended for it (core/quit_after.gd's
+## --quit-after limit, bot_end.gd's networked end): report the checks so far, so every run prints a BOT RESULT
+## (2026-10-31: party_board needs ~9000 frames; 2026-11-11: networked runs ended without one).
+## A bot whose checks only run at its natural end (party_board: once the results are up) sets on_cut to check the
+## progress a cut-short run made instead; without it a cut run counted 0 checks (party_board's solo VR host run).
+var on_cut := Callable()
+
+
+func on_frame_limit(note := ", stopped at the --quit-after frame limit") -> void:
+	if not _finished and on_cut.is_valid():
+		on_cut.call()
+	finish(false, note)

@@ -14,6 +14,7 @@ const G := preload("res://games/mini_golf_party/holegen.gd")
 const Main := preload("res://games/mini_golf_party/main.gd")
 const Garden := preload("res://games/mini_golf_party/garden.gd")
 const Seeded := preload("res://core/seeded.gd")
+const Deep := preload("res://games/mini_golf_party/deep.gd")
 const StoryCard := preload("res://core/story_card.gd")
 
 var fails := 0
@@ -98,6 +99,34 @@ func _initialize() -> void:
 	_expect(G.daily_seed("2026-10-29") == G.daily_seed("2026-10-29"), "TODAY'S COURSE is the same all day")
 	_expect(G.daily_seed("2026-10-29") != G.daily_seed("2026-10-30"), "TODAY'S COURSE changes each day")
 	_expect(G.daily_seed() > 0, "the daily seed is a real seed")
+	# TODAY'S COURSE over 400+ days (and the 60 from whenever this runs): holes the way the game builds them
+	# (HoleGen.hole + this mode's Deep.sinkable proof; a passing try means G.check, the putter proof and the mode's
+	# proof all passed), at a course level and mode that rotate with the day (each level and each of GENTLE / BRAVE /
+	# HARD gets 100+ days). Each hole is a few proof sims, so a day checks two of its four gimmick holes, rotating
+	# (every hole of the course gets 200+ days; all five every day would add ~30 s).
+	var t_days := Time.get_ticks_msec()
+	var rd := Seeded.validate_days(func(date: String) -> Array:
+			var dn := int(Time.get_unix_time_from_datetime_string(date + "T12:00:00") / 86400)
+			var lv := 1 + dn % G.MAX_LEVEL
+			var md: String = ["gentle", "brave", "hard"][dn % 3]
+			var out: Array = [md]
+			for i in [1 + dn % (G.HOLES - 1), 1 + (dn + 2) % (G.HOLES - 1)]:
+				out.append(G.hole(G.daily_seed(date), i, lv, func(h: Dictionary) -> bool: return Deep.sinkable(h, md, "")))
+			return out,
+		func(c: Array) -> Array:
+			var why: Array = []
+			var md := String(c[0])
+			for k in range(1, c.size()):
+				var d: Dictionary = c[k]
+				for w in G.check(d):
+					why.append("%s hole %d: %s" % [md, int(d["index"]) + 1, w])
+				if int(d["try"]) < 0:
+					why.append("%s hole %d (level %d, %s) needed the classic fallback" % [md, int(d["index"]) + 1, int(d["level"]), d["gimmick"]])
+				if var_to_str(G.hole_try(int(d["course_seed"]), int(d["index"]), int(d["level"]), int(d["try"]))) != var_to_str(d):
+					why.append("%s hole %d: the rebuilt hole differs" % [md, int(d["index"]) + 1])
+			return why, 400, "TODAY'S COURSE", ["2026-11-11", "2026-11-12"])
+	fails += (rd.failures as Array).size()
+	print("TODAY'S COURSE: %d days checked (%d ms)" % [int(rd.checked), Time.get_ticks_msec() - t_days])
 	# The validator really catches broken holes.
 	var bad := G.hole(9, 1, 2)
 	bad["cup"] = (bad["tee"] as Vector2) + Vector2(0.0, -0.5)

@@ -27,7 +27,11 @@ static func derive(seed_value: int, salt: Variant) -> int:
 
 
 ## Today's date as "YYYY-MM-DD" (local time, so the daily level changes at the family's midnight).
+## Test runs only (env SAVE_TEST, which godot-test sets): DUO_TODAY=YYYY-MM-DD pretends it is that day, so a bot can
+## replay any day's daily level (2026-11-12: Hide and Seek's TODAY'S STREET broke the bot on one date only).
 static func today() -> String:
+	if OS.has_environment("SAVE_TEST") and OS.get_environment("DUO_TODAY").length() == 10:
+		return OS.get_environment("DUO_TODAY")
 	return Time.get_date_string_from_system()
 
 
@@ -89,6 +93,93 @@ static func shuffled(r: RandomNumberGenerator, items: Array) -> Array:
 	return a
 
 
+## Dates a daily-level validator checks: `count` days from `first`, then the 60 days from whenever the test runs
+## (so the family's real "today" and the coming weeks are always covered), plus `extra` dates. "YYYY-MM-DD" each.
+static func dates(count: int = 400, first: String = "2026-10-01", extra: Array = []) -> Array:
+	var out: Array = []
+	var t0 := Time.get_unix_time_from_datetime_string(first + "T12:00:00")
+	for d in count:
+		out.append(Time.get_date_string_from_unix_time(t0 + d * 86400))
+	var now := Time.get_unix_time_from_datetime_string(Time.get_date_string_from_system() + "T12:00:00")
+	for d in 60:
+		var s := Time.get_date_string_from_unix_time(now + d * 86400)
+		if not out.has(s):
+			out.append(s)
+	for e in extra:
+		if not out.has(str(e)):
+			out.append(str(e))
+	return out
+
+
+## QUICK test runs (2026-11-12): a landing (dev.land sets GEN_QUICK=1) checks a representative SAMPLE so no test
+## holds a landing up for minutes (kart_trackgen_test took ~220 s, dungeon_delve_floors_test ~130 s); the nightly
+## full sweep (tools/duo-nightly-tests, duo-nightly-tests.timer) runs every seed and date. The sample turns with the
+## day (offset = days since 2026-10-01), so over a few landings every seed/date is checked in quick runs too, and a
+## landing is reproducible all day. Seeds/dates a test lists as `extra` (family-played seeds, fixed dates) are
+## ALWAYS checked, and so are the next QUICK_AHEAD days (the family's real coming dailies).
+const QUICK_STRIDE := 4  ## validate(): every 4th seed
+const QUICK_DAY_STRIDE := 10  ## validate_days(): every 10th date of the 400
+const QUICK_AHEAD := 14
+
+
+static func quick() -> bool:
+	return OS.get_environment("GEN_QUICK") == "1"
+
+
+## A test's loop count: SEEDS env when set, else `full`, or in a quick run `quick_n` (default about a quarter, >= 2).
+##   var seeds := Seeded.test_count(60)      # 60 nightly, 15 in a landing
+##   var seeds := Seeded.test_count(60, 6)   # 60 nightly, 6 in a landing
+static func test_count(full: int, quick_n: int = -1) -> int:
+	if OS.has_environment("SEEDS"):
+		return int(OS.get_environment("SEEDS"))
+	if not quick():
+		return full
+	return mini(full, quick_n) if quick_n >= 0 else maxi(mini(2, full), full / QUICK_STRIDE)
+
+
+## True when item `i` of a loop is in today's quick sample (always true in a full run): for loops a test can't
+## shorten with test_count() (fixed lists of places / cups / dates).  if not Seeded.sampled(i): continue
+static func sampled(i: int, stride: int = QUICK_STRIDE) -> bool:
+	return not quick() or posmod(i - _day_offset(), stride) == 0
+
+
+static func _day_offset() -> int:
+	var now := Time.get_unix_time_from_datetime_string(Time.get_date_string_from_system() + "T12:00:00")
+	return int((now - Time.get_unix_time_from_datetime_string("2026-10-01T12:00:00")) / 86400)
+
+
+## The validator loop for a game's TODAY'S level (every game with a daily): make the daily level for each of
+## dates(count) with gen(date) and run check(level) on it (an Array of reasons, empty when fine); the same date must
+## make the same level all day. A daily nobody can win is a whole day lost for the family, so every gen test with a
+## daily runs this over a year+ of dates. Returns {"ok", "checked", "failures": [[date, reason], ...]} and prints
+## "SCRIPT ERROR: <tag> <date>: reason" per failure (first 30), like validate().
+static func validate_days(gen: Callable, check: Callable, count: int = 400, tag: String = "DAILY", extra: Array = []) -> Dictionary:
+	var failures: Array = []
+	var days := dates(count, "2026-10-01", extra)
+	if quick():
+		var keep := {}
+		for e in extra:
+			keep[str(e)] = true
+		var now := Time.get_unix_time_from_datetime_string(Time.get_date_string_from_system() + "T12:00:00")
+		for d in QUICK_AHEAD:
+			keep[Time.get_date_string_from_unix_time(now + d * 86400)] = true
+		var sample: Array = []
+		for i in days.size():
+			if keep.has(days[i]) or sampled(i, QUICK_DAY_STRIDE):
+				sample.append(days[i])
+		days = sample
+	for date in days:
+		var level: Variant = gen.call(date)
+		var reasons: Array = check.call(level)
+		if var_to_str(gen.call(date)) != var_to_str(level):
+			reasons.append("not the same all day")
+		for why in reasons:
+			failures.append([date, str(why)])
+			if failures.size() <= 30:
+				print("SCRIPT ERROR: %s %s: %s" % [tag, date, str(why)])
+	return {"ok": failures.is_empty(), "checked": days.size(), "failures": failures}
+
+
 ## The validator loop every generator test uses: generate `count` levels (seeds from `first`, plus any
 ## `extra` seeds, e.g. ones the family played), run `check` on each (returns an Array of failure
 ## reasons, empty when fine) and check determinism (the same seed must give the same level, compared
@@ -97,7 +188,8 @@ static func validate(gen: Callable, check: Callable, count: int = 200, first: in
 	var failures: Array = []
 	var seeds: Array = []
 	for i in count:
-		seeds.append(first + i * 7919)
+		if count <= 3 or sampled(i):  # quick runs: today's quarter of the seeds (see quick())
+			seeds.append(first + i * 7919)
 	seeds.append_array(extra)
 	for s in seeds:
 		var level: Variant = gen.call(int(s))

@@ -8,12 +8,14 @@ const HELPERS := ["dungeon_delve_deep_bot.gd"]
 const LATE := 120.0  ## a host end this late must be capped by bot_end.gd within_deadline
 var weak_re := RegEx.create_from_string("slot_stick\\(.*normalized\\(\\) \\* (0\\.[0-2]\\d*)\\b")
 var late_re := RegEx.create_from_string("(\\d+(?:\\.\\d+)?) if host else")
+var bot_end_re := RegEx.create_from_string("float\\(OS\\.get_environment\\(\"BOT_END\"\\)\\)(?!\\s*-)")
 
 
 func _initialize() -> void:
 	var bad: Array[String] = []
 	var late: Array[String] = []
 	var flat: Array[String] = []
+	var counted: Array[String] = []
 	var n := 0
 	for f in DirAccess.get_files_at("res://tests"):
 		if not f.ends_with("_bot.gd") or f in HELPERS:
@@ -23,6 +25,12 @@ func _initialize() -> void:
 		# quit() alone is not enough (often only a BOT_COUNT-style side mode quits): it must come with a BOT RESULT line.
 		if not ("finish(" in src or "bot_end.gd" in src or ("quit(" in src and "BOT RESULT" in src)):
 			bad.append(f)
+		# ...and END WITH A VERDICT that counts checks, in local, host and joining runs (tools/multibot.ts FAILs a run
+		# without BOT RESULT: it tested nothing; penalty_shootout's networked runs did, 2026-11-11): bot_kit's
+		# finish(), its own BOT RESULT line (dragon_rider counts its checks), or tests/bot_end.gd check() (the shared
+		# tally prints the BOT RESULT; with 0 checks it says FAIL). The runners FAIL a run that printed none.
+		if not ("finish(" in src or "BotEnd.check(" in src or "BOT RESULT" in src):
+			counted.append(f)
 		# Quitting straight away while a sound plays leaks its AudioStreamWAV + playback at exit: bots quit through
 		# tests/bot_end.gd quit_quietly (2026-10-29).
 		if "get_tree().quit(" in src or "tree.quit(" in src:
@@ -46,8 +54,14 @@ func _initialize() -> void:
 		var weak := weak_re.search(src)
 		if weak != null:
 			flat.append("%s (stick push %s is inside the 0.2 deadzone)" % [f, weak.get_string(1)])
+		# A bot that ends AT BOT_END (its finish step, a forced game over) is cut first when --quit-after or the
+		# runner's deadline comes sooner (the solo VR host run is BOT_END=62 with --quit-after 3600: cut at 59.5 s, so
+		# crystal_saga said "PASS (0 checks)" and duo_arena FAIL, 2026-11-12): it goes through bot_end.gd end_at(), which
+		# pulls the end in before any cut. (Reading BOT_END minus a margin, "BOT_END")) - 8.0", is fine.)
+		if bot_end_re.search(src) != null and not "end_at(" in src:
+			flat.append(f + " (ends at BOT_END: use tests/bot_end.gd end_at(), a --quit-after / deadline cut may come first)")
 		var m := late_re.search(src)
-		if m != null and float(m.get_string(1)) >= LATE and not "within_deadline(" in src:
+		if m != null and float(m.get_string(1)) >= LATE and not ("within_deadline(" in src or "end_at(" in src):
 			late.append("%s (%s s)" % [f, m.get_string(1)])
 	# Every tests/*_test.gd prints an explicit verdict (a PASS line, or BOT RESULT through bot_kit finish()): dev.land
 	# reads the PASS line, and a test that only says "SKY: 400 flights checked, 0 failures" and exits 0 looked the same
@@ -65,6 +79,9 @@ func _initialize() -> void:
 		# leaks ("RenderingServer::get_singleton() is null", RID leaks at exit: whack_a_mole_deep_test, 2026-11-11).
 		if code.begins_with("extends SceneTree") and "\nfunc _init(" in code:
 			flat.append(f + " (works in _init(): use _initialize(), the tree and RenderingServer exist by then)")
+	if not counted.is_empty():
+		flat.append("these bots count no checks (BotEnd.check() / bot_kit, so they end with a real BOT RESULT): " + ", ".join(counted))
+	_tally_lines(flat)
 	if not late.is_empty():
 		printerr("SCRIPT ERROR: BOT END: these bots end late in networked runs without bot_end.gd within_deadline (the runner kills them first): " + ", ".join(late))
 	if not flat.is_empty():
@@ -74,3 +91,18 @@ func _initialize() -> void:
 	elif not bad.is_empty():
 		printerr("SCRIPT ERROR: BOT END: these bots never end by themselves (arm tests/bot_end.gd in _ready): " + ", ".join(bad))
 	quit(1 if not (bad.is_empty() and late.is_empty() and flat.is_empty()) else 0)
+
+
+## tests/bot_end.gd's Tally counts every failure-line style the bots print (and tools/multibot.ts's FAIL rule matches
+## the same ones): keep them in step.
+func _tally_lines(flat: Array[String]) -> void:
+	var Tally = load("res://tests/bot_end.gd").Tally
+	for l in ["Bot: FAIL the bed has 3 spots", "BOT: HOUSE FAIL bodies=3", "BOT LEAK-CHECK FAIL host: x",
+			"SCRIPT ERROR: BOT DEEP: no pick", "SCRIPT ERROR: BOT: FAILED siege", "BOT ASSERT FAILED: x",
+			"BOT: ERROR instruction text on P2: press A", "Bot: SIMPLE FAIL: game over in simple mode"]:
+		if not Tally.is_fail_line(l):
+			flat.append("bot_end.gd Tally misses a failure line: " + l)
+	for l in ["Bot: OK siege", "BOT host t=3 results={} FAILS=0", "BOT RESULT: PASS (3 checks)", "BOT CUES: mode=host a,b",
+			"BOT: the game was paused by something else (a real controller?) - resuming"]:
+		if Tally.is_fail_line(l):
+			flat.append("bot_end.gd Tally counts a fine line as a failure: " + l)

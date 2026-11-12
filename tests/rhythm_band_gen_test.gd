@@ -15,6 +15,8 @@ const Song := preload("res://games/rhythm_band/song.gd")
 const Main := preload("res://games/rhythm_band/main.gd")
 const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const Deep := preload("res://games/rhythm_band/deep.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 
 var fails := 0
 
@@ -99,11 +101,34 @@ func _initialize() -> void:
 	for date in ["2026-10-29", "2026-12-25", "2027-01-01"]:
 		var dc := G.code_at(77, G.DAILY_POS, true, date)
 		_expect(G.daily_of(dc) and G.level_of(dc) == G.DAILY_LEVEL, "TODAY'S SONG is marked daily at its level")
-		for why in G.check(dc, G.DAILY_POS):
-			_expect(false, "TODAY'S SONG %s: %s" % [date, why])
 		_expect(dc == G.code_at(123456, G.DAILY_POS, true, date), "TODAY'S SONG is the same for every session all day")
 		_expect(var_to_str(G.from_code(dc)) == var_to_str(G.from_code(G.code_at(9, G.DAILY_POS, true, date))), "TODAY'S SONG is the same song all day")
 	_expect(G.daily_seed("2026-10-29") != G.daily_seed("2026-10-30"), "a new TODAY'S SONG each day")
+	# TODAY'S SONG over 400+ days (and the 60 from whenever this runs), the way a show plays it: the song at
+	# DAILY_POS (check(), like every other song) and its warned changes (deep.gd changes / problems) in every mode,
+	# that date's season, for a solo drummer and a full band.
+	var rd := Seeded.validate_days(func(date: String) -> Array:
+			var dc := G.code_at(77, G.DAILY_POS, true, date)
+			var season := Seeded.season(date) if Deep.SEASONS.has(Seeded.season(date)) else "spring"
+			var out: Array = [dc]
+			for mode in PickOrbs.MODE_IDS:
+				for band in [[0], [0, 1, 2, 3]]:
+					var spec := {"mode": mode, "season": season, "gift": "", "band": band}
+					out.append([spec, Deep.changes(dc, G.DAILY_POS, spec)])
+			return out,
+		func(day: Array) -> Array:
+			var dc := int(day[0])
+			var why: Array = []
+			why.append_array(G.check(dc, G.DAILY_POS))
+			if not G.daily_of(dc) or G.level_of(dc) != G.DAILY_LEVEL:
+				why.append("not marked daily at DAILY_LEVEL")
+			for k in range(1, day.size()):
+				var spec: Dictionary = day[k][0]
+				for x in Deep.problems(dc, G.DAILY_POS, day[k][1], spec):
+					why.append("%s band %d: %s" % [spec.mode, (spec.band as Array).size(), x])
+			return why, 400, "TODAY'S SONG", ["2026-11-11", "2026-11-12"])
+	gens += int(rd.checked)
+	fails += (rd.failures as Array).size()
 	_expect(not G.daily_of(G.code_at(77, 0, true)) and not G.daily_of(G.code_at(77, 2, true)), "only one TODAY'S SONG per show")
 	_expect(not G.daily_of(G.code_at(77, G.DAILY_POS, false)), "no TODAY'S SONG once it's done")
 	# The fan club: room for every fan on the ledges behind the band (over the LED wall, clear of the sign

@@ -66,18 +66,31 @@ func _initialize() -> void:
 		var from := int(FieldGen.BREEDS[b].from)
 		if from > 0:
 			_expect(not stats[from - 1][4].has(b) and (from - 1 < 1 or true), "breed %s never comes before level %d" % [FieldGen.BREEDS[b].id, from])
-	# TODAY'S FIELD: fair, the same all day, different day to day.
+	# TODAY'S FIELD over 400+ days (and the 60 from whenever this runs), the way _next_desc builds it:
+	# daily_spec(players, 120 s, date) from daily_seed(date). The spec grows with players and a field is ~15 ms with
+	# its retries, so each day checks one team size, rotating 1 / 3 / 6 dogs (150+ days each; all three every day
+	# would add ~40 s).
 	var days := {}
-	for d in 40:
-		var date := Time.get_date_string_from_unix_time(1790000000 + d * 86400)
-		var f := FieldGen.generate(FieldGen.daily_seed(date), FieldGen.daily_spec(3, 120.0, date))
-		for w in FieldGen.check(f):
-			_fail("daily %s: %s" % [date, w])
-		_expect(var_to_str(f) == var_to_str(FieldGen.generate(FieldGen.daily_seed(date), FieldGen.daily_spec(3, 120.0, date))), "daily %s is the same all day" % date)
-		_expect(bool(f.daily), "the daily field knows it's the daily")
-		days[var_to_str(f.sheep)] = true
-		total += 1
-	_expect(days.size() >= 39, "daily fields differ day to day (%d unique of 40)" % days.size())
+	var t_days := Time.get_ticks_msec()
+	var rd := Seeded.validate_days(func(date: String) -> Array:
+			var dn := int(Time.get_unix_time_from_datetime_string(date + "T12:00:00") / 86400)
+			var players: int = [1, 3, 6][dn % 3]
+			return [FieldGen.generate(FieldGen.daily_seed(date), FieldGen.daily_spec(players, 120.0, date))],
+		func(fs: Array) -> Array:
+			var why: Array = []
+			for f in fs:
+				for w in FieldGen.check(f):
+					why.append("%d sheep: %s" % [(f.sheep as Array).size(), w])
+				if not bool(f.daily):
+					why.append("the daily field doesn't know it's the daily")
+				if int(f.attempt) == 99:
+					why.append("%d sheep: fell back to the plain field" % (f.sheep as Array).size())
+			days[var_to_str(fs[0].sheep)] = true
+			return why, 400, "TODAY'S FIELD", ["2026-11-11", "2026-11-12"])
+	total += int(rd.checked)
+	fails += (rd.failures as Array).size()
+	print("TODAY'S FIELD: %d days checked (%d ms)" % [int(rd.checked), Time.get_ticks_msec() - t_days])
+	_expect(days.size() >= int(rd.checked) - 2, "daily fields differ day to day (%d unique of %d)" % [days.size(), int(rd.checked)])
 	# The validator catches broken fields.
 	var good := FieldGen.generate(5, FieldGen.spec(6, 3))
 	var walled := good.duplicate(true)

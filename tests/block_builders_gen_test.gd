@@ -40,17 +40,27 @@ func _initialize() -> void:
 	for k in CourseGen.KINDS:
 		_expect(int(kinds.get(k, 0)) >= 10, "challenge %s shows up (%s)" % [k, str(kinds)])
 	_expect(int(nch[10]) > int(nch[0]), "later adventures have more challenges (%s)" % str(nch))
-	# TODAY'S SKY: fair, the same all day, different day to day.
+	# TODAY'S SKY over 400+ days (Seeded.validate_days, the shared daily validator): fair (check()), the same
+	# all day, different day to day.
 	var days := {}
-	for d in 40:
-		var date := Time.get_date_string_from_unix_time(1790000000 + d * 86400)
-		var lv := Story.daily_course(date)
-		for w in CourseGen.check(lv):
-			_fail("daily %s: %s" % [date, w])
-		_expect(var_to_str(lv) == var_to_str(Story.daily_course(date)), "daily %s is the same all day" % date)
-		days[var_to_str(lv.ground)] = true
-		total += 1
-	_expect(days.size() >= 30, "daily courses differ (%d unique of 40)" % days.size())
+	var rs := Seeded.validate_days(func(date: String) -> Dictionary: return Story.daily_course(date),
+		func(lv: Dictionary) -> Array:
+			days[var_to_str([lv.ground, lv.solution, lv.challenges, lv.theme])] = true
+			var why: Array = CourseGen.check(lv)
+			if lv.has("fallback"):
+				why.append("fell back to the small safe course")
+			return why, 400, "TODAY'S SKY", ["2026-11-11", "2026-11-12"])
+	total += int(rs.checked)
+	fails += (rs.failures as Array).size()
+	# (A mid-sized adventure has a small space of island layouts: some days repeat a layout, rarely in a row.)
+	_expect(days.size() >= int(rs.checked) * 3 / 4, "daily courses differ (%d unique of %d)" % [days.size(), int(rs.checked)])
+	var same_in_a_row := 0
+	for d in 60:
+		var a := Story.daily_course(Time.get_date_string_from_unix_time(1790000000 + d * 86400))
+		var b := Story.daily_course(Time.get_date_string_from_unix_time(1790000000 + (d + 1) * 86400))
+		if var_to_str([a.ground, a.solution]) == var_to_str([b.ground, b.solution]):
+			same_in_a_row += 1
+	_expect(same_in_a_row <= 2, "today's sky is rarely the same course as yesterday's (%d of 60)" % same_in_a_row)
 	# Hand checks: the validator catches broken courses.
 	var lv0 := CourseGen.generate(42, 4)
 	var bad := lv0.duplicate(true)

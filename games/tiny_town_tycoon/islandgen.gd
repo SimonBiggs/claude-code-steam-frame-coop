@@ -43,7 +43,24 @@ const BIOME_W: Array[int] = [3, 1, 2]
 const LANDMARKS: Array[String] = ["landmark", "ferris", "lighthouse"]
 
 
+## The island for a seed: the first try that passes check() (try 0 is the seed itself, so almost every seed's
+## island is its first try; a rare cramped one, e.g. TODAY'S ISLAND on 2027-01-09 with a district too small for
+## houses or its landmark, is made again from a derived seed). isl.seed stays the asked-for seed (wishes use it).
+const TRIES := 8
+
 static func generate(seed_value: int) -> Dictionary:
+	var first := {}
+	for t in TRIES:
+		var isl := _make(seed_value if t == 0 else Seeded.derive(seed_value, "island%d" % t))
+		isl["seed"] = seed_value
+		if t == 0:
+			first = isl
+		if check(isl).is_empty():
+			return isl
+	return first
+
+
+static func _make(seed_value: int) -> Dictionary:
 	var r := Seeded.rng(seed_value, "shape")
 	var biome: int = BIOMES[Seeded.weighted(Seeded.rng(seed_value, "biome"), BIOME_W)]
 	var ter := PackedByteArray()

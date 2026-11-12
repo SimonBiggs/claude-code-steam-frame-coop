@@ -84,6 +84,23 @@ static func replay(duration: float = 3.0) -> Control:
 	return show(roots, o)
 
 
+## Every VR story card (show_vr) is in this group.
+const VR_GROUP := "story_card_vr"
+
+
+## Whether `n` is part of a story card (a TV Card or a VR one; also one that is fading or was just replaced and is
+## waiting to be freed). Bots' how-to text scans skip these: a picture and one short line are the story. Checking
+## identity with a game's own "current card" var raced (2026-11-12, tiny_town_tycoon networked host: a story shown by
+## an RPC replaced the card that frame, so the old one, still in the tree, read as how-to text).
+static func is_story(n: Node) -> bool:
+	var p := n
+	while p != null:
+		if p is Card or p.is_in_group(VR_GROUP):
+			return true
+		p = p.get_parent()
+	return false
+
+
 ## The VR card (a HudKit VrCard): title = who, body = the line, and the same picture as the TV card on a round
 ## medallion at its left edge (opts.pic; the card's child "StoryPicture"). Returns it.
 static func show_vr(world: Node, cam: Node3D, opts: Dictionary) -> Node3D:
@@ -92,6 +109,7 @@ static func show_vr(world: Node, cam: Node3D, opts: Dictionary) -> Node3D:
 	var card := HudKit.vr_card(world, cam, String(opts.get("who", "")), String(opts.get("line", "")),
 		{"duration": float(opts.get("duration", 4.0)), "color": opts.get("color", "accent"), "width": 1.0,
 		"height": float(opts.get("vr_height", -0.22)), "title_size": 0.07, "body_size": 0.055})
+	card.add_to_group(VR_GROUP)  # is_story(): bots tell a story card from how-to text by this, not by a game's var
 	var pic := String(opts.get("pic", ""))
 	if pic != "":
 		card.add_child(StoryCardPics.vr_medallion(pic, UiKit.color_of(opts.get("color", "accent"), UiKit.ACCENT), card))
@@ -219,7 +237,7 @@ class StoryCardPics:
 		return p
 
 	## The VR card's picture: the TV card's round disc + picture, drawn into a little SubViewport shown on a
-	## Sprite3D (depth-tested like the card, drawn over its panel) half over the card's left edge.
+	## Sprite3D (skips the depth test like the card's panel, drawn over it: core/vr_text_guard.gd) half over the card's left edge.
 	static func vr_medallion(kind: String, col: Color, card: Node3D) -> Sprite3D:
 		const PX := 256
 		var vp := SubViewport.new()
@@ -238,6 +256,7 @@ class StoryCardPics:
 		s.texture = vp.get_texture()
 		s.pixel_size = 0.3 / PX
 		s.render_priority = UiKit.VR_PRIO_TEXT
+		s.no_depth_test = true  # vr-depth-ok: like the panel it sits on, or a leaf in front hides the picture but not the card
 		s.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var w: float = card.get("width") if card.get("width") != null else 1.0
 		s.layers = card.get("vis_layers") if card.get("vis_layers") != null else UiKit.VR_LAYER

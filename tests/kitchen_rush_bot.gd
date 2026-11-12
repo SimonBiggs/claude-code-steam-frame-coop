@@ -81,7 +81,7 @@ func _ready() -> void:
 	if OS.has_environment("BOT_SECONDS"):
 		end_at = float(OS.get_environment("BOT_SECONDS"))
 	elif OS.has_environment("BOT_END"):  # the shared "end by yourself after N s" (tests/bot_end.gd), like every other bot
-		end_at = float(OS.get_environment("BOT_END"))
+		end_at = preload("res://tests/bot_end.gd").end_at(end_at)  # BOT_END, before a --quit-after / deadline cut
 
 
 func _physics_process(delta: float) -> void:

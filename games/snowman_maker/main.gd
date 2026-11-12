@@ -11,6 +11,12 @@ extends Node3D
 ## snowmen; the first game of each date is the DAILY GARDEN. Tumble helps a lone builder.
 ## Story data: story.gd; village meshes: village.gd. One telemetry line per day (core/telemetry.gd).
 ## Built on the engine template: net modes, party seats, split view, VR rig, state store, awards.
+## SECOND PASS (deep.gd; tests/snowman_maker_deep_test.gd): GENTLE / BRAVE / HARD picked once a session and TUMBLE'S
+## SNOWMAN GIFTS (cosy scarf, carrot nose, magic hat, sparkle buttons, snow boots) before every day from the second, both
+## on pick orbs (picks.gd: walk under one / reach into one); warned SUNBEAMS that melt snowballs and SNOW SLIDES told
+## by steady rings on the snow (hazards.gd); winter is a real snowy garden, out of season it is Tumble's MAGIC SNOW
+## GLOBE (season.gd); TUMBLE'S SNOW TOWN grows every few snowmen (town.gd). State: "deep" [mode, gift, season], "hz"
+## (the surprise showing), "town"; events "orbs" (sticky), "take", "banner".
 
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -36,6 +42,12 @@ const Village := preload("res://games/snowman_maker/village.gd")
 const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Telemetry := preload("res://core/telemetry.gd")
+const Deep := preload("res://games/snowman_maker/deep.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const PicksScript := preload("res://games/snowman_maker/picks.gd")
+const HazardsScript := preload("res://games/snowman_maker/hazards.gd")
+const SeasonScript := preload("res://games/snowman_maker/season.gd")
+const TownScript := preload("res://games/snowman_maker/town.gd")
 
 const GAME_ID := "snowman_maker"
 const ARENA := 9.0
@@ -151,6 +163,28 @@ var touch_cd := {}  # key -> seconds left (wobble / puff / crunch cooldowns)
 var total_made := 0
 var total_rolled := 0.0  # over all rounds (bots)
 var total_stacked := 0
+# --- Second pass (deep.gd) ---
+var picks: Node  # picks.gd
+var hazards: Node3D  # hazards.gd (every machine draws the "hz" state)
+var season_node: Node3D  # season.gd
+var town: Node3D  # town.gd
+var difficulty := "brave"  # GENTLE / BRAVE / HARD (the day's "mode" is daily / story / bonus)
+var mode_picked := false  # host: this session's mode pick is done
+var gift := ""  # every machine: this day's gift ("" none; from the "deep" state)
+var gift_round := -1  # host: the day the gift was picked for
+var season := ""
+var session_round := 0  # host: snow days played this session
+var hz_list: Array = []  # host: this day's surprises
+var hz_i := 0  # host: the next surprise
+var hz_now := {}  # host: the surprise being told / going off
+var hz_bumped := {}  # host: slots the slide bumped this time
+var hz_count := 0  # host: surprises this day (telemetry)
+var bumps := 0  # host: slide bumps this day (telemetry)
+var melted := 0.0  # host: snowball radius melted by sunbeams this day (telemetry, cm)
+var dizzy := {}  # every machine: slot -> seconds a slide bump still slows them
+var auto_t := {}  # host: snowman id -> seconds it has stood with 3 balls (CARROT NOSE / MAGIC HAT)
+var gift_shown := ""  # every machine: the gift whose banner showed
+var bot_surprises := false  # bots: surprises from the first day, from 3 s
 
 
 func _ready() -> void:
@@ -187,6 +221,11 @@ func _ready() -> void:
 	hints = Hints.new()
 	add_child(hints)
 	hints.bind_party(party)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
+	net.sticky_event("story")  # ... and Tumble's latest beat
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
 	if OS.has_environment("DUO_JOIN"):
 		net.join_finished.connect(func(ok: bool) -> void: _setup("client" if ok else "local"))
 		net.join(OS.get_environment("DUO_JOIN"))
@@ -230,7 +269,8 @@ func _setup(mode: String) -> void:
 	if mode != "client":
 		net.state_set("best", int(save.data["best"]))
 		_publish_progress()
-		_start_round()
+		_begin_session()
+		_next_round()
 	hints.intro(INTRO, {"duration": 6.0})
 	if vr_rig != null:
 		hints.hint("vr_grab", "Pull the trigger to lift snow!", {"to": "vr"})
@@ -295,6 +335,17 @@ func _build_world(vr: bool) -> void:
 	sign_day.position = Vector3(0.0, 2.95, 0.06)
 	sign_node.add_child(sign_day)
 	_build_village(net.state_get("village", [0, 0, 0, 0, 0]))
+	hazards = HazardsScript.new()
+	hazards.main = self
+	add_child(hazards)
+	season_node = SeasonScript.new()
+	season_node.name = "Season"
+	season_node.main = self
+	add_child(season_node)
+	town = TownScript.new()
+	town.name = "TownNode"
+	town.main = self
+	add_child(town)
 
 
 ## Every machine: build this snow day's garden from {seed, chapter} (boxes, pines, ice, drifts).
@@ -604,12 +655,13 @@ func _move_local_players(delta: float) -> void:
 	var send := send_t <= 0.0
 	if send:
 		send_t = 1.0 / 30.0
-	var playing := String(net.state_get("phase", "play")) == "play"
+	var playing := String(net.state_get("phase", "play")) in ["play", "pick"]
 	for slot in party.local_slots():
 		if not avatars.has(slot):
 			continue
 		var a: Node3D = avatars[slot]
 		var mv := party.stick(slot, "move") if playing else Vector2.ZERO
+		var speed := SPEED * Deep.speed_share(gift) * (Deep.DIZZY_SLOW if float(dizzy.get(slot, 0.0)) > 0.0 else 1.0)
 		if mv != Vector2.ZERO:
 			var cam := split.active_camera(slot)
 			var f := -cam.global_basis.z
@@ -617,7 +669,7 @@ func _move_local_players(delta: float) -> void:
 			f = f.normalized()
 			var r := Vector3(-f.z, 0.0, f.x)
 			var dir := r * mv.x - f * mv.y
-			var p := a.position + dir * SPEED * delta
+			var p := a.position + dir * speed * delta
 			p.y = 0.0
 			a.position = _out_of_trees(p.limit_length(ARENA - 0.3), BODY_R)
 			Creatures.anim(a).face(dir)
@@ -686,7 +738,7 @@ func _make_vr_avatar() -> void:
 
 func on_request(_slot: int, action: String, _args: Array) -> void:
 	if action == "next_round" and results_showing():
-		_start_round()
+		_next_round()
 
 
 func on_pause_changed(paused: bool, by_slot: int) -> void:
@@ -747,6 +799,28 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			_build_village(value)
 		"unlocks":
 			_sync_stacks(net.state_get("stacks", {}))
+		"deep":
+			var dv: Array = value if value is Array else []
+			if dv.size() >= 3:
+				difficulty = String(dv[0])
+				gift = String(dv[1])
+				season = String(dv[2])
+				if season_node != null and season != "":
+					season_node.set_season(season)
+				if gift != "" and gift != gift_shown:
+					var gd := Deep.gift(gift)
+					_banner(String(gd.name), "victory")
+					show_story({"who": "TUMBLE", "line": String(gd.line), "pic": String(gd.pic), "color": (gd.color as Color).to_html(false), "duration": 3.5})
+				gift_shown = gift
+		"hz":
+			var hz := Deep.unpack(value if value is Array else [])
+			if hazards != null:
+				hazards.show_now(hz)
+			if not hz.is_empty():
+				_banner(String(Deep.KIND_NAMES[String(hz.kind)]), "warning")
+		"town":
+			if town != null:
+				town.set_pieces(int(value), Time.get_ticks_msec() - setup_msec > 2000)
 		"made":
 			if Time.get_ticks_msec() - setup_msec > 2000:  # not for a TV machine that just (re)joined
 				_celebrate()
@@ -785,8 +859,26 @@ func _start_round() -> void:
 	var builders := _builders()
 	var misses := int(save.data["misses"]) if mode == "story" or mode == "bonus" else 0
 	var laps := int(save.data["laps"]) if mode == "bonus" else 0
-	var goals := Story.goals(builders, chap, misses, laps, round_time)
+	var goals := Deep.goals(builders, chap, misses, laps, round_time, difficulty)
 	_apply_garden(seed_v, chap)
+	session_round += 1
+	if gift_round != session_round:
+		gift = ""
+	_send_deep()
+	var hz_spec := {"mode": difficulty, "season": season, "round": session_round}
+	if bot_surprises:
+		hz_spec["round"] = Deep.FIRST_ROUND
+		hz_spec["first"] = Deep.SHORT_FIRST
+	hz_list = Deep.hazards(garden, round_time, hz_spec)
+	hz_i = 0
+	hz_now = {}
+	hz_count = 0
+	bumps = 0
+	melted = 0.0
+	auto_t.clear()
+	net.state_set("hz", [])
+	print("Snowman Maker surprises: %s mode, %s, gift %s: %s" % [difficulty, season, gift if gift != "" else "none",
+		str(hz_list.map(func(e: Dictionary) -> String: return "%s@%.0f" % [e.kind, float(e.t)]))])
 	net.state_set("stacks", {})
 	net.state_set("score", 0)
 	net.state_set("time", int(ceil(time_left)))
@@ -796,7 +888,7 @@ func _start_round() -> void:
 	net.state_set("round", int(net.state_get("round", 0)) + 1)
 	tele = {"mode": mode, "chapter": chap, "day": day_n, "seed": seed_v, "goals": goals, "builders": builders,
 		"tv_players": party.player_count(), "vr": vr_rig != null, "flat_host": flat_host, "misses_before": misses,
-		"seconds": round_time, "t0": clock, "helpers": 0}
+		"seconds": round_time, "t0": clock, "helpers": 0, "difficulty": difficulty, "gift": gift, "season": season}
 	if vr_rig != null:
 		vr_rig.guard_trigger()
 	for k in 4:
@@ -825,7 +917,7 @@ func _rescale_goals() -> void:
 	var misses := int(tele.get("misses_before", 0))
 	var laps := int(save.data["laps"]) if String(d.get("mode", "")) == "bonus" else 0
 	nd["builders"] = _builders()
-	nd["goals"] = Story.goals(_builders(), int(d.get("chapter", 0)), misses, laps, round_time)
+	nd["goals"] = Deep.goals(_builders(), int(d.get("chapter", 0)), misses, laps, round_time, difficulty)
 	net.state_set("day", nd)
 	if not tele.is_empty():
 		tele["builders"] = _builders()
@@ -839,6 +931,8 @@ func _builders() -> int:
 
 
 func _end_round(how: String = "time") -> void:
+	hz_now = {}
+	net.state_set("hz", [])
 	if held_ball >= 0 and balls.has(held_ball):
 		(balls[held_ball] as Dictionary)["s"] = FLYING
 	held_ball = -1
@@ -881,7 +975,12 @@ func _end_round(how: String = "time") -> void:
 		save.mark_dirty()
 	var after := Story.flakes(stars_d, int(save.data["extra_flakes"]))
 	var news := Story.newly_unlocked(before, after)
+	var town_before := int(net.state_get("town", 0))
 	_publish_progress()
+	var town_now := Deep.town(int(save.data["made"]))
+	if town_now > town_before:
+		var tk: String = Deep.TOWN[clampi(town_now - 1, 0, Deep.TOWN.size() - 1)]
+		_story({"who": "TUMBLE", "line": "Our snow town grew!", "pic": String(Deep.TOWN_PICS[tk]), "color": "8ec5ff", "duration": 4.0}, 3.0)
 	net.state_set("best", int(save.data["best"]))
 	tele["chapter_done"] = bool(adv.get("chapter_done", false))
 	_telemetry(how)
@@ -931,6 +1030,11 @@ func _telemetry(how: String) -> void:
 	t["stacked"] = total_stacked
 	t["rolled_m"] = int(total_rolled)
 	t["end"] = how
+	t["surprises"] = hz_count
+	t["bumps"] = bumps
+	t["melted_cm"] = int(melted * 100.0)
+	t["town"] = Deep.town(int(save.data["made"]))
+	t["picks"] = picks.history.size() if picks != null else 0
 	t["played_s"] = int(clock - float(t.get("t0", clock)))
 	t.erase("t0")
 	tele = {}
@@ -946,6 +1050,7 @@ func _publish_progress() -> void:
 	net.state_set("unlocks", Story.unlocked(flakes))
 	var daily: Dictionary = save.data["daily"]
 	net.state_set("daily_best", int(daily.get(Seeded.daily_key(), 0)))
+	net.state_set("town", Deep.town(int(save.data["made"])))
 
 
 # --- Story beats ----------------------------------------------------------------------------
@@ -1043,6 +1148,10 @@ func _process(delta: float) -> void:
 		touch_cd[key] = float(touch_cd[key]) - delta
 		if float(touch_cd[key]) <= 0.0:
 			touch_cd.erase(key)
+	for slot in dizzy.keys():
+		dizzy[slot] = float(dizzy[slot]) - delta
+		if float(dizzy[slot]) <= 0.0:
+			dizzy.erase(slot)
 	if net.mode == "client":
 		_mirror_motion(delta)
 		return
@@ -1051,7 +1160,13 @@ func _process(delta: float) -> void:
 	if results_showing():
 		results_t += delta
 		if results_t > 12.0:
-			_start_round()  # play again by itself
+			_next_round()  # play again by itself (Tumble's gift pick first)
+		return
+	if picks.active():
+		picks.tick(delta)
+		var pl := int(ceil(picks.left()))
+		if pl != int(net.state_get("time", 0)) and picks.active():
+			net.state_set("time", pl)
 		return
 	time_left -= delta
 	if int(ceil(time_left)) != int(net.state_get("time", 0)):
@@ -1067,9 +1182,11 @@ func _process(delta: float) -> void:
 	_update_helpers(delta)
 	if vr_rig != null:
 		_vr_hands()
+	_tick_surprises()
 	_simulate_balls(delta)
 	_simulate_items(delta)
 	_tv_carry()
+	_auto_dress(delta)
 
 
 func _free_count() -> int:
@@ -1201,8 +1318,15 @@ func _simulate_balls(delta: float) -> void:
 					slide = Vector3.ZERO
 				b["slide"] = slide
 				var dist := _flat(p - start)
+				if _melting(p):  # a sunbeam: it melts smaller (never below a new snowball)
+					var nr := maxf(BALL_MIN, r - float(Deep.mode_data(difficulty).melt) * delta)
+					melted += r - nr
+					r = nr
+					b["r"] = r
+					p.y = r
+					n.position.y = r
 				if dist > 0.0005:
-					var grow := 0.0 if under == "ice" else (GROW * 3.0 if under == "drifts" else GROW)
+					var grow := (0.0 if under == "ice" else (GROW * 3.0 if under == "drifts" else GROW)) * Deep.grow_share(gift)
 					r = minf(BALL_MAX, r + dist * grow)
 					b["r"] = r
 					p.y = r
@@ -1457,6 +1581,7 @@ func _complete(sid: int) -> void:
 		var nxt: Array = wishes[i % wishes.size()]
 		net.state_set("wish", {"i": i, "hat": int(nxt[0]), "v": int(nxt[1])})
 		fx("wish", [], "achievement", -2.0)
+	pts = Deep.snowman_points(pts, gift)  # (SPARKLE BUTTONS: double)
 	net.state_set("score", int(net.state_get("score", 0)) + pts)
 	net.state_set("made", total_made)
 
@@ -1468,7 +1593,8 @@ func _dress(sid: int, kind: int, by: int) -> void:
 		st["carrot"] = true
 	else:
 		st["hat"] = kind
-	awards.add(by, "dressed")
+	if by >= 0:
+		awards.add(by, "dressed")
 	var node: Snowman = stack_nodes.get(sid)
 	fx("sparkle", [node.head_world() if node != null else (st["pos"] as Vector3)], "ding", 0.0, 1.2 if kind != CARROT else 1.0)
 	if bool(st["carrot"]) and int(st["hat"]) > 0:
@@ -1881,6 +2007,198 @@ func _helper_pick(from: Vector3) -> int:
 	return best
 
 
+# --- Second pass: picks, surprises, gifts (deep.gd, picks.gd, hazards.gd) ----------------------------------------
+
+## Host: the session's season, the family's last difficulty, the town; What's New "try" envs jump straight in.
+func _begin_session() -> void:
+	season = Seeded.season()
+	if OS.has_environment("SM_SEASON") and Deep.SEASONS.has(OS.get_environment("SM_SEASON")):
+		season = OS.get_environment("SM_SEASON")
+	if String(save.data.get("mode", "")) != "":
+		difficulty = Deep.mode_of(String(save.data.mode))
+	if OS.has_environment("SM_MODE"):
+		difficulty = Deep.mode_of(OS.get_environment("SM_MODE"))
+		mode_picked = true
+	if OS.has_environment("SM_GIFT") and not Deep.gift(OS.get_environment("SM_GIFT")).is_empty():
+		mode_picked = true
+		gift = OS.get_environment("SM_GIFT")  # (the first day with that gift)
+		gift_round = 1
+	if OS.has_environment("SM_SURPRISES_NOW"):
+		bot_surprises = true
+		mode_picked = true
+	_send_deep()
+	net.state_set("town", Deep.town(int(save.data["made"])))
+	var sd := Deep.season_data(season)
+	_story({"who": "TUMBLE", "line": String(sd.line), "pic": String(sd.pic), "color": "8ec5ff", "duration": 3.5}, 0.5)
+	print("Snowman Maker session: %s, difficulty %s, town %d pieces" % [season, difficulty, Deep.town(int(save.data["made"]))])
+
+
+## Host: the difficulty, the gift and the season for every machine.
+func _send_deep() -> void:
+	net.state_set("deep", [difficulty, gift, season])
+
+
+## Nobody here could take a pick (no VR builder, no TV player): the middle comes sooner.
+func pick_nobody() -> bool:
+	return vr_rig == null and avatars.is_empty()
+
+
+## Host: the next snow day, after the mode pick (once a session) or Tumble's gift pick (every day from the second).
+func _next_round() -> void:
+	if net.mode == "client" or picks == null or picks.active():
+		return
+	if not mode_picked:
+		_start_pick("mode")
+	elif session_round >= 1 and gift_round != session_round + 1:
+		_start_pick("gift")
+	else:
+		_start_round()
+
+
+func _start_pick(stage: String) -> void:
+	# The garden is cleared for the pick (the orbs float over the build circle with no VR builder).
+	for id in balls.keys():
+		_free_ball(int(id))
+	for id in items.keys():
+		_free_item(int(id))
+	held_ball = -1
+	held_item = -1
+	stack_data.clear()
+	_publish_stacks()
+	carry.clear()
+	var entries: Array = []
+	var opts: Array = []
+	if stage == "mode":
+		opts = PickOrbs.mode_ids(Deep.mode_of(String(save.data.mode)) if String(save.data.get("mode", "")) != "" else "brave")
+		for id in opts:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
+		_story(_tumble_beat("Easy or tricky?", 3.0))
+	else:
+		opts = Deep.gift_choices(Deep.town(int(save.data["made"])), String(save.data.get("last_gift", "")),
+			Seeded.derive(int(_day().get("seed", 1)), "gift%d" % session_round))
+		for id in opts:
+			var gd := Deep.gift(String(id))
+			entries.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
+		_story({"who": "TUMBLE", "line": "A gift for you!", "pic": "gift", "color": "8ec5ff", "duration": 3.0})
+	net.state_set("hz", [])
+	net.state_set("phase", "pick")
+	_banner_all("PICK ONE!", "default")
+	picks.begin(stage, entries, opts, _on_picked)
+	sfx.play("whistle", -8.0, 1.3)
+
+
+## Host: the team picked (or the middle one was taken for them).
+func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
+	if stage == "mode":
+		mode_picked = true
+		difficulty = Deep.mode_of(String(opt))
+		save.data["mode"] = difficulty
+		_story({"who": "TUMBLE", "line": String(PickOrbs.MODE_LINES.get(difficulty, "Let's go!")), "pic": String(PickOrbs.mode(difficulty).pic),
+			"color": PickOrbs.mode_color(difficulty).to_html(false), "duration": 3.0})
+		_banner_all(PickOrbs.mode_name(difficulty), "victory")
+	else:
+		gift = String(opt)
+		gift_round = session_round + 1
+		save.data["last_gift"] = gift
+	save.mark_dirty()
+	print("Picked %s: %s" % [stage, str(opt)])
+	_next_round()
+
+
+## Host, every frame of a day: tell the next surprise, set it off (slides bump rollers, knock snowballs), clear it.
+func _tick_surprises() -> void:
+	var day_t := round_time - time_left
+	if hz_now.is_empty():
+		if hz_i < hz_list.size() and day_t >= float((hz_list[hz_i] as Dictionary).t):
+			hz_now = hz_list[hz_i]
+			hz_i += 1
+			hz_bumped = {}
+			hz_count += 1
+			net.state_set("hz", Deep.pack(hz_now))
+		return
+	var since := day_t - float(hz_now.t)
+	if since >= float(hz_now.warn) and String(hz_now.kind) == "slide":
+		var sp := Deep.slide_at(hz_now, since - float(hz_now.warn))
+		if Deep.bumps(gift):
+			for slot in avatars:
+				if hz_bumped.has(slot):
+					continue
+				var a: Node3D = avatars[slot]
+				if _flat(a.position - sp) < float(hz_now.r) + Deep.SLIDE_HIT:
+					hz_bumped[slot] = true
+					bumps += 1
+					fx("bump", [a.position, int(slot)], "boing", -2.0, 0.7)
+		for id in balls:  # loose snowballs are knocked aside
+			var b: Dictionary = balls[id]
+			if int(b["s"]) != GROUND:
+				continue
+			var n: Node3D = b["n"]
+			var d := Vector2(n.position.x - sp.x, n.position.z - sp.z)
+			if d.length() < Deep.SLIDE_R + float(b["r"]):
+				_push_out(n, d, Deep.SLIDE_R + float(b["r"]) + 0.05)
+	if since >= Deep.span(hz_now):
+		hz_now = {}
+		net.state_set("hz", [])
+
+
+## Host: is a loose snowball at p in a shining sunbeam (and not wrapped in a cosy scarf)?
+func _melting(p: Vector3) -> bool:
+	if hz_now.is_empty() or String(hz_now.kind) != "sun" or not Deep.melts(gift):
+		return false
+	if round_time - time_left - float(hz_now.t) < float(hz_now.warn):
+		return false
+	return Deep.inside(hz_now, Vector2(p.x, p.z))
+
+
+## Host: CARROT NOSE / MAGIC HAT pop onto a three-ball snowman by themselves.
+func _auto_dress(delta: float) -> void:
+	if gift != "carrot" and gift != "hat":
+		return
+	for sid in stack_data.keys():
+		var st: Dictionary = stack_data[sid]
+		if bool(st["done"]) or (st["radii"] as Array).size() < 3:
+			auto_t.erase(sid)
+			continue
+		auto_t[sid] = float(auto_t.get(sid, 0.0)) + delta
+		if float(auto_t[sid]) < Deep.AUTO_SECS:
+			continue
+		auto_t[sid] = 0.0
+		var node: Snowman = stack_nodes.get(sid)
+		var at: Vector3 = node.head_world() if node != null and is_instance_valid(node) else (st["pos"] as Vector3) + Vector3.UP
+		if gift == "carrot" and not bool(st["carrot"]):
+			fx("auto", [at], "sparkle", -4.0, 1.3)
+			_dress(int(sid), CARROT, -1)
+		elif gift == "hat" and int(st["hat"]) == 0:
+			fx("auto", [at], "sparkle", -4.0, 1.1)
+			_dress(int(sid), _wish_hat(), -1)
+
+
+## Every machine: a big banner on each view and in VR.
+func _banner(title: String, style: String) -> void:
+	if split != null:
+		HudKit.banner(_all_huds(), title, "", {"duration": 1.8, "style": style})
+	if vr_rig != null:
+		HudKit.vr_banner(self, vr_rig.camera, title, "", {"duration": 1.8, "style": style, "distance": 2.4})
+
+
+## Host: a banner on every machine (ones that don't come from a state change).
+func _banner_all(title: String, style: String) -> void:
+	_banner(title, style)
+	if net.mode == "host":
+		net.event("banner", [title, style])
+
+
+## (picks.gd bursts too)
+func burst(pos: Vector3, color: Color, amount: int, speed: float) -> void:
+	_burst(pos, amount, [color], speed)
+
+
+## (town.gd)
+func burst_at(pos: Vector3, colors: Array) -> void:
+	_burst(pos, 40, colors, 4.5)
+
+
 # --- Effects (play here, and on the TV machine through an event) ------------------------------
 
 func fx(kind: String, args: Array, sound: String = "", vol: float = 0.0, pitch: float = 1.0) -> void:
@@ -1920,6 +2238,16 @@ func _fx_local(kind: String, args: Array, sound: String, vol: float, pitch: floa
 		"sign":
 			sign_wob = 1.0
 			at = SIGN_POS + Vector3.UP * 1.5
+		"bump":  # the snow slide bumped a roller: dizzy for a moment
+			at = args[0]
+			var bs := int(args[1])
+			_burst(at + Vector3.UP * 0.8, 14, [Deep.SLIDE_COLOR, Color(1, 1, 1)], 3.0)
+			dizzy[bs] = float(Deep.mode_data(difficulty).dizzy)
+			if avatars.has(bs):
+				Creatures.anim(avatars[bs]).hurt(Deep.SLIDE_COLOR, Vector3.UP)
+		"auto":  # a gift popped a nose / hat on
+			at = args[0]
+			_burst(at, 22, [Color(1.0, 0.85, 0.3), Color(1, 1, 1), Color(0.5, 0.8, 1.0)], 3.0)
 	if sound != "":
 		if at != Vector3.ZERO:
 			sfx.play_at(sound, at, vol, pitch)
@@ -2107,3 +2435,11 @@ func apply_event(kind: String, args: Array) -> void:
 		_fx_local(String(args[0]), args[1], String(args[2]), float(args[3]), float(args[4]))
 	elif kind == "story":
 		show_story(args[0])
+	elif kind == "banner":
+		_banner(String(args[0]), String(args[1]))
+	elif kind == "orbs":
+		if picks != null and args.size() >= 3:
+			picks.show_row(String(args[0]), args[1], args[2], float(args[3]) if args.size() >= 4 else Deep.ORB_SCALE)
+	elif kind == "take":
+		if picks != null and args.size() >= 2:
+			picks.take_fx(int(args[0]), int(args[1]))

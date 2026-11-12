@@ -9,7 +9,8 @@ const COLOR := Color(0.557, 0.773, 1.0)  # Tumble's "8ec5ff"
 
 
 ## data: the raw save (no defaults filled in: always .get with a default). today: Seeded.today().
-## grown: every snowman the family has made for Tumble's Winter Fair; daily: TODAY'S GARDEN finished today
+## grown: every snowman the family has made for Tumble's Winter Fair (Tumble's snow town grows from the same count);
+## daily: TODAY'S GARDEN finished today
 ## (data.daily is {Seeded.daily_key(): best score}, the last two weeks).
 static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 	var days: Variant = data.get("daily", {})
@@ -19,4 +20,5 @@ static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 ## A save as the game writes it after a few days (tests/progress_test.gd: it must read as grown > 0, daily done).
 static func sample(today: String) -> Dictionary:
 	return {"best": 1800, "chapter": 1, "day": 1, "stars": {"0-0": 3, "0-1": 2, "0-2": 3, "1-0": 1}, "misses": 0, "laps": 0,
-		"daily": {"daily:" + today: 1500}, "days": 5, "extra_flakes": 2, "made": 11, "wishes": 9}
+		"daily": {"daily:" + today: 1500}, "days": 5, "extra_flakes": 2, "made": 11, "wishes": 9,
+		"mode": "brave", "last_gift": "scarf"}

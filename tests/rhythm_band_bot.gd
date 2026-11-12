@@ -32,6 +32,7 @@ extends Node
 ## played and Doodle's season stage stands.
 
 const FAKE_PAD := 40
+const BotEnd := preload("res://tests/bot_end.gd")  # check(): counted, so a run cut off before its own BOT RESULT still has one
 
 var main
 var t := 0.0
@@ -326,7 +327,12 @@ func _check_tip(who: String, text: String) -> void:
 
 
 func _exit_tree() -> void:
-	if main == null or not simple:
+	if main == null:
+		return
+	# Ended before its own BOT RESULT (local --quit-after, solo VR's BOT_END, networked): a song must have been played.
+	if quit_t < 0.0:
+		BotEnd.check(songs_done >= 1, "a song was played (mode %s, t=%.0f, state %s)" % [main.net.mode, t, main.state])
+	if not simple:
 		return
 	if not verdict_done:  # cut off (BOT_END / --quit-after) before song 3: a verdict on what it got to
 		var m: String = main.net.mode
@@ -409,6 +415,7 @@ func _check(line: String) -> void:
 	if line.ends_with("FAIL"):
 		check_fails += 1
 	print(line)
+	BotEnd.check(not line.ends_with("FAIL"), line)  # the shared tally (tests/bot_end.gd) for runs that end before quit_t
 
 
 func _final_checks(mode: String) -> void:

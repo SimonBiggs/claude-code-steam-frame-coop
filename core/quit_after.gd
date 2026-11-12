@@ -20,6 +20,12 @@ func _ready() -> void:
 ## The --quit-after frame count, or -1 when not passed. Godot keeps engine options like --quit-after out of
 ## OS.get_cmdline_args(), so read the process's own command line (Linux; tests only run here).
 static func limit() -> int:
+	return arg_int("--quit-after")
+
+
+## An engine option's int value from this process's command line ("--x N" or "--x=N"), or -1 when not passed.
+## (Also --fixed-fps for tests/bot_end.gd run_length.)
+static func arg_int(flag: String) -> int:
 	var args := PackedStringArray()
 	var f := FileAccess.open("/proc/self/cmdline", FileAccess.READ)
 	if f != null:
@@ -32,9 +38,9 @@ static func limit() -> int:
 				cur.append(byte)
 	for i in args.size():
 		var a := str(args[i])
-		if a == "--quit-after" and i + 1 < args.size():
+		if a == flag and i + 1 < args.size():
 			return int(args[i + 1])
-		if a.begins_with("--quit-after="):
+		if a.begins_with(flag + "="):
 			return int(a.get_slice("=", 1))
 	return -1
 
@@ -44,10 +50,6 @@ func _process(_delta: float) -> void:
 		return
 	set_process(false)
 	print("QUIT AFTER: frame %d of --quit-after %d, quitting quietly (core/quit_after.gd)" % [Engine.get_process_frames(), at])
-	if get_tree().get_node_count_in_group("bot_frame_limit") > 0:
-		get_tree().call_group("bot_frame_limit", "on_frame_limit")  # bots (tests/bot_kit.gd) print their BOT RESULT so far
-	elif get_tree().current_scene != null and str(get_tree().current_scene.scene_file_path).ends_with("_bot.tscn"):
-		# A bot without tests/bot_kit.gd: its checks fail loudly (SCRIPT ERROR / BOT ASSERT FAILED) as they run, so
-		# reaching the limit without one is its pass. Said plainly, so a cut-off run is never mistaken for a full one.
-		print("BOT RESULT: PASS (no failed check by the --quit-after frame limit; this bot has no bot_kit summary)")
-	load("res://tests/bot_end.gd").quit_quietly(get_tree(), 0)
+	# quit_quietly has every bot say its BOT RESULT so far (tests/bot_kit.gd on_frame_limit, or the shared tally of
+	# tests/bot_end.gd check() for bots without bot_kit), noting the cut-off, so it's never mistaken for a full run.
+	load("res://tests/bot_end.gd").quit_quietly(get_tree(), 0, ", stopped at the --quit-after frame limit")

@@ -56,6 +56,7 @@ var bot_vr := OS.has_environment("BOT_VR") and not OS.has_environment("DUO_JOIN"
 
 func _ready() -> void:
 	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
+	add_to_group("bot_frame_limit")  # ended before every verdict was in: on_frame_limit counts the ones that are
 	if OS.has_environment("BOT_MAP"):  # BOT_MAP=0/1/2: start on this map (house / castle / spaceship)
 		var cfg := ConfigFile.new()
 		cfg.load("user://hide_and_seek_best.cfg")
@@ -209,18 +210,27 @@ func _seeker(delta: float) -> void:
 			if d < best_d:
 				best_d = d
 				best = h
-	# PIP'S STREET: neighbour friends hiding in the house are worth finding too (the bot goes for them first).
+	# PIP'S STREET: neighbour friends hiding in the house are worth finding too. Like a kid who has just seen the
+	# "Find me!" cards, the bot goes for the nearest friend FIRST (wherever they hide) while there's time, then the
+	# hiders: finding the last hider ends the round, so a seeker who grabs a nearby hider first never meets friends
+	# hiding at the far end of the house (2026-11-12's TODAY'S STREET: both friends ~13 m away, the one networked
+	# hider 3.5 m away; the old "a friend if within the hider's distance + 8 m" never went for them).
 	var best_pos: Vector3 = Vector3.ZERO if best == null else best.global_position
 	var best_c: Vector3 = Vector3.ZERO if best == null else best.center()
+	var friends_first: bool = main.phase_t > 8.0
+	var fbest = null
+	var fbest_d := INF
 	for k in main.friends.size():
 		if int(main.friend_state[k][1]) < 0 and is_instance_valid(main.friends[k]):
-			var fp: Vector3 = main.friends[k].global_position
-			var fd: float = fp.distance_to(s.global_position) - 8.0
-			if fd < best_d:
-				best_d = maxf(0.0, fd)
-				best = main.friends[k]
-				best_pos = fp
-				best_c = main.friends[k].center()
+			var fd: float = main.friends[k].global_position.distance_to(s.global_position)
+			if fd < fbest_d:
+				fbest_d = fd
+				fbest = main.friends[k]
+	if fbest != null and (friends_first or fbest_d - 8.0 < best_d):
+		best_d = fbest_d
+		best = fbest
+		best_pos = fbest.global_position
+		best_c = fbest.center()
 	# Alone (no hiders): Pip is the one to find too.
 	if main.solo_round and main.pip_on:
 		var pd: float = main.pip_spot.distance_to(s.global_position)
@@ -318,6 +328,22 @@ func _hiders(delta: float) -> void:
 			p.bot_alt = p.taunt_cd <= 0.0 and fmod(t + p.index * 0.7, 1.5) < 0.2  # squeak whenever it's ready
 
 
+## tests/bot_end.gd quit_quietly: the run ends before _result (a 60 s local run, solo VR's BOT_END, a networked
+## end): count the verdicts that are in, so the shared tally prints the BOT RESULT (0 in = FAIL).
+func on_frame_limit(_note := "") -> void:
+	if has_meta("result") or main == null:
+		return
+	var BotEnd := preload("res://tests/bot_end.gd")
+	if conn_done:
+		BotEnd.check(conn_ok, "connectivity: every hiding spot can be reached")
+	if cue_verdict:
+		BotEnd.check(has_meta("cues_ok"), "the picture cues showed")
+	BotEnd.check(main.round_no >= 1, "a round of hide and seek ran (round %d, t=%.0f)" % [main.round_no, t])
+	for k in ["pip_ok", "friend_ok", "sneak_ok"]:
+		if has_meta(k):
+			BotEnd.check(true, k)
+
+
 ## One BOT RESULT line per machine once every verdict is in.
 func _result(mode: String) -> void:
 	# A VR host alone (no TV machine, so no hiders): the solo Pip hunt rounds must start and end by themselves (this bot
@@ -333,6 +359,12 @@ func _result(mode: String) -> void:
 	if main.phase != "over" and mode == "local":
 		return
 	set_meta("result", true)
+	_print_result("")
+	if mode == "local":
+		preload("res://tests/bot_end.gd").quit_quietly(get_tree())
+
+
+func _print_result(note: String) -> void:
 	var fails: Array[String] = []
 	if not conn_ok:
 		fails.append("connectivity")
@@ -344,9 +376,7 @@ func _result(mode: String) -> void:
 		fails.append("pip")
 	if not has_meta("friend_ok"):
 		fails.append("street friend")
-	print("BOT RESULT: %s (5 checks)%s" % ["PASS" if fails.is_empty() else "FAIL", "" if fails.is_empty() else " failed: " + ", ".join(fails)])
-	if mode == "local":
-		preload("res://tests/bot_end.gd").quit_quietly(get_tree())
+	print("BOT RESULT: %s (5 checks%s)%s" % ["PASS" if fails.is_empty() else "FAIL", note, "" if fails.is_empty() else " failed: " + ", ".join(fails)])
 
 
 ## PIP'S STREET: a friend found and at Pip's garden party (host / local: in the save too; TV: mirrored from the host).

@@ -23,6 +23,7 @@ const Balloon := preload("res://games/balloon_pop/balloon.gd")
 const Picks := preload("res://games/balloon_pop/picks.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const TestTime := preload("res://tests/test_time.gd")
 
 var fails := 0
 
@@ -57,7 +58,7 @@ func _initialize() -> void:
 								_fail("%s / %s b%d p%d %ds seed %d: %s" % [mode, r.id, built, players, int(time), seed_v, x])
 							var g0 := Time.get_ticks_usec()
 							var gl := Skies.gusts(rd, mode)
-							gust_ms = maxf(gust_ms, (Time.get_ticks_usec() - g0) / 1000.0)
+							gust_ms = TestTime.worst(gust_ms, (Time.get_ticks_usec() - g0) / 1000.0, func() -> Variant: return Skies.gusts(rd, mode))
 							for x in Skies.gust_problems(rd, gl, mode):
 								_fail("%s / %s b%d %ds seed %d: gusts: %s" % [mode, r.id, built, int(time), seed_v, x])
 							if var_to_str(gl) != var_to_str(Skies.gusts(rd.duplicate(true), mode)):

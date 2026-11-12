@@ -40,7 +40,7 @@ func _initialize() -> void:
 	while Time.get_ticks_msec() - t_all < 10000:
 		var t_step := Time.get_ticks_usec()
 		var all_done := Progress.load_some(3.0)
-		worst = maxf(worst, (Time.get_ticks_usec() - t_step) / 1000.0)
+		worst = maxf(worst, (Time.get_ticks_usec() - t_step) / 1000.0)  # timing-spike-ok: load_some() steps can't be re-run
 		steps += 1
 		if all_done:
 			break

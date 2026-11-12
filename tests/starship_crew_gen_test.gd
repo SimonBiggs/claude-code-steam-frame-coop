@@ -63,18 +63,28 @@ func _initialize() -> void:
 					for w in MissionGen.check(MissionGen.generate(int(m.s), String(m.k), int(m.tier), lap)):
 						_fail("world %d trip %d %s: %s" % [world, trips, String(m.k), w])
 					total += 1
+	# TODAY'S MISSION over 400+ days (and the 60 from whenever this runs), the way a trip starts it: the first
+	# mission of Story.trip(..., daily_due, date), laps 0, 1 and 7 (a long mission keeps lapping), MissionGen.check.
 	var days := {}
-	for d in 40:
-		var date := Time.get_date_string_from_unix_time(1790000000 + d * 86400)
-		var dm := Story.daily_mission(date)
-		_expect(Story.mission_name(dm) == "TODAY'S MISSION!", "the daily mission is called TODAY'S MISSION!")
-		var m := MissionGen.generate(int(dm.s), String(dm.k), int(dm.tier))
-		for w in MissionGen.check(m):
-			_fail("daily %s: %s" % [date, w])
-		_expect(var_to_str(m) == var_to_str(MissionGen.generate(int(Story.daily_mission(date).s), String(dm.k), int(dm.tier))), "daily %s is the same all day" % date)
-		days[var_to_str(m.events)] = true
-		total += 1
-	_expect(days.size() >= 30, "daily missions differ (%d unique of 40)" % days.size())
+	var rd := Seeded.validate_days(func(date: String) -> Array:
+			var dm: Dictionary = Story.trip(3, 77, true, date)[0]
+			var out: Array = [dm]
+			for lap in [0, 1, 7]:
+				out.append(MissionGen.generate(int(dm.s), String(dm.k), int(dm.tier), lap))
+			return out,
+		func(day: Array) -> Array:
+			var dm: Dictionary = day[0]
+			var why: Array = []
+			if Story.mission_name(dm) != "TODAY'S MISSION!" or not bool(dm.daily):
+				why.append("the trip's first mission isn't TODAY'S MISSION!")
+			for k in range(1, day.size()):
+				for w in MissionGen.check(day[k]):
+					why.append("%s lap %d: %s" % [dm.k, [0, 1, 7][k - 1], w])
+			days[var_to_str(day[1].events)] = true
+			return why, 400, "TODAY'S MISSION", ["2026-11-11", "2026-11-12"])
+	total += int(rd.checked)
+	fails += (rd.failures as Array).size()
+	_expect(days.size() >= int(rd.checked) * 3 / 4, "daily missions differ (%d unique of %d)" % [days.size(), int(rd.checked)])
 	# Hand checks: the validator catches broken missions.
 	var m0 := MissionGen.generate(42, "rings", 3)
 	var b1 := m0.duplicate(true)

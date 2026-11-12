@@ -71,17 +71,32 @@ func _initialize() -> void:
 	print("lake gen: 50 lakes generated + checked in %.1f ms" % quick)
 	_expect(quick < 50.0, "50 lakes in under 50 ms here (%.1f ms)" % quick)
 	# TODAY'S LAKE.
+	# Over 400+ days (Seeded.validate_days, the shared daily validator), as main.gd _new_lake() makes it: the day's
+	# lake at every book level 0-3 with Ollie's daily wish for a new family (Book.pick_daily_wish), each fair with fair
+	# lures (_check_wish: check() + Tackle.check_offer), the wish never changing the lake, the same all day.
 	var days_seen := {}
-	for d in 40:
-		var date := Time.get_date_string_from_unix_time(1790000000 + d * 86400)
-		var sd := Seeded.daily_seed("fishing_lake", date)
-		var a := LakeGen.generate(sd, {"level": 3, "daily": true, "wish": LakeGen.KOI})
-		var b := LakeGen.generate(sd, {"level": 3, "daily": true, "wish": LakeGen.PIKE})
-		_expect(var_to_str(a.spots) == var_to_str(b.spots) and a.weather == b.weather, "daily %s: the wish never changes TODAY'S LAKE" % date)
-		for w in LakeGen.check(a):
-			_fail("daily %s: %s" % [date, w])
-		days_seen[var_to_str(a.spots)] = true
-	_expect(days_seen.size() >= 38, "daily lakes differ (%d of 40)" % days_seen.size())
+	var rs := Seeded.validate_days(func(date: String) -> Dictionary:
+			var sd := Seeded.daily_seed("fishing_lake", date)
+			var out := {"lakes": []}
+			for lvl in 4:
+				var l := LakeGen.generate(sd, {"level": lvl, "daily": true})
+				l.wish = Book.pick_daily_wish({}, l)
+				(out.lakes as Array).append(l)
+			out["koi"] = LakeGen.generate(sd, {"level": 3, "daily": true, "wish": LakeGen.KOI})
+			out["pike"] = LakeGen.generate(sd, {"level": 3, "daily": true, "wish": LakeGen.PIKE})
+			return out,
+		func(out: Dictionary) -> Array:
+			var why: Array = []
+			for i in (out.lakes as Array).size():
+				for w in _check_wish(out.lakes[i], -1):
+					why.append("level %d: %s" % [i, w])
+			if var_to_str(out.koi.spots) != var_to_str(out.pike.spots) or out.koi.weather != out.pike.weather:
+				why.append("the wish changes TODAY'S LAKE")
+			days_seen[var_to_str(out.koi.spots)] = true
+			return why, 400, "TODAY'S LAKE", ["2026-11-11", "2026-11-12"])
+	total += int(rs.checked)
+	fails += (rs.failures as Array).size()
+	_expect(days_seen.size() >= int(rs.checked) - 10, "daily lakes differ (%d of %d)" % [days_seen.size(), int(rs.checked)])
 	# Variety: all three weathers and all five spots turn up at level 3.
 	var wx := {}
 	var habs := {}

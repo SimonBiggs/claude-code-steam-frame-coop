@@ -70,6 +70,7 @@ var cup_keys := {}
 
 func _ready() -> void:
 	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
+	add_to_group("bot_frame_limit")  # ended before its tour is done (BOT_END, --quit-after): on_frame_limit's verdict
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keeps running if the Start check opened the pause menu
 	main = load("res://games/kart_race/main.tscn").instantiate()
 	add_child(main)
@@ -183,6 +184,20 @@ func _tour_checks(new_results: bool) -> void:
 	if not ending and t > max_t:
 		set_meta("too_slow", "only %d races in %.0f s" % [races, t])
 		_end_run(mode)
+
+
+## tests/bot_end.gd quit_quietly: the run is being ended before the tour finished (solo VR's BOT_END=62, the
+## --quit-after limit, a networked end): check what a short run must have shown; the shared tally prints BOT RESULT.
+func on_frame_limit(_note := "") -> void:
+	if ending or main == null:
+		return
+	var BotEnd := preload("res://tests/bot_end.gd")
+	var gen := 0
+	for k in tracks_seen:
+		if str(k).begins_with("gen:"):
+			gen += 1
+	BotEnd.check(gen >= 1, "a generated track was built (mode %s, t=%.0f)" % [main.net.mode, t])
+	BotEnd.check(races >= 1 or main.state in ["race", "countdown", "results"], "racing started (mode %s, races %d, state %s)" % [main.net.mode, races, main.state])
 
 
 func _end_run(mode: String) -> void:

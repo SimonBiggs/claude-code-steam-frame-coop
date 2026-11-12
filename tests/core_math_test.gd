@@ -46,8 +46,9 @@ func _initialize() -> void:
 				fails.append("%s: %s (raw looking_at/look_at: use UiKit.aim / aim_from / look)" % [path, m.get_string().strip_edges()])
 	# World-space UI order: panels below text both on the TV (labels at VR_PRIO_TEXT) and in VR, where
 	# core/vr_text_guard.gd resets every Label3D to priority 0 (panels at 20 hid their own text).
-	if UiKit.VR_PRIO_UNDER_UI >= UiKit.VR_PRIO_PANEL or preload("res://core/vr_view_check.gd").VR_PRIO_PANEL != UiKit.VR_PRIO_PANEL:
-		fails.append("VR UI priorities: VR_PRIO_UNDER_UI must be below VR_PRIO_PANEL, and core/vr_view_check.gd VR_PRIO_PANEL must equal UiKit's")
+	if UiKit.VR_PRIO_UNDER_UI >= UiKit.VR_PRIO_PANEL or preload("res://core/vr_view_check.gd").VR_PRIO_PANEL != UiKit.VR_PRIO_PANEL \
+			or preload("res://core/vr_view_check.gd").VR_PRIO_HILITE != UiKit.VR_PRIO_HILITE:
+		fails.append("VR UI priorities: VR_PRIO_UNDER_UI must be below VR_PRIO_PANEL, and core/vr_view_check.gd VR_PRIO_PANEL / VR_PRIO_HILITE must equal UiKit's")
 	if not (UiKit.VR_PRIO_PANEL < UiKit.VR_PRIO_HILITE and UiKit.VR_PRIO_HILITE < 0 and UiKit.VR_PRIO_TEXT > 0):
 		fails.append("VR UI priorities: panel %d, hilite %d must be < 0 (vr_text_guard puts labels at 0)" % [UiKit.VR_PRIO_PANEL, UiKit.VR_PRIO_HILITE])
 	for depth in [false, true]:

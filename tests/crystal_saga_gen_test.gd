@@ -132,17 +132,31 @@ func _initialize() -> void:
 			for w2 in SagaGen.check(SagaGen.generate(int(jn.seed), int(jn.tier))):
 				_fail("world %d journey %d: %s" % [world, j, w2])
 			total += 1
+	# TODAY'S QUEST over 400+ days (Seeded.validate_days, the shared daily validator), as main.gd plays it
+	# (Saga.journey(..., daily, ...) -> Saga.plan_for()): the road a new family gets that day, and the road of one
+	# grown family (by the date: BRAVE part-way round its realm, or most of it cleared; all three was +12 s), each fair
+	# (check()), the same seed for every family and the same all day.
 	var days := {}
-	for d in 40:
-		var date := Time.get_date_string_from_unix_time(1790000000 + d * 86400)
-		var dq := Saga.journey(3, 42, true, date)
-		var p3 := SagaGen.generate(int(dq.seed), int(dq.tier))
-		for w3 in SagaGen.check(p3):
-			_fail("daily %s: %s" % [date, w3])
-		_expect(int(Saga.journey(3, 999, true, date).seed) == int(dq.seed), "TODAY'S QUEST %s is the same road for every family" % date)
-		days[var_to_str(p3.props)] = true
-		total += 1
-	_expect(days.size() >= 30, "daily quests differ (%d unique of 40)" % days.size())
+	var grown := [[999, [0, 1, 2], true], [777777, [0, 1, 2, 3, 4, 5], false], [5, [0, 1, 2, 3], true], [1234, [0], false]]
+	var rs := Seeded.validate_days(func(date: String) -> Array:
+			var out: Array = []
+			for f in [[42, [], false], grown[absi(hash(date)) % grown.size()]]:
+				var jn := Saga.journey(3, int(f[0]), true, date, 0, f[1], bool(f[2]))
+				out.append([jn, Saga.plan_for(jn, int(f[0]), bool(f[2]))])
+			return out,
+		func(out: Array) -> Array:
+			var why: Array = []
+			for i in out.size():
+				var jn: Dictionary = out[i][0]
+				if not bool(jn.daily) or int(jn.seed) != int(out[0][0].seed):
+					why.append("family %d: not the day's quest seed" % i)
+				for w3 in SagaGen.check(out[i][1]):
+					why.append("family %d (tier %d): %s" % [i, int(jn.tier), w3])
+			days[var_to_str(out[0][1].props)] = true
+			return why, 400, "TODAY'S QUEST", ["2026-11-11", "2026-11-12"])
+	total += int(rs.checked)
+	fails += (rs.failures as Array).size()
+	_expect(days.size() >= int(rs.checked) * 3 / 4, "daily quests differ (%d unique of %d)" % [days.size(), int(rs.checked)])
 	# Hand checks: the validator catches broken roads.
 	var p0 := SagaGen.generate(42, 3)
 	var b1 := p0.duplicate(true)

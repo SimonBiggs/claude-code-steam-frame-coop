@@ -24,7 +24,8 @@ const TOOL_COPIES: Record<string, string> = {  // installed file -> repo copy (k
   [join(HOME, ".local/share/brepl/mcp.ts")]: "tools/brepl-mcp.ts", [join(HOME, ".local/share/brepl/multibot.ts")]: "tools/multibot.ts", [join(HOME, ".local/share/brepl/alerts.ts")]: "tools/brepl-alerts.ts",
   [join(HOME, ".local/share/brepl/peers.ts")]: "tools/brepl-peers.ts", [join(BIN, "brepl-tunnel")]: "tools/brepl-tunnel",
   [join(HOME, ".config/systemd/user/brepl-tunnel@.service")]: "tools/systemd/brepl-tunnel@.service",
-  [join(BIN, "test-throttle")]: "tools/test-throttle", [join(BIN, "duo-deploy-deck")]: "tools/duo-deploy-deck",
+  [join(BIN, "test-throttle")]: "tools/test-throttle", [join(BIN, "duo-nightly-tests")]: "tools/duo-nightly-tests",
+  [join(HOME, ".config/systemd/user/duo-nightly-tests.service")]: "tools/systemd/duo-nightly-tests.service", [join(HOME, ".config/systemd/user/duo-nightly-tests.timer")]: "tools/systemd/duo-nightly-tests.timer", [join(BIN, "duo-deploy-deck")]: "tools/duo-deploy-deck",
   [join(HOME, "GodotProjects/duo-arena-deck-build/run.sh")]: "tools/deck-run.sh", [join(HOME, "GodotProjects/duo-arena-deck-build/claude-rc.sh")]: "tools/deck/claude-rc.sh",
   [join(HOME, ".config/systemd/user/brepl.service")]: "tools/systemd/brepl.service", [join(BIN, "frame-at")]: "tools/frame-at", [join(BIN, "duo-deploy-frame")]: "tools/duo-deploy-frame",
 };
@@ -40,6 +41,12 @@ const lastPath = async (out: string) => {
 };
 
 // --- Bot tests (headless, in the staging copy, at low priority) ------------------------------------
+
+/** Bots whose runs may end without a BOT RESULT line (multibot verdict allowNoResult). Every other bot run, local, host
+ *  or joining, FAILs without one: a run without a verdict tests nothing (2026-11-11: penalty_shootout's networked runs
+ *  "passed" that way; tests/bot_end.gd now gives every bot one). Keep this short, with a reason for each. */
+export const NET_NO_RESULT_OK: Record<string, string> = {
+};
 
 export const bots = {
   /** Game ids that have a bot test. */
@@ -57,10 +64,11 @@ export const bots = {
       return { out: r.stdout.toString() + r.stderr.toString(), code: r.exitCode };
     };
     // Pass (docs/GAME_DEV_GUIDE.md "Testing"): multibot.verdict, the one shared rule.
-    const parse = ({ out, code }: { out: string; code: number }, mode: string) => ({ mode, ...verdict(out, code) });
+    const allowNoResult = NET_NO_RESULT_OK[id];
+    const parse = ({ out, code }: { out: string; code: number }, mode: string) => ({ mode, ...verdict(out, code, { allowNoResult }) });
     const runs: any[] = [parse(await one({}, "--fixed-fps 60 --quit-after 3600"), "local")];
     if (o.net) {
-      const g = await runGroup({ scene, project: proj, joiners: o.joiners ?? 1, seconds: o.seconds ?? 180, quiet: true });
+      const g = await runGroup({ scene, project: proj, joiners: o.joiners ?? 1, seconds: o.seconds ?? 180, quiet: true, allowNoResult });
       runs.push(...g.machines.map(m => ({ mode: m.machine, ...m })));
       for (const [k, a] of Object.entries(g.agree)) if (!a.ok) runs.push({ mode: `agree ${k}`, pass: false, result: a.values.join(" / "), failed: [], errors: [] });
     }
@@ -71,7 +79,9 @@ export const bots = {
     // Bots that change game files refuse plain runs ("run it with tools/multibot.ts --copies" / tools/hot-everything-test):
     // they have their own runners, so a sweep skips them instead of reporting two FAILs every time.
     const own = new Set<string>();
-    if (!o.only) for (const id of await bots.list()) if ((await Bun.file(join(STAGE, "tests", id + "_bot.gd")).text().catch(() => "")).includes("this bot changes game files")) own.add(id);
+    // (So do bots that are one half of a tools/ runner: "## Own runner: tools/<name>" in their header, e.g. lan_update
+    // and telemetry_push, which FAIL on purpose without their runner's receiver / update server, 2026-11-11.)
+    if (!o.only) for (const id of await bots.list()) if (/this bot changes game files|^## Own runner: /m.test(await Bun.file(join(STAGE, "tests", id + "_bot.gd")).text().catch(() => ""))) own.add(id);
     const ids = (o.only ?? (await bots.list())).filter(id => !own.has(id));
     const results: any[] = [];
     let next = 0;
@@ -258,9 +268,20 @@ export async function debt() {
     { kind: "anchors", files: "set_anchors_preset", bad: "add_child\\([a-z_]+\\)\\n\\s*[a-z_]+\\.set_anchors_preset\\(Control\\.PRESET_(CENTER|RIGHT|BOTTOM)", fix: "use UiKit.pin(control, preset) (core/ui_kit.gd): one helper, offsets always reset" },
     { kind: "set_meta-null", files: "_meta(", bad: "set_meta\\([^\\n]*(,\\s*null\\)|else null\\))|get_meta\\([^)\\n]*,\\s*null\\)", fix: "set_meta(k, null) DELETES the key and get_meta(k, null) has NO default (errors when missing): store false and test with get_meta(k, false) is <Type>" },
     { kind: "dir-list-unchecked", files: "get_(directories|files)_at\\(", bad: "get_(directories|files)_at\\(", unless: "dir_exists_absolute|make_dir_recursive_absolute", fix: "check DirAccess.dir_exists_absolute(path) (or make the folder) before get_directories_at / get_files_at: listing a missing folder logs \"Couldn't open directory\" (2026-10-30: user://test_saves/)" },
-    { kind: "test-timing-spike", dirs: "tests", files: "worst_ms", bad: "worst_ms = maxf\\(worst_ms, [^\\n]*(get_ticks_usec|\\bus / 1000)", unless: "TestTime.worst|^extends RefCounted\\n## Timing in generator tests", fix: "time with TestTime.worst(worst_ms, ms, func() -> Variant: return <the call>) (tests/test_time.gd): one slow call on a busy machine re-runs twice and the fastest counts (Mini Golf's 42 ms failed a landing, 2026-11-11)" },
+    { kind: "test-timing-spike", dirs: "tests", files: "get_ticks_(usec|msec)", bad: "(\\w+) = max[fi]\\(\\1, [^\\n]*(get_ticks_usec|get_ticks_msec|\\bus / 1000)(?![^\\n]*timing-spike-ok)", unless: "^extends RefCounted\\n## Timing in generator tests", fix: "time with TestTime.worst(worst_ms, ms, func() -> Variant: return <the call>) (tests/test_time.gd): one slow call on a busy machine re-runs twice and the fastest counts (Mini Golf's 42 ms failed a landing, 2026-11-11)" },
     { kind: "raw-look_at", files: "look(ing)?_at\\(", bad: "(^|\\n)[^#\\n]*(\\blooking_at\\(|[^A-Za-z0-9_]look_at\\()", unless: "static func aim\\(dir", fix: "use UiKit.aim(dir) / aim_from(from, at) / look(node, target) (core/ui_kit.gd): raw looking_at / look_at go NaN or error when the direction is vertical (tests/core_math_test.gd fails on any)" },
   ];
+  // Slow landing tests (SLOW_TEST_S) not changed since they were slow, and the nightly full sweep's failures / absence.
+  const slow = JSON.parse(await readFile(SLOW_FILE, "utf8").catch(() => "{}"));
+  for (const [t, v] of Object.entries(slow) as [string, any][]) {
+    const m = await stat(join(LIVE, `tests/${t}.gd`)).then(x => x.mtime.toISOString().slice(0, 16), () => "");
+    if (m && m <= v.at) issues.push({ kind: "slow-landing-test", what: `${t} took ${v.secs} s in a landing (${v.branch}, ${v.at})`, fix: `give it a quick mode: Seeded.test_count(n) / Seeded.sampled(i) (core/seeded.gd, GEN_QUICK=1 in landings); the nightly full sweep keeps every seed. Then delete its entry in ~/.cache/duo-arena/slow-tests.json` });
+  }
+  const nl = JSON.parse(await readFile(NIGHTLY, "utf8").catch(() => "null"));
+  if (!nl || Date.now() - Date.parse(nl.date) > 36 * 3600e3)
+    issues.push({ kind: "nightly-missing", what: nl ? `the last full test sweep was ${nl.date}` : "no full test sweep has run yet", fix: "systemctl --user status duo-nightly-tests.timer; run one: bg('x', () => dev.nightly())" });
+  else for (const [t, r] of Object.entries(nl.tests) as [string, any][])
+    if (!r.pass) issues.push({ kind: "nightly-fail", what: `${t} failed the full sweep (${nl.date} @${nl.commit}): ${String(r.tail).split("\n").pop()}`, fix: `GEN_QUICK only samples: fix the seed/date in ~/.cache/duo-arena/nightly/logs/${t}.log, then dev.nightly(["${t}"])` });
   // Voice echo (2026-11-11): every TTS player must log to ~/.claude/said.log, or the room/Deck mics feed Claude's own words back.
   for (const f of (await sh(`grep -lIE "say\\.py|piper |\\bespeak\\b" ~/.local/bin/* 2>/dev/null | grep -v '\\.bak' | xargs -r grep -L said.log`, LIVE)).out.split("\n").filter(Boolean))
     issues.push({ kind: "tts-no-said-log", what: f, fix: "append 'ts<TAB>text' to ~/.claude/said.log at start and end of playback (saidecho.py drops echoes)" });
@@ -489,6 +510,13 @@ export async function installTools(since: string) {
       try { await (globalThis as any).writeModule(dest, await readFile(src, "utf8")); } catch (e) { done.push(`${rel}: NOT installed (${String(e).slice(0, 200)})`); continue; }
     } else await sh(`cp --preserve=mode ${JSON.stringify(src)} ${JSON.stringify(dest)}`);
     done.push(`${rel} -> ${dest.replace(HOME, "~")}`);
+    // A new or changed systemd unit does nothing until systemd reloads it, and a new timer until it is enabled
+    // (2026-11-12: duo-nightly-tests.timer had to be enabled by hand after its landing).
+    if (dest.includes("/.config/systemd/user/")) {
+      const unit = dest.split("/").pop()!;
+      const r = await sh(`systemctl --user daemon-reload${unit.endsWith(".timer") ? ` && systemctl --user enable --now ${unit} 2>&1 | tail -1; systemctl --user is-active ${unit}` : ""}`);
+      done.push(`systemd reloaded${unit.endsWith(".timer") ? `, ${unit}: ${r.out.split("\n").pop()}` : ""}`);
+    }
     // A running user service still executes the OLD copy (2026-11-11: duo-telemetry-recv): restart every active
     // service whose unit runs this file.
     if (dest.startsWith(BIN)) {
@@ -583,6 +611,25 @@ export async function lone(ids?: string[], project = STAGE) {
   return { fail: out.filter(r => !r.pass).map(r => `${r.id}: ${r.summary}`), table: out.map(r => `${r.id.padEnd(18)} ${r.summary.split("\n")[0]}`).join("\n") };
 }
 
+/** Landing tests must stay quick (2026-11-12: kart_trackgen_test ~220 s and dungeon_delve_floors_test ~130 s made every
+ *  landing that ran them long). dev.land records any test over SLOW_TEST_S in ~/.cache/duo-arena/slow-tests.json and
+ *  dev.debt reports it until the test file changes: give it a quick mode (Seeded.test_count / Seeded.sampled, GEN_QUICK=1);
+ *  the nightly full sweep (dev.nightly, duo-nightly-tests.timer) keeps the full coverage. */
+export const SLOW_TEST_S = 60;
+const SLOW_FILE = join(HOME, ".cache/duo-arena/slow-tests.json");
+const NIGHTLY = join(HOME, ".cache/duo-arena/nightly/latest.json");
+async function noteSlowTest(test: string, secs: number, branch: string) {
+  const all = JSON.parse(await readFile(SLOW_FILE, "utf8").catch(() => "{}"));
+  all[test] = { secs, branch, at: new Date().toISOString().slice(0, 16) };
+  await writeFile(SLOW_FILE, JSON.stringify(all, null, 1));
+}
+
+/** The full test sweep now (what duo-nightly-tests.timer runs at 03:30): every tests/*_test.gd (or `tests`) on a
+ *  snapshot of live main, every seed and date. Long (~15-30 min): run it in bg(). Returns the summary line. */
+export async function nightly(tests: string[] = []) {
+  return (await sh(`duo-nightly-tests ${tests.join(" ")} 2>&1 | tail -1`)).out;
+}
+
 export async function land(branch: string, genTests: string[], botId: string, otherBots: string[], msg: string) {
   // A landing that stopped leaves its merge in wt-merge (and its files in staging) for a retry. Landing a DIFFERENT
   // branch next must not carry it along (2026-10-31: a tools-only landing nearly deployed saga-deep, whose tests had
@@ -633,18 +680,27 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     // A test with a scene (extends Node, e.g. engine_ui_test) runs as that scene; a SceneTree script runs with -s.
     const scene = await stat(join(STAGE, `tests/${t}.tscn`)).then(() => true, () => false);
     const how = scene ? `--fixed-fps 60 res://tests/${t}.tscn`  /* ends itself (exit code = failures); timeout 600 caps it */ : `-s res://tests/${t}.gd`;
-    out[t] = (await sh(`DUO_PORT=${rport()} timeout 600 godot-test --headless --path . ${how} 2>&1 | grep -v OpenXR | grep -E "PASS|FAIL|SCRIPT ERROR" | tail -3; echo exit=\${PIPESTATUS[0]}`, STAGE)).out;
+    // GEN_QUICK=1: generator tests check today's sample of seeds/dates (core/seeded.gd Seeded.quick()); the nightly
+    // full sweep (tools/duo-nightly-tests) checks them all. A landing test over SLOW_TEST_S is flagged (dev.debt).
+    const t0 = Date.now();
+    out[t] = (await sh(`GEN_QUICK=1 DUO_PORT=${rport()} timeout 600 godot-test --headless --path . ${how} 2>&1 | grep -v OpenXR | grep -E "PASS|FAIL|SCRIPT ERROR" | tail -3; echo exit=\${PIPESTATUS[0]}`, STAGE)).out;
+    const secs = Math.round((Date.now() - t0) / 1000);
+    out[t] += ` (${secs} s)`;
+    if (secs > SLOW_TEST_S) { out[t] += ` SLOW: over ${SLOW_TEST_S} s in a landing`; await noteSlowTest(t, secs, branch); }
     // Every test prints an explicit verdict, -s scripts too (paper_planes_sky_test exited 0 with only a count line,
     // 2026-11-11; tests/bot_end_test.gd fails a tests/*_test.gd with no PASS line in its code).
     if (!/PASS/.test(out[t])) out[t] += " (no PASS line)";
     ok &&= /exit=0/.test(out[t]) && !/FAIL|SCRIPT ERROR|no PASS line/.test(out[t]);
   }
-  const deckOut = (await sh(`DECK_BOT_ONLY=${botId} DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 6000 res://tests/deck_bot.tscn 2>&1`, STAGE)).out;
-  out.deck = deckOut.split("\n").filter(l => /BOT RESULT|SCRIPT ERROR/.test(l)).slice(-3).join("\n") + engineErrors(deckOut).slice(0, 3).map(e => `\nSCRIPT ERROR (engine): ${e}`).join("");
-  // (0 checks = DECK_BOT_ONLY matched no game: fine for a non-game botId like arcade_lobby, a FAIL for a game.)
+  // The Deck bot checks games only: for a non-game botId (arcade_lobby: a tools / core landing) DECK_BOT_ONLY matches
+  // nothing, and since BotEnd counts checks (0 checks = FAIL, 2026-11-12) that failed every tools-only landing.
   const isGame = await stat(join(STAGE, "games", botId)).then(() => true, () => false);
-  if (isGame && /\(0 checks\)/.test(out.deck)) out.deck += " (no Deck checks ran for this game)";
-  ok &&= /BOT RESULT: PASS/.test(out.deck) && !/SCRIPT ERROR|no Deck checks/.test(out.deck);
+  if (isGame) {
+    const deckOut = (await sh(`DECK_BOT_ONLY=${botId} DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 6000 res://tests/deck_bot.tscn 2>&1`, STAGE)).out;
+    out.deck = deckOut.split("\n").filter(l => /BOT RESULT|SCRIPT ERROR/.test(l)).slice(-3).join("\n") + engineErrors(deckOut).slice(0, 3).map(e => `\nSCRIPT ERROR (engine): ${e}`).join("");
+    if (/\(0 checks/.test(out.deck)) out.deck += " (no Deck checks ran for this game)";
+    ok &&= /BOT RESULT: PASS/.test(out.deck) && !/SCRIPT ERROR|no Deck checks/.test(out.deck);
+  } else out.deck = `not run: ${botId} is not a game (the Deck bot checks games)`;
   // Solo VR: the Frame hosting with no TV machine is a real way the family plays, and new bot checks kept assuming TV
   // players there (2026-11-11: 8 games, then treasure-deep2's "map pieces were dug up"). Run the game's bot that way.
   if (isGame && await stat(join(STAGE, `tests/${botId}_bot.tscn`)).then(() => true, () => false)) {
@@ -706,6 +762,7 @@ export function help() {
   dev.playRuns({since?, game?})      those RUN lines as objects ({device, recv, ...run})
   dev.lone(ids?) / dev.loneRun(id, project?)  lone flat player check (one Deck player, no VR, nobody else): rounds advance, never frozen (dev.land runs it)
   dev.guard(game)                    a game's long guard bots (LAND_GUARDS; dev.land runs them when a branch touches the game)
+  dev.nightly(tests?)                full sweep of every test (every seed/date; landings run GEN_QUICK samples); nightly at 03:30
   dev.debt()                         tech-debt scan: {clean, issues:[{kind, what, fix}]} (fix them straight away)
   dev.bots.list() / .run(id, {net, joiners}) / .all({only, net, concurrency})   headless bot tests in staging (net: host + joiners, tools/multibot.ts)
   dev.stage.diff() / .pull() / .deploy(msg)                            staging <-> live game

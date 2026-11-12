@@ -25,6 +25,7 @@ const PickOrbs := preload("res://core/pick_orbs.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Stage := preload("res://games/rhythm_band/stage.gd")
+const TestTime := preload("res://tests/test_time.gd")
 
 var fails := 0
 
@@ -56,7 +57,7 @@ func _initialize() -> void:
 						var t1 := Time.get_ticks_usec()
 						var list := Deep.changes(code, pos, spec)
 						var why := Deep.problems(code, pos, list, spec)
-						worst_ms = maxf(worst_ms, (Time.get_ticks_usec() - t1) / 1000.0)
+						worst_ms = TestTime.worst(worst_ms, (Time.get_ticks_usec() - t1) / 1000.0, func() -> Variant: return Deep.problems(code, pos, Deep.changes(code, pos, spec), spec))
 						checked += 1
 						var tag := "%s %s show %d song %d gift '%s' band %d" % [mode, season, session, pos + 1, g, band.size()]
 						for x in why:
