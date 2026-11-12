@@ -1013,6 +1013,7 @@ static func _vr_keep_sig(n: Node, cam: Node3D) -> int:
 ## one of them, staying within ~32 degrees of eye level. Keeps the last answer while it still works (no hopping as the
 ## orbs bob); 0 when nothing must be kept clear. The VR followers glide a panel to its new spot (vr_follow, VrText).
 const VR_DODGE_WORDS := 5  # steps a card moves at most to clear world words (VrViewCheck.world_words)
+const VR_DODGE_PICK := 20  # steps a card moves at most to clear a pick (the 32 degrees stop it first)
 const VR_DODGE_STEP := 0.08  # (x VrText.COMFORT m at the usual 1.6 x COMFORT m: ~3 degrees a step)
 static func vr_dodge(cam: Node3D, target: Vector3, n: Node3D, k: float = 1.0) -> float:
 	var things: Array[Node3D] = VrViewCheck.keep_clear(n, cam as Camera3D) if cam is Camera3D else ([] as Array[Node3D])
@@ -1028,9 +1029,9 @@ static func vr_dodge(cam: Node3D, target: Vector3, n: Node3D, k: float = 1.0) ->
 		return 0.0
 	var head := cam.global_position
 	var boxes: Array[AABB] = []
-	for t in things:
+	for t in things:  # part by part, like the check (VrViewCheck.thing_boxes)
 		if t != n and not n.is_ancestor_of(t):
-			boxes.append(VrViewCheck.thing_box(t, (cam as Camera3D).cull_mask))
+			boxes.append_array(VrViewCheck.thing_boxes(t, (cam as Camera3D).cull_mask))
 	# other VR panels count too (less than a pick): two cards dodging the same row mustn't end up in one spot
 	var word_boxes: Array[AABB] = []
 	for w in words:
@@ -1045,7 +1046,9 @@ static func vr_dodge(cam: Node3D, target: Vector3, n: Node3D, k: float = 1.0) ->
 	var flat := Vector2(target.x - head.x, target.z - head.z).length()
 	var tries: Array[float] = [float(n.get_meta("vr_dodge", 0.0)), 0.0]
 	# only words to clear (no pick): a card never travels far for them (a huge garden sign sent one under the lawn)
-	for i in range(1, (VR_DODGE_WORDS if boxes.is_empty() else 12) + 1):
+	# (for a pick: as far as the 32-degree limit allows; 12 steps stopped short of the clear spot over a high row,
+	# Dodge Ball 2026-11-12)
+	for i in range(1, (VR_DODGE_WORDS if boxes.is_empty() else VR_DODGE_PICK) + 1):
 		tries.append(i * step)
 		tries.append(-i * step)
 	var best := 0.0
@@ -1077,10 +1080,7 @@ static func vr_dodge(cam: Node3D, target: Vector3, n: Node3D, k: float = 1.0) ->
 
 
 static func _vr_covers_pick(head: Vector3, p: Vector3, size: Vector2, boxes: Array[AABB]) -> bool:
-	for b in boxes:
-		if VrViewCheck.cover_deg2(head, p, size, b) > 0.0:
-			return true
-	return false
+	return VrViewCheck.covers_any(head, p, size, boxes)
 
 
 ## Would `n` moved to `p` be hidden from the eyes, as core/vr_view_check.gd sees it (blocker(): its panel's centre,

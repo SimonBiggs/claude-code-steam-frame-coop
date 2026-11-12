@@ -154,15 +154,17 @@ static func problems(root: Node) -> Array[String]:
 	var keep := keep_clear(root, cam)
 	if not keep.is_empty():
 		var boxes: Array[AABB] = []
+		var parts: Array = []
 		for k in keep:
 			boxes.append(thing_box(k, cam.cull_mask))
+			parts.append(thing_boxes(k, cam.cull_mask))
 		for c in shown:
 			var size := panel_extent(c)
 			var p := _centre(c)
 			for i in keep.size():
-				if keep[i] != c and not c.is_ancestor_of(keep[i]) and cover_deg2(head, p, size, boxes[i]) > 0.0:
+				if keep[i] != c and not c.is_ancestor_of(keep[i]) and covers_any(head, p, size, parts[i]):
 					out.append("%s: drawn over the pick %s (UiKit.vr_dodge keeps VR UI clear of VrViewCheck.KEEP_CLEAR)%s" % [_name(c), _name(keep[i]),
-						(" [pick box %s card at %s size %s dodge %s moving %s]" % [boxes[i], p, size, c.get_meta("vr_dodge", "-"), c.get_meta("vr_moving", "-")] + _debug(c, cam)) if OS.has_environment("VR_VIEW_DEBUG") else ""])
+						(" [pick parts %s card at %s size %s dodge %s moving %s]" % [parts[i], p, size, c.get_meta("vr_dodge", "-"), c.get_meta("vr_moving", "-")] + _debug(c, cam)) if OS.has_environment("VR_VIEW_DEBUG") else ""])
 		# A pick orb (or the name under it) behind scenery: the player can't read what they're choosing (Rhythm Band
 		# 2026-11-12: HARD's label half behind the green cymbal).
 		for k in keep:
@@ -735,8 +737,20 @@ static func keep_clear(n: Node, cam: Camera3D) -> Array[Node3D]:
 ## The world box of what `n` draws for a camera with `mask` (meshes, sprites and its words; not lights or sparkles).
 ## Label3D boxes aren't built in headless runs, so words are measured from their text.
 static func thing_box(n: Node3D, mask: int = 0xFFFFF) -> AABB:
-	var box := AABB()
-	var have := false
+	var parts := thing_boxes(n, mask)
+	if parts.is_empty():
+		return AABB(n.global_position, Vector3.ZERO)
+	var box := parts[0]
+	for b in parts:
+		box = box.merge(b)
+	return box
+
+
+## thing_box part by part (the orb, its picture, its name): one box around all of them has corners nothing is drawn
+## at (a wide name's depth at the orb's top), which "covered" a pick a card was clear of and left no spot to dodge to
+## (Dodge Ball 2026-11-12: TUMTUM's card over the CURVE BALL orb for 2 s). Picks are checked against these.
+static func thing_boxes(n: Node3D, mask: int = 0xFFFFF) -> Array[AABB]:
+	var out: Array[AABB] = []
 	for c in [n] + n.find_children("*", "GeometryInstance3D", true, false):
 		if not c is GeometryInstance3D or c is GPUParticles3D or c is CPUParticles3D:
 			continue
@@ -751,11 +765,9 @@ static func thing_box(n: Node3D, mask: int = 0xFFFFF) -> AABB:
 			b = AABB(g.global_position - Vector3(sz.x, sz.y, sz.x) * 0.5, Vector3(sz.x, sz.y, sz.x))
 		else:
 			b = g.global_transform * g.get_aabb()
-		if b.size.length() < 0.001:
-			continue
-		box = b if not have else box.merge(b)
-		have = true
-	return box if have else AABB(n.global_position, Vector3.ZERO)
+		if b.size.length() >= 0.001:
+			out.append(b)
+	return out
 
 
 ## A Label3D's width and height in metres, worked out from its text (its own box only exists with a renderer).
@@ -814,6 +826,14 @@ static func cover_deg2(head: Vector3, centre: Vector3, size: Vector2, box: AABB,
 	var ox := minf(hi.x, hx) - maxf(lo.x, -hx)
 	var oy := minf(hi.y, hy) - maxf(lo.y, -hy)
 	return ox * oy if ox > 0.0 and oy > 0.0 else 0.0
+
+
+## Does a panel `size` big at `centre` cover any of `boxes` (thing_boxes) seen from `head`?
+static func covers_any(head: Vector3, centre: Vector3, size: Vector2, boxes: Array) -> bool:
+	for b in boxes:
+		if cover_deg2(head, centre, size, b) > 0.0:
+			return true
+	return false
 
 
 ## A panel's drawn width and height (metres, as it is scaled now), from its own and its children's boxes.
