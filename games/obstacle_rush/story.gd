@@ -45,7 +45,10 @@ const LINES := {
 
 
 static func save_defaults() -> Dictionary:
-	return {"crowns": 0, "shows": 0, "fans": 0, "stars": 0, "courses": 0, "world": -1, "daily": {}}
+	# (second pass, deep.gd: mode, last_gift, gifts picked, surprises told, medals = the hall's medals by mode, oldest
+	# first, medal_total = every medal ever)
+	return {"crowns": 0, "shows": 0, "fans": 0, "stars": 0, "courses": 0, "world": -1, "daily": {},
+		"mode": "", "last_gift": "", "gifts": 0, "surprises": 0, "medals": [], "medal_total": 0}
 
 
 ## How hard this show's courses are (0 = the first show after the lessons).

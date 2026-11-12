@@ -380,12 +380,12 @@ func hazard_hit(p: Vector3) -> Vector3:
 	return (tangent.normalized() + rel.normalized() * 0.3).normalized()
 
 
-## Index of a star a runner at p grabs (not taken yet), or -1.
-func star_hit(p: Vector3) -> int:
+## Index of a star a runner at p grabs (not taken yet), or -1. r: how near (the STAR MAGNET reaches further).
+func star_hit(p: Vector3, r: float = CourseGen.STAR_R) -> int:
 	for k in stars.size():
 		if star_bits & (1 << k):
 			continue
-		if (p + Vector3(0.0, 0.6, 0.0)).distance_to(stars[k]) < CourseGen.STAR_R:
+		if (p + Vector3(0.0, 0.6, 0.0)).distance_to(stars[k]) < r:
 			return k
 	return -1
 

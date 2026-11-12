@@ -13,7 +13,7 @@ extends RefCounted
 ## safe and comes right after its obstacle (a ball bonk or a fall never costs more than one obstacle), a
 ## real door in every wall, every star is reachable, and a simulated jelly bean (runner.gd's physics,
 ## cpu_brain.gd's route rules) runs every course from the start to the flag at CPU speed and at full speed,
-## jumping early and late, without ever falling off.
+## jumping early and late, without ever falling off. (deep.gd's gifts change the bean's physics: phys.)
 
 const Seeded := preload("res://core/seeded.gd")
 const Runner := preload("res://games/obstacle_rush/runner.gd")
@@ -383,8 +383,16 @@ static func solid_top(c: Dictionary, x: float) -> float:
 
 ## Run a bean along the course in x/y with runner.gd's physics and cpu_brain.gd's route rules.
 ## speed: 1.0 = a person at full stick, Runner.CPU_SPEED = a CPU runner. early: jump as soon as the brain
-## would (0.9 before the jump point), else at the last moment. Returns {ok, t, why, path (mid-body points)}.
-static func simulate(c: Dictionary, speed: float, early: bool) -> Dictionary:
+## would (0.9 before the jump point), else at the last moment. phys: a gift's physics (deep.gd
+## phys(): jump, fall, max_fall, speed, air; {} = none). Returns {ok, t, why, path (mid-body points)}.
+static func simulate(c: Dictionary, speed: float, early: bool, phys: Dictionary = {}) -> Dictionary:
+	var jump_v := Runner.JUMP_V * float(phys.get("jump", 1.0))
+	var fall_k := float(phys.get("fall", 1.0))
+	var max_fall := float(phys.get("max_fall", 30.0))
+	var air_max := Runner.RUN_SPEED * speed * float(phys.get("air", 99.0))  # (a gift never carries a jump further)
+	speed *= float(phys.get("speed", 1.0))
+	var jumped := false  # (a GLIDE CAPE only opens on the bean's own jumps)
+	var lenient := not phys.is_empty()  # (a gift run: a jump pressed on landing at the jump point counts, like a person's)
 	var dt := 1.0 / 60.0
 	var x: float = float(c.start_x)
 	var y: float = support_y(c, x)
@@ -413,6 +421,8 @@ static func simulate(c: Dictionary, speed: float, early: bool) -> Dictionary:
 		var jump := false
 		if what == "jump" and absf(goal.x - x) < (0.9 if early else 0.15):
 			jump = true
+		elif lenient and what == "jump" and on_floor and goal.x - x < 0.15 and goal.x - x > -0.55:
+			jump = true
 		if x > best_x + 0.3:
 			best_x = x
 			stuck = 0.0
@@ -423,9 +433,12 @@ static func simulate(c: Dictionary, speed: float, early: bool) -> Dictionary:
 				stuck = 0.0
 				best_x = x
 		vx = move_toward(vx, want, (Runner.ACCEL if on_floor else Runner.AIR_ACCEL) * dt)
-		vy -= Runner.GRAVITY * dt
+		if not on_floor:
+			vx = clampf(vx, -air_max, air_max)
+		vy -= Runner.GRAVITY * dt * (fall_k if vy < 0.0 and jumped else 1.0)
 		if jump and air_t < Runner.COYOTE:
-			vy = Runner.JUMP_V
+			vy = jump_v
+			jumped = true
 			air_t = Runner.COYOTE
 		if on_floor:
 			for p in c.pads:
@@ -433,7 +446,8 @@ static func simulate(c: Dictionary, speed: float, early: bool) -> Dictionary:
 				if absf(y - (pp.y + 0.35)) < 0.5 and absf(x - pp.x) < PAD_R:
 					vx = PAD_V.x
 					vy = PAD_V.y
-		vy = maxf(vy, -30.0)
+					jumped = false
+		vy = maxf(vy, -max_fall)
 		var nx := x + vx * dt
 		var ny := y + vy * dt
 		# Walls: a raised floor (and its candy block) in front of the feet.
@@ -451,6 +465,8 @@ static func simulate(c: Dictionary, speed: float, early: bool) -> Dictionary:
 		else:
 			on_floor = false
 		air_t = 0.0 if on_floor else air_t + dt
+		if on_floor and vy <= 0.0:
+			jumped = false
 		x = nx
 		y = ny
 		if step % 3 == 0:

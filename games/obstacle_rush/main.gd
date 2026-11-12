@@ -23,6 +23,12 @@ extends Node3D
 ##   a glowing target on the course and a see-through ghost glove that shows the throw (ghost_hand.gd).
 ## - Text: the TV shows one short line at most (A Jump!, the course name); VR gets one short headline.
 ## - CPU runners fill up to three runners (solo VR: the giant plays with three CPU runners).
+## - SECOND PASS (deep.gd): GENTLE / BRAVE / HARD picked on pick orbs before the first seeded course of a session,
+##   COACH JELLY'S GIFTS (spring shoes, glide cape, star magnet, bubble, zoom shoes) before every later course of a
+##   show (both picks.gd: runners stand under a big orb over the start; the VR giant alone reaches into a small one),
+##   warned surprises (a SWINGING LOG, RISING WATER: hazards.gd, steady warn bands, never on a show's first course),
+##   seasonal courses (season.gd) and COACH JELLY'S MEDAL HALL that grows with every show (hall.gd). State: "deep"
+##   [mode, gift, season], "hz" (the surprise told now), "shields", "medals"; events "orbs", "take", "hz_hit".
 ## Modes as in games/engine_template: local (split screen without a headset), host (VR on the Steam
 ## Frame, simulates everything), client (the TV machine: its runners move locally and instantly, the
 ## rest is mirrored from snapshots).
@@ -53,6 +59,13 @@ const Stands := preload("res://games/obstacle_rush/stands.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const Deep := preload("res://games/obstacle_rush/deep.gd")
+const PicksScript := preload("res://games/obstacle_rush/picks.gd")
+const HazardsScript := preload("res://games/obstacle_rush/hazards.gd")
+const GiftsScript := preload("res://games/obstacle_rush/gifts.gd")
+const SeasonScript := preload("res://games/obstacle_rush/season.gd")
+const HallScript := preload("res://games/obstacle_rush/hall.gd")
 
 ## A runner owned here bumped pretend door k (bots learn from it like the CPU brains do).
 signal fake_door_hit(rid: int, k: int)
@@ -63,6 +76,7 @@ const HOP_IN_TIME := 70.0  ## after this, runners still on the course hop to the
 const AFTER_FIRST := 35.0  ## ... or this long after the first person got there
 const FLAG_DOWN := 3.6  ## the board's flags (above the grandstand) ...
 const FLAG_UP := 7.0  ## ... and raised for a course done
+const VR_CARD_UP := 0.3  ## VR story cards float this far (m) above eye level, over the course's high floors
 const TABLE_W := 42.0  ## the picnic table (coursegen.gd keeps courses within x -19..19)
 
 # --- The networking contract ---
@@ -113,6 +127,24 @@ var asked_stars := {}  ## client: stars already asked for this course
 var run := {}  ## host: this course's numbers (telemetry)
 var vr_story: Node3D
 var story_rng := RandomNumberGenerator.new()
+
+# Second pass (deep.gd)
+var picks: Node  # picks.gd
+var hazards: Node3D  # hazards.gd
+var gifts_node: Node3D  # gifts.gd
+var season_node: Node3D  # season.gd
+var hall: Node3D  # hall.gd
+var mode := "brave"  # every machine (the "deep" state)
+var gift := ""  # every machine: this course's gift ("" none)
+var season := ""
+var mode_picked := false  # host: the mode was picked this session
+var gift_for := ""  # host: "show/course" the picked gift is for
+var pending_course := 0  # host: the course waiting for a pick
+var shields := {}  # host: runner id -> true while their BUBBLE is up
+var bot_tricks := false  # host (bots, What's New: OR_TRICKS_NOW): surprises on a show's first course too
+var hazard_hits := 0  # host: runners caught by surprises this course (telemetry)
+var shield_pops := 0  # host: bubbles popped this course (telemetry)
+var session_seed := 0  # host: this session's gift offers
 
 
 func _ready() -> void:
@@ -187,6 +219,7 @@ func _setup(mode: String) -> void:
 		elif vr_rig != null:
 			split.set_bubble(vr_rig.mirror)
 	party.allow_slot0 = mode != "client" and vr_rig == null
+	_setup_deep()
 	if mode != "client":
 		if force_shows < 0 and OS.has_environment("OR_SHOWS"):  # (tests, screenshots: OR_SHOWS=3 starts on seeded courses)
 			force_shows = int(OS.get_environment("OR_SHOWS"))
@@ -195,11 +228,15 @@ func _setup(mode: String) -> void:
 		net.state_set("fans", int(save.data.fans))
 		stands.apply(int(save.data.fans))
 		print("Coach Jelly's show: %d shows done, %d fans, world %d" % [int(save.data.shows), int(save.data.fans), int(save.data.world)])
+		_begin_deep()
 		_start_show()
 	else:
 		stands.apply(int(net.state_get("fans", 0)))
 		if net.state_has("cdesc"):
 			_build_course(net.state_get("cdesc", {}))
+		for k in ["deep", "hz", "shields", "medals"]:  # the host's state may have arrived before this machine was set up
+			if net.state_has(k):
+				_on_deep_state(k, net.state_get(k, null))
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	ready_to_play = true
 	print("Obstacle Rush: %s mode%s" % [mode, " with a VR giant" if vr_rig != null else ""])
@@ -311,15 +348,23 @@ func _start_show() -> void:
 func _go_course(i: int) -> void:
 	course_t = 0.0
 	first_t = -1.0
-	var d := Story.describe(Story.recipe(show_no, int(save.data.world), i, daily_show))
+	pending_course = i
+	var stage := _pick_due(i)
+	if gift_for != _gift_key(i):
+		gift = ""  # (a gift is for one course)
+	var d := Story.describe(Deep.moded(Story.recipe(show_no, int(save.data.world), i, daily_show), mode))
 	net.state_set("done", {})
 	net.state_set("stars", 0)
-	net.state_set("phase", "play")
+	net.state_set("phase", "pick" if stage != "" else "play")
 	net.state_set("course", i)
 	net.state_set("cdesc", d)
 	_build_course(d)
 	run = {"show": show_no, "course_i": i, "tumbles": 0, "falls": 0, "fakes": 0, "grabs": 0, "bonks": 0}
-	sound_at("whistle", Vector3(course.start_x, 2.0, -course.half_w), -6.0)
+	_deep_course(i)
+	if stage != "":
+		_start_pick(stage)
+	else:
+		sound_at("whistle", Vector3(course.start_x, 2.0, -course.half_w), -6.0)
 
 
 ## Every machine: build the course the host described (compact: coursegen.gd make()).
@@ -493,14 +538,17 @@ func _physics_process(delta: float) -> void:
 			continue
 		var br: CpuBrain = brains[rid]
 		br.think(r, course, delta)
-		r.inp_move = br.out_move if phase == "play" else Vector3.ZERO
+		r.inp_move = br.out_move if phase == "play" and not hazards.wait_for(r.position) else Vector3.ZERO  # (wait for a told surprise)
 		if br.out_jump:
 			r.inp_jump = true
 	_step_owned(delta)
 	course.step(delta, runners.values())
 	giant.step(delta)
+	if phase == "pick":
+		picks.tick(delta)
 	if phase == "play":
 		course_t += delta
+		hazards.host_tick(delta)
 		_finish_rules()
 	elif phase == "cheer":
 		phase_t += delta
@@ -518,7 +566,9 @@ func _physics_process(delta: float) -> void:
 
 ## Every machine: TV pads drive their own runners; owned runners move here.
 func _step_owned(delta: float) -> void:
-	var playing := String(net.state_get("phase", "play")) == "play"
+	var phase := String(net.state_get("phase", "play"))
+	var picking := phase == "pick"
+	var playing := phase == "play" or picking  # (in a pick: walk under an orb)
 	for slot in party.local_slots():
 		if not runners.has(slot):
 			continue
@@ -539,7 +589,12 @@ func _step_owned(delta: float) -> void:
 		var r: Runner = runners[rid]
 		if not r.owned:
 			continue
+		r.phys = Deep.phys(gift)
+		r.wade = hazards.wade_at(r.position)
 		r.step(delta)
+		if picking and r.position.x > course.start_x + Deep.FENCE:  # nobody runs on into the course while the orbs are up
+			r.position.x = course.start_x + Deep.FENCE
+			r.velocity.x = minf(r.velocity.x, 0.0)
 		for e in r.events:
 			_runner_event(r, e)
 		r.events.clear()
@@ -575,6 +630,12 @@ func _runner_event(r: Runner, e: Array) -> void:
 			_tell_host(r.rid, "stat", ["tumbles"])
 		"boop":
 			_local_sound("pop", p, -6.0, 1.6)
+		"pop":  # a BUBBLE took the bonk
+			_local_sound("pop", p, -2.0, 1.2)
+			if net.mode == "client":
+				net.request(r.rid, "pop", [])
+			else:
+				_pop_shield(r.rid)
 		"fake":
 			_local_sound("boing", p, 0.0, 0.7)
 			_tell_host(r.rid, "stat", ["fakes"])
@@ -614,7 +675,7 @@ func _stat(rid: int, what: String) -> void:
 func _grab_star(r: Runner) -> void:
 	if r.done or String(net.state_get("phase", "play")) != "play":
 		return
-	var k := course.star_hit(r.position)
+	var k := course.star_hit(r.position, Deep.star_r(gift))
 	if k < 0:
 		return
 	if net.mode == "client":
@@ -764,7 +825,9 @@ func _telemetry(end: String) -> void:
 		"name": course.course_name(), "seed": int(d.get("s", 0)), "tier": int(d.get("tier", -1)), "attempt": int(d.get("a", -1)),
 		"pieces": course.desc.get("pieces", []), "played_s": snappedf(course_t, 0.1), "stars": course.stars.size(),
 		"stars_got": course.stars.size() - course.stars_left(), "fans": int(save.data.fans), "shows": int(save.data.shows),
-		"throws": giant.throws if giant != null else 0}, true)
+		"throws": giant.throws if giant != null else 0, "pmode": mode, "gift": gift, "season": season,
+		"surprises": hazards.count if hazards != null else 0, "surprise_hits": hazard_hits, "shield_pops": shield_pops,
+		"medals": int(save.data.get("medal_total", 0)), "picks": picks.history.size() if picks != null else 0}, true)
 	Telemetry.run(GAME_ID, info)
 
 
@@ -875,6 +938,7 @@ func _end_show() -> void:
 	save.mark_dirty()
 	_add_fans(Story.FAN_SHOW)
 	_story(_coach(Story.pick(story_rng, "show_end"), "crown"))
+	_add_medal()
 	var data := awards.results({"title": "WHAT A SHOW!", "style": "victory", "score_stat": "stars",
 		"score_format": "%d STARS", "continue": "Again!"})
 	net.state_set("results", data)
@@ -931,6 +995,8 @@ func on_request(slot: int, action: String, args: Array) -> void:
 		"star":
 			if args.size() >= 1 and String(net.state_get("phase", "")) == "play":
 				_take_star(int(args[0]), slot)
+		"pop":
+			_pop_shield(slot)
 
 
 ## Host: a TV player's runner moved on the TV machine.
@@ -950,6 +1016,8 @@ func _process(delta: float) -> void:
 		course.animate(delta, runners.values())
 	_update_board(delta)
 	_headline(delta)
+	if gifts_node != null:
+		gifts_node.follow(runners, Time.get_ticks_msec() * 0.001)
 	if ghost != null:
 		_ghost(delta)
 	if again_btn != null and again_btn.visible:
@@ -1067,7 +1135,9 @@ func show_story(beat: Dictionary) -> void:
 	if vr_rig != null:
 		if vr_story != null and is_instance_valid(vr_story):
 			vr_story.queue_free()
-		vr_story = StoryCard.show_vr(self, vr_rig.camera, beat)
+		var vb := beat.duplicate()
+		vb["vr_height"] = VR_CARD_UP  # above the toy course: a step or a high floor right in front would hide it at eye level
+		vr_story = StoryCard.show_vr(self, vr_rig.camera, vb)
 
 
 func _coach(line: String, pic: String = "coach") -> Dictionary:
@@ -1085,6 +1155,7 @@ func _all_huds() -> Array:
 # --- Store, results, pause ----------------------------------------------------------------------
 
 func _on_state_changed(key: String, value: Variant) -> void:
+	_on_deep_state(key, value)
 	match key:
 		"cdesc":
 			if net.mode == "client" and value is Dictionary and var_to_str(value) != built_key:
@@ -1178,6 +1249,257 @@ func on_pause_changed(paused: bool, _by_slot: int) -> void:
 			UiKit.pop_in(tv_banner)
 
 
+# --- Second pass: modes, Coach Jelly's gifts, surprises, seasons, the medal hall (deep.gd) -------------------------
+
+## Every machine: the second pass's nodes.
+func _setup_deep() -> void:
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
+	hazards = HazardsScript.new()
+	hazards.main = self
+	add_child(hazards)
+	gifts_node = GiftsScript.new()
+	gifts_node.main = self
+	add_child(gifts_node)
+	season_node = SeasonScript.new()
+	add_child(season_node)
+	hall = HallScript.new()
+	hall.name = "MedalHall"
+	add_child(hall)
+
+
+## Host, once per session: the season, the family's last mode, the medal hall, for every machine.
+func _begin_deep() -> void:
+	session_seed = Seeded.fresh_seed()
+	season = Seeded.season()
+	if OS.has_environment("OR_SEASON") and Deep.SEASONS.has(OS.get_environment("OR_SEASON")):
+		season = OS.get_environment("OR_SEASON")
+	mode = Deep.mode_of(String(save.data.mode) if String(save.data.mode) != "" else "brave")
+	if OS.has_environment("OR_MODE"):  # (What's New "try" / bots: straight in)
+		mode = Deep.mode_of(OS.get_environment("OR_MODE"))
+		mode_picked = true
+	if OS.has_environment("OR_GIFT") and not Deep.gift(OS.get_environment("OR_GIFT")).is_empty():
+		gift = OS.get_environment("OR_GIFT")  # (What's New "try": the first course with that gift)
+		gift_for = "try"
+		mode_picked = true
+	bot_tricks = OS.has_environment("OR_TRICKS_NOW")
+	_send_deep()
+	_send_medals()
+	var sd := Deep.season_data(season)
+	_story(_coach(String(sd.line), String(sd.pic)))
+
+
+## Host: the mode, the gift and the season for every machine.
+func _send_deep() -> void:
+	net.state_set("deep", [mode, gift, season])
+
+
+## Host: the medal hall for every machine.
+func _send_medals() -> void:
+	net.state_set("medals", [int(save.data.medal_total), (save.data.medals as Array).duplicate()])
+
+
+func _gift_key(i: int) -> String:
+	return "%d/%d" % [show_no, i]
+
+
+## Host: the pick course i waits for ("" none): the mode once a session before the first seeded course, a gift before
+## every later course of a show. Never on the lessons.
+func _pick_due(i: int) -> String:
+	if gift_for == "try":
+		gift_for = _gift_key(i)
+	if show_no <= 0:
+		return ""
+	if not mode_picked:
+		return "mode"
+	if i >= 1 and gift_for != _gift_key(i):
+		return "gift"
+	return ""
+
+
+## Host, when course i is built (and again once its gift is picked): its gift, bubbles and surprises.
+func _deep_course(i: int) -> void:
+	_send_deep()
+	hazard_hits = 0
+	shield_pops = 0
+	shields.clear()
+	if gift == "bubble":
+		for rid in runners:
+			shields[int(rid)] = true
+	net.state_set("shields", shields.keys())
+	var spec := {"mode": mode, "season": season, "course": i, "first": bot_tricks}
+	var list := Deep.hazards(course.desc, spec)
+	hazards.host_begin(list)
+	if gift != "":
+		var gd := Deep.gift(gift)
+		_story(_coach(String(gd.line), String(gd.pic)))
+	print("Obstacle Rush course %d: %s mode, %s, gift %s, surprises %s" % [i, mode, season, gift if gift != "" else "none",
+		str(list.map(func(e: Dictionary) -> String: return "%s@%.1f" % [e.kind, float(e.x)]))])
+
+
+## Nobody here could take a pick (no runner who is a person, no VR giant): the middle comes sooner.
+func pick_nobody() -> bool:
+	return vr_rig == null and _people() == 0
+
+
+## Runners who are people (not the CPU runners).
+func _people() -> int:
+	var n := 0
+	for rid in runners:
+		if int(rid) < 10:
+			n += 1
+	return n
+
+
+## Host: put up the pick orbs (the course waits for them; runners can walk about behind the start).
+func _start_pick(stage: String) -> void:
+	var entries: Array = []
+	var opts: Array = []
+	if stage == "mode":
+		opts = PickOrbs.mode_ids(mode)
+		for id in opts:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
+		_story(_coach("Easy or tricky?"))
+	else:
+		opts = Deep.gift_choices(int(save.data.medal_total), String(save.data.last_gift),
+			Seeded.derive(session_seed, "gift " + _gift_key(pending_course)))
+		for id in opts:
+			var gd := Deep.gift(String(id))
+			entries.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
+		_story(_coach("A gift for you!", "gift"))
+	net.state_set("phase", "pick")
+	sound_at("chime", Vector3(course.start_x, 2.0, 0.0), -6.0, 1.3)
+	picks.begin(stage, entries, opts, vr_rig != null and _people() == 0, _on_picked)
+
+
+## Host: the team picked (or the middle one was taken for them): on with the course.
+func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
+	if stage == "mode":
+		mode = Deep.mode_of(String(opt))
+		mode_picked = true
+		save.data.mode = mode
+		save.mark_dirty()
+		_story({"who": "COACH JELLY", "line": String(PickOrbs.MODE_LINES.get(mode, "Let's go!")), "pic": String(PickOrbs.mode(mode).pic),
+			"color": PickOrbs.mode_color(mode), "duration": 3.0})
+		_send_deep()
+		print("Picked mode: %s" % mode)
+		_go_course(pending_course)  # built again in the picked mode (a gift may come next)
+		return
+	gift = String(opt)
+	gift_for = _gift_key(pending_course)
+	save.data.last_gift = gift
+	save.data.gifts = int(save.data.gifts) + 1
+	save.mark_dirty()
+	print("Picked gift: %s" % gift)
+	_deep_course(pending_course)
+	net.state_set("phase", "play")
+	sound_at("whistle", Vector3(course.start_x, 2.0, -course.half_w), -6.0)
+
+
+## Host: a surprise's tell started (hazards.gd).
+func hazard_told(e: Dictionary) -> void:
+	save.data.surprises = int(save.data.surprises) + 1
+	print("Surprise: %s at x %.1f (w %.2f) after %.1f s" % [e.kind, float(e.x), float(e.w), course_t])
+
+
+## Host: a surprise caught runner rid (hazards.gd): the machine that runs it bumps it.
+func hazard_hit(rid: int, e: Dictionary) -> void:
+	var r: Runner = runners.get(rid)
+	if r == null:
+		return
+	hazard_hits += 1
+	if r.owned:
+		_apply_hazard(r, e)
+	else:
+		net.event("hz_hit", [rid, Deep.pack(e)])
+
+
+## The machine running runner r: GENTLE a little hop; BRAVE / HARD a comical tumble back (a BUBBLE pops instead).
+func _apply_hazard(r: Runner, e: Dictionary) -> void:
+	var hit := float(Deep.mode_data(mode).hit) * (0.6 if String(e.get("kind", "")) == "water" else 1.0)
+	_local_sound("splash" if String(e.get("kind", "")) == "water" else "boing", r.position, -4.0, 1.1)
+	if hit <= 0.0:
+		r.boop()
+	else:
+		r.bonk(Vector3.LEFT, hit)
+
+
+## Host: runner rid's BUBBLE took a bonk.
+func _pop_shield(rid: int) -> void:
+	if not shields.has(rid):
+		return
+	shields.erase(rid)
+	shield_pops += 1
+	net.state_set("shields", shields.keys())
+
+
+## Host, at a show's end: a medal in the hall (its mode's colour); gifts open and gold cups come as it fills.
+func _add_medal() -> void:
+	var list: Array = save.data.medals
+	list.append(mode)
+	while list.size() > Deep.HALL_SHOWN:
+		list.remove_at(0)
+	save.data.medals = list
+	var total := int(save.data.medal_total) + 1
+	save.data.medal_total = total
+	save.mark_dirty()
+	_send_medals()
+	_story(_coach("A new medal!", "medal"))
+	for g in Deep.GIFTS:
+		if int(g.unlock) == total:
+			_story(_coach("A new gift!", String(g.pic)))
+	if total % Deep.TROPHY_EVERY == 0 and Deep.trophies(total) > Deep.trophies(total - 1):
+		_story(_coach("A gold cup!", "trophy"))
+
+
+## Every machine, when the pick orbs pop up (picks.gd show_row): a clear banner over the course's.
+func pick_banner() -> void:
+	if split != null:
+		HudKit.banner(_all_huds(), "PICK ONE!", "", {"duration": 2.4, "color": Color(1.0, 0.85, 0.3)})
+	show_headline("PICK ONE!")
+
+
+## Every machine: the second pass's replicated state.
+func _on_deep_state(key: String, value: Variant) -> void:
+	match key:
+		"deep":
+			var dv: Array = value if value is Array else []
+			if dv.size() >= 3:
+				mode = String(dv[0])
+				gift = String(dv[1])
+				season = String(dv[2])
+				if hazards != null:
+					hazards.mode = mode
+				if season_node != null and season != "":
+					season_node.set_season(season)
+				if gifts_node != null:
+					gifts_node.set_gift(gift)
+		"hz":
+			var hz := Deep.unpack(value if value is Array else [])
+			if hazards != null and course != null:
+				hazards.show_now(hz, course.half_w)
+			if not hz.is_empty():
+				var nm := String(Deep.KIND_NAMES.get(String(hz.kind), "LOOK OUT!"))
+				if split != null:
+					HudKit.banner(_all_huds(), nm, "", {"duration": 2.0, "color": HazardsScript.color_of(String(hz.kind))})
+				show_headline(nm)
+		"shields":
+			var ids: Array = value if value is Array else []
+			if gifts_node != null:
+				gifts_node.set_shields(ids)
+			for rid in runners:
+				var r: Runner = runners[rid]
+				if r.owned:
+					r.shield = ids.has(int(rid))
+		"medals":
+			var mv: Array = value if value is Array else []
+			if hall != null and mv.size() >= 2:
+				hall.set_medals(int(mv[0]), mv[1])
+
+
 # --- Networking -----------------------------------------------------------------------------------
 
 func make_snapshot() -> Array:
@@ -1246,6 +1568,16 @@ func apply_event(kind: String, args: Array) -> void:
 			if course.target != null:
 				course.target.queue_free()
 				course.target = null
+		"orbs":
+			if picks != null:
+				picks.show_row(String(args[0]), args[1], args[2], bool(args[3]) if args.size() > 3 else false)
+		"take":
+			if picks != null:
+				picks.take_fx(int(args[0]), int(args[1]))
+		"hz_hit":
+			var r4: Runner = runners.get(int(args[0]))
+			if r4 != null and r4.owned:
+				_apply_hazard(r4, Deep.unpack(args[1]))
 		"story":
 			if args.size() >= 4:
 				show_story({"who": String(args[0]), "line": String(args[1]), "pic": String(args[2]),
