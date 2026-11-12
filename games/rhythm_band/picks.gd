@@ -82,7 +82,7 @@ func show_row(new_stage: String, entries: Array) -> void:
 	for lp in Deep.row_local(entries.size()):
 		at.append(_world(lp))
 	orbs.show_orbs(new_stage, entries, at[0], 0.42, 0.0, {"at": at, "scale": Deep.ORB_SCALE, "pop": true, "font": 64,
-		"label_y": -1.3, "label_px": 0.0055, "two_lines": true, "bob": 0.04, "dot_size": 0.18})  # (names under the orbs)
+		"label_y": -1.1, "label_px": 0.0055, "two_lines": true, "bob": 0.04, "dot_size": 0.18})  # (names under the orbs: over them they lined up with the band's P2 / P3 tags)
 	_place()
 
 
@@ -90,7 +90,10 @@ func show_row(new_stage: String, entries: Array) -> void:
 func _world(lp: Vector3) -> Vector3:
 	var d = main.players[0] if main.players.size() > 0 else null
 	if d != null and d.rig != null and d.rig.is_inside_tree():
-		return d.rig.to_global(lp * d.kit_s)
+		# (height and spread follow the player's size like the drums; the distance out shrinks less, or a seated
+		# player's row sank into the hi-hat and crash: core/vr_view_check.gd pick_hidden)
+		var k: float = d.kit_s
+		return d.rig.to_global(Vector3(lp.x * k, lp.y * k, lp.z * maxf(k, Deep.ROW_Z_MIN_S)))
 	return main.DRUM_SPOT + Vector3(0.0, 1.45, 0.0) + lp
 
 

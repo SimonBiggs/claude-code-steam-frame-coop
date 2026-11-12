@@ -19,6 +19,11 @@ extends Node
 ## PAUSED, that no runner's camera sees its own name tag, and prints "BOT: ERROR instruction text" if a
 ## headline (TV or VR) is anything but BLOCK BUILDERS, a level name or a short word, or a tip spot (a
 ## view's HUD / hint line, the controls line, the status line) shows words.
+## Second pass (deep.gd): on the pick orbs the runners walk under an orb and stand there, the flat builder's glove
+## hovers under one, the fake VR hand moves into one (BB_BOT_PICK=i picks orb i; else the middle for the mode and
+## each gift in turn); runners and the buddy walk out of told surprises and wait outside them (hazards.gd steer).
+## Checks: the mode pick comes before the first sky course, a gift pick before each later one, every surprise shown
+## is fair (deep.gd problems), the town grows a building per sky course, BB_TRICKS_NOW runs see surprises.
 
 const Levels := preload("res://games/block_builders/levels.gd")
 const Story := preload("res://games/block_builders/story.gd")
@@ -44,7 +49,12 @@ var gifts_seen := 0
 var props_phase := 0
 var props_t := 0.0
 var cues := {}  # simple mode: picture cues seen / learned
-const WORDS := ["", "BLOCK BUILDERS", "HOORAY!", "YOU DID IT!", "PAUSED", "Connecting to the Builder…"]
+const Deep := preload("res://games/block_builders/deep.gd")
+const WORDS := ["", "BLOCK BUILDERS", "HOORAY!", "YOU DID IT!", "PAUSED", "Connecting to the Builder…", "PICK ONE!", "WIND!", "WOBBLE!"]
+var picks_seen := {}  # stage -> count (host)
+var hz_checked := {}  # packed surprise -> true
+var town_start := -1
+var sky_cleared := 0
 const HUD_WORDS := ["", "YOU MADE IT!", "Syncing with the Builder…"]
 
 
@@ -65,13 +75,14 @@ func _physics_process(delta: float) -> void:
 	if main.simple:
 		_note_cues()
 	var host_side: bool = main.net.mode != "client"
-	if host_side and OS.has_environment("BB_START_LEVEL") and not started_level and main.state == "intro" and t > 2.0 \
-			and (main.net.mode != "host" or main.net.connected):
+	if host_side and OS.has_environment("BB_START_LEVEL") and not started_level and (main.state == "intro" or main.level < Story.LESSONS) and t > 2.0 \
+			and (main.net.mode != "host" or main.net.connected or main.solo):
 		started_level = true
 		main._start_level(int(OS.get_environment("BB_START_LEVEL")) - 1)
 	if host_side and not main.simple and main.state == "play" and main.level == 1 and gift_called_seq != main.level_seq and main.level_time > 0.5:
 		gift_called_seq = main.level_seq
 		main.spawn_balloon()
+	_note_deep(host_side)
 	if host_side and main.builder != null:
 		if main.builder.flat:
 			_drive_flat_builder(delta)
@@ -90,6 +101,8 @@ func _physics_process(delta: float) -> void:
 			cleared_seen += 1
 			print("Bot: LEVEL %d CLEARED (%d so far) score=%d stars=%d" % [main.level + 1, cleared_seen, main.score, main.stars_taken])
 			if main.simple and main.net.mode != "client" and Story.is_adventure(main.level):
+				sky_cleared += 1
+				BotEnd.check(int(main.save.data.get("town_total", 0)) - town_start >= sky_cleared, "the town grew a building per sky course (%d of %d)" % [int(main.save.data.get("town_total", 0)) - town_start, sky_cleared])
 				# The bot path detours to the lost cloud friend (coursegen.gd), so it must be home now.
 				if BotEnd.check(main.friend_state == 2 and (main.save.data.friends as Array).size() > 0, "the lost friend on %s was rescued (state %d) %s friend %s ground %s path %s" % [str(main.level_data().name), main.friend_state, str(main.level_data().get("challenges")), str(main.level_data().get("friend")), str(main.level_data().ground), str(main.level_data().bot_path)]):
 					print("Bot: FRIEND rescued on %s (%d home)" % [str(main.level_data().name), (main.save.data.friends as Array).size()])
@@ -180,6 +193,14 @@ func _drive_flat_builder(delta: float) -> void:
 	var b = main.builder
 	b.bot = true
 	build_t -= delta
+	if main.state == "pick":
+		var at := _pick_target()
+		if at != Vector3.INF and (main.picks.row == "flat" or main._people() == 0):
+			if main.picks.t < 1.0:
+				at.z += 2.5  # (a glove resting under an orb when they pop up must leave and come back)
+			b.bot_cell = Vector3i(floori(at.x), 0, floori(at.z))
+			b.cursor = Vector2(at.x, at.z)
+		return
 	var ct = _coop_target()
 	if ct != null and main.state != "intro":
 		var cp: Vector3 = ct
@@ -223,6 +244,13 @@ func _drive_vr_builder(delta: float) -> void:
 		return
 	if vr_phase == "coop":
 		vr_phase = "idle"
+	if main.state == "pick":
+		b.bot_trigger = false
+		vr_phase = "idle"
+		var at := _pick_target()
+		if at != Vector3.INF and main.picks.row == "vr":
+			ctrl.global_position = ctrl.global_position.move_toward(at - off, 6.0 * delta)
+		return
 	if main.state != "play":
 		b.bot_trigger = main.state_t > 3.5 and int(t * 2.0) % 2 == 0
 		vr_phase = "idle"
@@ -301,6 +329,15 @@ func _drive_runner(r) -> void:
 	if not r.active:
 		r.bot_input = {"move": Vector3.ZERO, "jump": false}
 		return
+	if main.state == "pick":
+		var at := _pick_target()
+		var mv := Vector3.ZERO
+		if at != Vector3.INF and main.picks.row == "start":
+			var d := Vector3(at.x - r.global_position.x, 0.0, at.z - r.global_position.z)
+			if d.length() > 0.15:
+				mv = d.normalized() * clampf(d.length() * 2.0, 0.3, 1.0)
+		r.bot_input = {"move": mv, "jump": false}
+		return
 	if main.state != "play":
 		# Jump now and then: confirms banners on the TV / split screen.
 		r.bot_input = {"move": Vector3.ZERO, "jump": main.state_t > 2.0 and int(t * 2.0) % 2 == 0 and r.index == 1}
@@ -345,7 +382,66 @@ func _drive_runner(r) -> void:
 		jump = r.on_ground and ahead < pos.y - 0.5
 	if reached and wi < path.size() - 1:
 		r.set_meta("bot_wp", wi + 1)
+	if main.hazards != null and OS.has_environment("BB_BOT_NO_DODGE") and not main.hazards.now.is_empty():
+		var hz: Dictionary = main.hazards.now  # a clumsy runner: walks right into the told zone and stands there
+		var dz := Vector3(float(hz.x) - r.global_position.x, 0.0, float(hz.z) - r.global_position.z)
+		if absf(r.global_position.y - float(hz.y)) < 0.5:
+			move = dz.normalized() if dz.length() > 0.2 else Vector3.ZERO
+			jump = false
+	elif main.hazards != null:
+		var steered: Vector3 = main.hazards.steer(r, move)  # out of a told surprise, wait outside one
+		if steered != move:
+			move = steered
+			jump = false
 	r.bot_input = {"move": move, "jump": jump}
+
+
+# --- Second pass (deep.gd) ------------------------------------------------------
+
+## The orb this bot picks (its middle on the ground for runners / the glove, the ball itself for the VR hand).
+func _pick_target() -> Vector3:
+	var pk = main.picks
+	if pk == null or pk.spots.is_empty():
+		return Vector3.INF
+	var i := 1
+	if OS.has_environment("BB_BOT_PICK"):
+		i = int(OS.get_environment("BB_BOT_PICK"))
+	elif pk.stage == "gift":
+		i = int(picks_seen.get("gift", 0)) % 3
+	i = clampi(i, 0, pk.spots.size() - 1)
+	var at: Vector3 = pk.spots[i]
+	if pk.row == "vr":
+		var op: Vector3 = pk.orb_position(i)
+		return op if op != Vector3.INF else at
+	return Vector3(at.x, 0.0, at.z) + (Vector3(0.0, (main.course.start as Vector3).y, 0.0) if pk.row == "start" else Vector3.ZERO)
+
+
+## Host checks: picks come when due, every surprise shown is fair, the town grows.
+func _note_deep(host_side: bool) -> void:
+	if not main.simple or main.picks == null:
+		return
+	if town_start < 0 and host_side:
+		town_start = int(main.save.data.get("town_total", 0))
+	var st: String = main.picks.stage
+	if st != "" and String(get_meta("pick_stage", "")) != st + str(main.level_seq):
+		set_meta("pick_stage", st + str(main.level_seq))
+		picks_seen[st] = int(picks_seen.get(st, 0)) + 1
+		print("BOT: %s pick on %s (%s row) t=%.0f" % [st, str(main.level_data().name), main.picks.row, t])
+		if host_side:
+			BotEnd.check(Story.is_adventure(main.level), "picks only on sky courses (%s on level %d)" % [st, main.level + 1])
+			if st == "gift":
+				BotEnd.check(main.session_courses >= 1, "no gift on a session's first course")
+	if main.state == "play" and host_side and Story.is_adventure(main.level) and int(get_meta("mode_seq", -1)) != main.level_seq:
+		set_meta("mode_seq", main.level_seq)
+		BotEnd.check(main.mode_picked, "the mode was picked before a sky course is played")
+	var now: Dictionary = main.hazards.now
+	if not now.is_empty():
+		var k := str(Deep.pack(now)) + str(main.level_seq)
+		if not hz_checked.has(k):
+			hz_checked[k] = true
+			print("BOT: surprise %s at x %.1f (t=%.0f)" % [now.kind, float(now.x), t])
+			var probs := Deep.problems(main.level_data(), now, main.mode)
+			BotEnd.check(probs.is_empty(), "the %s surprise is fair %s" % [now.kind, str(probs)])
 
 
 # --- Visual teaching checks (simple mode) ------------------------------------------
@@ -437,6 +533,17 @@ func _exit_tree() -> void:
 	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
 	if main != null and is_instance_valid(main):
 		BotEnd.check(cleared_seen >= 1, "a level was cleared (mode %s, t=%.0f, state %s)" % [main.net.mode, t, main.state])
+		print("BOT DEEP: picks %s history %s surprises %s hits %d town %d mode %s gift %s season %s" % [str(picks_seen),
+			str(main.picks.history) if main.picks != null else "[]", str(main.hazards.seen) if main.hazards != null else "{}",
+			main.hazards.hits_all if main.hazards != null else 0, int(main.save.data.get("town_total", 0)), main.mode, main.gift, main.season])
+		if OS.has_environment("BB_TRICKS_NOW") and main.net.mode != "client" and sky_cleared >= 1:
+			BotEnd.check(not (main.hazards.seen as Dictionary).is_empty(), "surprises came (BB_TRICKS_NOW)")
+		if OS.has_environment("BB_BOT_NO_DODGE") and main.net.mode != "client" and not (main.hazards.seen as Dictionary).is_empty():
+			BotEnd.check(main.hazards.hits_all > 0 or main.gift == "sticky", "a runner who doesn't dodge gets moved by a surprise")
+		if main.net.mode != "client" and sky_cleared >= 1 and not OS.has_environment("BB_MODE"):
+			BotEnd.check(int(picks_seen.get("mode", 0)) >= 1, "the mode pick came")
+		if main.net.mode != "client" and sky_cleared >= 2 and not OS.has_environment("BB_NO_GIFTS"):
+			BotEnd.check(int(picks_seen.get("gift", 0)) >= 1, "a gift pick came before a later sky course")
 	if main != null and is_instance_valid(main) and main.simple:
 		var ks: Array = cues.keys()
 		ks.sort()

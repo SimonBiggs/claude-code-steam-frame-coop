@@ -49,6 +49,10 @@ func _process(delta: float) -> void:
 ## How long a problem may last before it fails the bot.
 static func hold(p: String) -> float:
 	# (a card gliding clear of a pick orb that just popped up keeps the long hold: UiKit.vr_dodge moves it in time)
+	# A pick hidden behind scenery: bots pick within a few seconds, so a 3 s hold never saw it (Rhythm Band's HARD behind
+	# the green cymbal, 2026-11-12); the orbs' pop-in is over well within SHORT_S.
+	if p.contains(" of the pick ") and p.contains(": hidden behind "):
+		return SHORT_S
 	return SHORT_S if p.contains(": drawn over ") and not p.contains("drawn over the pick") else HOLD_S
 
 

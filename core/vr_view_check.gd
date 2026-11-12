@@ -21,6 +21,8 @@ extends RefCounted
 ##   UiKit.VR_PRIO_PANEL (-4, under their own text), so a blended surface at the default priority 0 behind a card
 ##   is blended OVER it (Fishing Lake 2026-11-11: the lake's water made Ollie's cards a faint, far-looking ghost).
 ##   Give such surfaces UiKit.VR_PRIO_UNDER_UI.
+## - every pick orb near the VR player (picture and words) in plain sight: nothing solid in front of any part of its
+##   name (pick_hidden; Rhythm Band 2026-11-12: HARD half behind the green cymbal).
 ## - never over a pick: no panel covers (seen from the eyes) anything in the KEEP_CLEAR group (core/pick_orbs.gd puts
 ##   every pick orb there while it shows). UiKit.vr_spot moves VR UI up or down clear of them (vr_dodge); a game
 ##   never has to lift its orbs or push its cards about for this (story cards sat on picks for ~2 s at a pick's start).
@@ -54,6 +56,8 @@ const VR_PRIO_HILITE := -3  ## UiKit.VR_PRIO_HILITE (tests/core_math_test.gd che
 const MIN_TEXT_GAP := 0.35
 ## Node group: things VR panels must never cover (pick orbs). Any game can add its own must-see things.
 const KEEP_CLEAR := "vr_keep_clear"
+## Picks further than this (real metres) from the VR head are for other players; their sight lines aren't checked.
+const PICK_SEE_D := 6.0
 const VrRig := preload("res://core/vr_rig.gd")
 ## Meta on a fake XRCamera3D that the game itself puts exactly where its real fit puts a real head (Kart Race: the
 ## seat's eye point), so it needs no XROrigin3D. The value says why.
@@ -151,6 +155,11 @@ static func problems(root: Node) -> Array[String]:
 			for i in keep.size():
 				if keep[i] != c and not c.is_ancestor_of(keep[i]) and cover_deg2(head, p, size, boxes[i]) > 0.0:
 					out.append("%s: drawn over the pick %s (UiKit.vr_dodge keeps VR UI clear of VrViewCheck.KEEP_CLEAR)" % [_name(c), _name(keep[i])])
+		# A pick orb (or the name under it) behind scenery: the player can't read what they're choosing (Rhythm Band
+		# 2026-11-12: HARD's label half behind the green cymbal).
+		for k in keep:
+			for pp in pick_hidden(cam, k):
+				out.append(pp)
 	# Words right in front of the eyes (a TV player's name tag walking through the VR player): giant letters.
 	var origin := cam.get_parent()
 	for n in root.find_children("*", "Label3D", true, false):
@@ -330,11 +339,48 @@ static func blocker(cam: Camera3D, card: Node3D, p: Vector3) -> String:
 	return "%s (%.1f m away)" % [_name(hit.node), float(hit.f) * head.distance_to(p) * 0.96 / maxf(XRServer.world_scale, 0.001)]
 
 
+## A pick orb (KEEP_CLEAR) the VR head can't fully see: its picture or any part of its words (a 3 x 3 grid over each
+## Label3D under it: middle, ends, top, bottom, corners) behind something solid (first_hit). Picks further than PICK_SEE_D real
+## metres are for other players (a far field's big orbs) and aren't checked. [] = all clear.
+static func pick_hidden(cam: Camera3D, k: Node3D) -> Array[String]:
+	var out: Array[String] = []
+	var head := cam.global_position
+	var ws := maxf(XRServer.world_scale, 0.001)
+	if head.distance_to(k.global_position) / ws > PICK_SEE_D:
+		return out
+	var right := cam.global_basis.x.normalized()
+	var up := cam.global_basis.y.normalized()
+	var meshes := cam.get_viewport().find_children("*", "MeshInstance3D", true, false)
+	var spots: Array = [[k, k.global_position]]
+	for n in k.find_children("*", "Label3D", true, false):
+		var l := n as Label3D
+		if not l.is_visible_in_tree() or l.text.strip_edges() == "" or l.modulate.a < 0.1 or l.transparency > 0.65 or (l.layers & cam.cull_mask) == 0:
+			continue
+		var sz := label_size(l) * 0.42
+		for fx in [0.0, -1.0, 1.0]:
+			for fy in [0.0, -1.0, 1.0]:  # middle, ends, top, bottom and corners (Rhythm Band: only HARD's bottom right was hidden)
+				spots.append([l, l.global_position + right * sz.x * fx + up * sz.y * fy])
+	for s in spots:
+		var p: Vector3 = s[1]
+		var dist := head.distance_to(p)
+		if dist < 0.05:
+			continue
+		var hit := first_hit(cam, head.lerp(p, 0.97), k, meshes)
+		if hit.node == null or float(hit.f) * dist * 0.97 < 0.6 * ws:
+			continue
+		var what: Node = s[0]
+		out.append("%s of the pick %s: hidden behind %s%s (%.1f m away; move the pick or the scenery)" % [
+			("words " + _name(what)) if what is Label3D else "picture", _name(k), _name(hit.node), made_by(hit.node), float(hit.f) * dist * 0.97 / ws])
+		break  # one line per pick is enough
+	return out
+
+
 ## The nearest solid thing between the eyes and `to`: {node, f} with f the fraction (0..1) of the way, or
 ## {node: null, f: 1.0}. Solid = a StaticBody3D (walls, doors, tables) or a drawn mesh's real triangles (signs,
 ## props from saved growth, trees); not moving things (players walking past, balls), not `skip`, VR UI or the VR
 ## player's own rig, not meshes around the head (rooms, sky domes). UiKit.vr_clear uses it to bring VR UI in front.
-static func first_hit(cam: Camera3D, to: Vector3, skip: Node = null) -> Dictionary:
+## `meshes`: the viewport's MeshInstance3Ds when the caller already has them (many rays in one check).
+static func first_hit(cam: Camera3D, to: Vector3, skip: Node = null, meshes: Array = []) -> Dictionary:
 	var best := {"node": null, "f": 1.0}
 	var head := cam.global_position
 	var length := head.distance_to(to)
@@ -354,16 +400,16 @@ static func first_hit(cam: Camera3D, to: Vector3, skip: Node = null) -> Dictiona
 				best = {"node": r.collider, "f": head.distance_to(r.position) / length}
 				break
 			ex.append((r.collider as CollisionObject3D).get_rid())
-	for n in cam.get_viewport().find_children("*", "MeshInstance3D", true, false):
+	for n in (meshes if not meshes.is_empty() else cam.get_viewport().find_children("*", "MeshInstance3D", true, false)):
 		var m := n as MeshInstance3D
-		if m.mesh == null or not m.is_visible_in_tree() or m.transparency > 0.5 or (m.layers & cam.cull_mask) == 0:
+		if m == null or not is_instance_valid(m) or m.mesh == null or not m.is_visible_in_tree() or m.transparency > 0.5 or (m.layers & cam.cull_mask) == 0:
 			continue
 		if m.layers == VR_LAYER or m.get_world_3d() != cam.get_world_3d():
 			continue
 		var box := m.global_transform * m.get_aabb()
 		if box.grow(0.05).has_point(head) or box.intersects_segment(head, to) == null:
 			continue
-		if _skip_blocker(m, skip, cam) or _moving(m) or _see_through(m):
+		if _skip_blocker(m, skip, cam) or _moving(m) or _walks_about(m) or _see_through(m):
 			continue
 		var f := _mesh_hit(m, head, to)
 		if f < float(best.f):
@@ -464,6 +510,21 @@ static func _smallest_text_deg(n: Node3D, head: Vector3) -> float:
 	return best
 
 
+## " (made by games/x/props.gd Fence)": the nearest scripted ancestor of an unnamed mesh, so a failure says what it is.
+static func made_by(n: Node) -> String:
+	var what := ""
+	if n is MeshInstance3D and (n as MeshInstance3D).mesh != null:
+		var b := (n as MeshInstance3D).get_aabb()
+		what = " %s %.1fx%.1fx%.1f m at %s" % [(n as MeshInstance3D).mesh.get_class(), b.size.x, b.size.y, b.size.z, (n as Node3D).global_position.snapped(Vector3.ONE * 0.1)]
+	var x := n
+	while x != null:
+		var s: Script = x.get_script()
+		if s != null and s.resource_path != "":
+			return " (%s in %s %s)" % [what.strip_edges(), s.resource_path.get_file(), x.name]
+		x = x.get_parent()
+	return " (%s)" % what.strip_edges()
+
+
 static func _name(n: Node) -> String:
 	var s := str(n.name)
 	if n is Label3D:
@@ -482,6 +543,18 @@ static func _moving(n: Node) -> bool:
 	var x := n.get_parent()
 	while x != null:
 		if x is CharacterBody3D or x is RigidBody3D:
+			return true
+		x = x.get_parent()
+	return false
+
+
+## Part of a player or creature built by core/creatures.gd (meta "creature"), or something one carries (a basket on a
+## head): they walk about and step out of the way, so they don't count as in the way (Dodge Ball 2026-11-12: a runner
+## standing under the big orb it picks; Fruit Catch: a TV player's basket walking past the VR player).
+static func _walks_about(n: Node) -> bool:
+	var x := n.get_parent()
+	while x != null:
+		if x.has_meta("creature"):
 			return true
 		x = x.get_parent()
 	return false

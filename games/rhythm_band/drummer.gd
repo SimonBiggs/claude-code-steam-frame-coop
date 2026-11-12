@@ -881,7 +881,9 @@ func _update_tags() -> void:
 			var chosen: bool = i < 3 and int(main.drum_level) == i
 			lt.modulate = PAD_COLORS[i].lightened(0.4) if chosen else PAD_COLORS[i]
 			lt.text = ("> %s <" % MENU_NAMES[i]) if chosen else MENU_NAMES[i]
-		if not vr:
+		if fake_vr:
+			flat_tags[i].visible = false  # a fake VR drummer sees what a real one does (no key letters in the face)
+		elif not vr:
 			flat_tags[i].visible = not (ghost and main.SIMPLE_MODE)
 			if main.SIMPLE_MODE:
 				flat_tags[i].text = (["X", "A", "B", "Y"] if joy >= 0 else ["A", "S", "D", "F"])[i]
