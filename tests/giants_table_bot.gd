@@ -286,7 +286,7 @@ func _drive_picks(delta: float) -> Dictionary:
 		return busy
 	var knight_here := false
 	for k in main.knights():
-		if k.active and not k.is_down:
+		if k.active and not k.is_down and not k.remote:  # (a knight this bot drives: never assume TV players)
 			knight_here = true
 	var g = main.giant
 	var giant_goes: bool = g != null and not g.ghost and main.net.mode != "client" and (stage == "mode" or not knight_here)

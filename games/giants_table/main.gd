@@ -981,6 +981,8 @@ func _process(delta: float) -> void:
 	if net.mode == "host" and not net.connected:
 		solo_wait += delta
 		if solo_wait < 8.0:
+			if picks.active():
+				picks.tick(delta)  # (the pick runs on: a hand that reached in while the knights had time to join counts)
 			return  # give the knights a moment to join; after that the Giant can play alone (they can still join)
 	_host_knights(delta)
 	_update_boulders(delta)
