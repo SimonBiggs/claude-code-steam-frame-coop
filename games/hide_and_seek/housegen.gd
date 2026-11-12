@@ -36,6 +36,10 @@ const GARDEN_W := 8.0
 const FENCE_T := 0.2
 const JAIL_HALF := 0.65
 const CELL := 0.2
+## Players need this much more room than their radius on the grid: a 0.2 m cell centre could sit in a 3 cm window of a
+## gap only just wider than a hider, which real physics (the bot's capsule) can't get through (2026-11-12: a hiding
+## spot in the 0.63 m slot between a sofa and a wall passed check() and was cut off in the game).
+const RASTER_MARGIN := 0.05
 const HIDER := [0.3, 0.9]  ## radius, height (player.gd)
 const SEEKER := [0.32, 1.6]
 const TOUCH := 0.95  ## main.gd BODY_TOUCH: a flat seeker this close to a hider finds them
@@ -703,8 +707,8 @@ static func raster(g: Dictionary, radius: float, height: float) -> Dictionary:
 		var sz: Vector3 = s[1]
 		if c.y - sz.y / 2.0 > height + 0.02 or c.y + sz.y / 2.0 < 0.02:
 			continue
-		var ex := sz.x / 2.0 + radius
-		var ez := sz.z / 2.0 + radius
+		var ex := sz.x / 2.0 + radius + RASTER_MARGIN
+		var ez := sz.z / 2.0 + radius + RASTER_MARGIN
 		var ix0 := maxi(0, ceili((c.x - ex - x0) / CELL - 0.5))
 		var ix1 := mini(nx - 1, floori((c.x + ex - x0) / CELL - 0.5))
 		var iz0 := maxi(0, ceili((c.z - ez - z0) / CELL - 0.5))

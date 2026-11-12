@@ -127,7 +127,8 @@ func _physics_process(delta: float) -> void:
 		return
 	if conn_worlds.is_empty() and not conn_done and t > 0.3 and main.net.mode != "client":
 		var builds: Array = [[0, main.map_spec if main.map_idx == 0 else Story.daily()], [0, Story.daily()],
-			[0, {"seed": 4242, "level": 0, "theme": 1}], [0, {"seed": 777, "level": 6, "theme": 3}], [1, {}], [2, {}]]
+			[0, {"seed": 4242, "level": 0, "theme": 1}], [0, {"seed": 777, "level": 6, "theme": 3}],
+			[0, {"seed": 217078, "level": 0, "theme": 0, "daily": false, "friends": [7], "twist": 0, "street": 0, "slot": 0}], [1, {}], [2, {}]]  # 217078: a nook the grid once let through (housegen RASTER_MARGIN)
 		for bi in builds:
 			var i: int = bi[0]
 			var vp := SubViewport.new()
@@ -149,7 +150,7 @@ func _physics_process(delta: float) -> void:
 			_connectivity(space, d, 0.3, 0.9, "hider")
 			vp.queue_free()
 		conn_worlds.clear()
-		print("%sBOT: CONNECTIVITY %s on all %d maps (4 houses)" % ["" if conn_ok else "SCRIPT ERROR: ", "OK" if conn_ok else "FAIL", main.MAPS.size()])
+		print("%sBOT: CONNECTIVITY %s on all %d maps (5 houses)" % ["" if conn_ok else "SCRIPT ERROR: ", "OK" if conn_ok else "FAIL", main.MAPS.size()])
 		if OS.has_environment("BOT_CONN_ONLY"):
 			preload("res://tests/bot_end.gd").quit_quietly(get_tree())
 			return
