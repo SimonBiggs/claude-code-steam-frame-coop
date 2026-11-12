@@ -3,7 +3,8 @@ extends RefCounted
 ## - ZONES: NEON CITY (home), DINO JUNGLE (mud geysers), LAVA RIM (lava vents), ICE RINK (frost puffs), STAR DECK
 ##   (zap pads). A run starts in NEON CITY; after each boss (waves 5, 10, ...) Nova warps the arena to the next zone
 ##   of the run's ROUTE (seeded from the unlocked zones: saved waves cleared over all days open new ones).
-## - layout(seed, zone): cover pillars and hazard pads, seeded. check() proves it fair: nothing on the start spots
+## - layout(seed, zone): a seeded pillar SHAPE (scatter / ring / twins / lanes / corners), cover pillars, hazard pads and
+##   NOVA'S SPRING (a pool of healing light), seeded. check() proves it fair: nothing on the start spots
 ##   or the pick orbs, nothing overlapping, inside the wall, and every open spot of the floor reachable on foot.
 ## - plan(n, mode, players): wave n's monsters (count, toughness, speed, bite, gap, most at once) for GENTLE (little
 ##   ones), BRAVE (normal) or HARD. check_curve() proves the curve smooth: every wave a little harder than the last
@@ -107,13 +108,31 @@ static func leg_seed(seed_value: int, leg: int) -> int:
 	return Seeded.derive(seed_value, "leg%d" % leg)
 
 
-## A zone's arena: {"zone", "pillars": [Vector3], "pads": [{p, r, period, offset}]}.
+## Seeded pillar patterns (the family sees a new arena shape, not just new spots): scattered, a ring round the middle,
+## mirrored twins, two lanes down the sides, four corners.
+const SHAPES: Array[String] = ["scatter", "ring", "twins", "lanes", "corners"]
+const SPRING_R := 1.3  # NOVA'S SPRING: a friendly pool of light (stand in it to heal during a wave)
+
+
+## A zone's arena: {"zone", "shape", "pillars": [Vector3], "pads": [{p, r, period, offset}], "spring": Vector3}.
 static func layout(seed_value: int, zone_id: String) -> Dictionary:
 	var r := Seeded.rng(seed_value, "layout_" + zone_id)
+	var shape := String(Seeded.pick(r, SHAPES))
 	var pillars: Array = []
-	var want := r.randi_range(3, 6)
+	for p in _shape_spots(r, shape):
+		var q := (p as Vector3).snapped(Vector3(0.5, 1.0, 0.5))
+		if Vector2(q.x, q.z).length() + PILLAR_HALF * 1.5 > ARENA_RADIUS - 3.0 or _near_safe(q, PILLAR_HALF * 1.5):
+			continue
+		var ok := true
+		for o in pillars:
+			if (o as Vector3).distance_to(q) < 4.5:
+				ok = false
+				break
+		if ok:
+			pillars.append(q)
+	var want := maxi(3, pillars.size())
 	var tries := 0
-	while pillars.size() < want and tries < 200:
+	while pillars.size() < want and tries < 200:  # a pattern that lost spots to the start / orbs: fill in, scattered
 		tries += 1
 		var a := r.randf() * TAU
 		var d := r.randf_range(6.5, 13.0)
@@ -149,7 +168,69 @@ static func layout(seed_value: int, zone_id: String) -> Dictionary:
 			if ok:
 				pads.append({"p": p, "r": rad, "period": snappedf(r.randf_range(6.0, 9.0), 0.1),
 					"offset": snappedf(r.randf_range(3.0, 7.0), 0.1)})
-	return {"zone": zone_id, "pillars": pillars, "pads": pads}
+	var spring := Vector3.INF
+	tries = 0
+	while spring == Vector3.INF and tries < 200:
+		tries += 1
+		var a := r.randf() * TAU
+		var p := Vector3(cos(a), 0.0, sin(a)) * r.randf_range(5.0, 10.0)
+		p = p.snapped(Vector3(0.5, 1.0, 0.5))
+		if _spring_problem(p, pillars, pads) == "":
+			spring = p
+	var out := {"zone": zone_id, "shape": shape, "pillars": pillars, "pads": pads}
+	if spring != Vector3.INF:
+		out["spring"] = spring
+	return out
+
+
+## Pillar spots for a pattern (main.gd's start spots and pick orbs are kept clear afterwards).
+static func _shape_spots(r: RandomNumberGenerator, shape: String) -> Array:
+	var out: Array = []
+	match shape:
+		"ring":
+			var n := r.randi_range(5, 7)
+			var d := r.randf_range(10.0, 12.0)
+			var ph := r.randf() * TAU
+			for i in n:
+				var a := ph + TAU * i / float(n)
+				out.append(Vector3(cos(a) * d, 0.0, sin(a) * d))
+		"twins":
+			for i in r.randi_range(2, 3):
+				var x := r.randf_range(5.0, 11.0)
+				var z := r.randf_range(-12.0, 11.0)
+				out.append(Vector3(x, 0.0, z))
+				out.append(Vector3(-x, 0.0, z))
+		"lanes":
+			var x := r.randf_range(8.0, 10.5)
+			for z in [-11.0, -6.0, 9.5, 12.5]:
+				out.append(Vector3(x, 0.0, z + r.randf_range(-0.5, 0.5)))
+				out.append(Vector3(-x, 0.0, z + r.randf_range(-0.5, 0.5)))
+		"corners":
+			var d := r.randf_range(9.0, 12.0)
+			for k in 4:
+				var a := PI * 0.25 + PI * 0.5 * k + r.randf_range(-0.15, 0.15)
+				out.append(Vector3(cos(a) * d, 0.0, sin(a) * d))
+		_:  # scatter
+			for i in r.randi_range(3, 6):
+				var a := r.randf() * TAU
+				var d := r.randf_range(6.5, 13.0)
+				out.append(Vector3(cos(a) * d, 0.0, sin(a) * d))
+	return out
+
+
+## Why a spring can't go at p ("" = fine): off the start / orbs, off pillars and pads, inside the wall.
+static func _spring_problem(p: Vector3, pillars: Array, pads: Array) -> String:
+	if Vector2(p.x, p.z).length() + SPRING_R > ARENA_RADIUS - 3.0:
+		return "near the wall"
+	if _near_safe(p, SPRING_R - 1.0):
+		return "on a start spot or a pick orb"
+	for q in pillars:
+		if absf(p.x - q.x) < PILLAR_HALF + SPRING_R + 0.5 and absf(p.z - q.z) < PILLAR_HALF + SPRING_R + 0.5:
+			return "under a pillar"
+	for d in pads:
+		if p.distance_to(d.p) < SPRING_R + float(d.r) + 1.0:
+			return "touching a hazard pad"
+	return ""
 
 
 static func _near_safe(p: Vector3, r: float) -> bool:
@@ -197,16 +278,26 @@ static func check(lay: Dictionary) -> Array[String]:
 		for j in range(i + 1, pads.size()):
 			if p.distance_to(pads[j].p) < float(d.r) + float(pads[j].r) + 1.0:
 				why.append("pads %d and %d touch (no safe path between)" % [i, j])
+	if lay.has("shape") and not SHAPES.has(String(lay.shape)):
+		why.append("no arena shape called %s" % lay.shape)
+	if pillars.size() < 3 and lay.has("shape"):
+		why.append("only %d pillars (want 3+)" % pillars.size())
+	if lay.has("spring"):
+		var sp := String(_spring_problem(lay.spring, pillars, pads))
+		if sp != "":
+			why.append("Nova's spring is %s" % sp)
+	elif lay.has("shape"):
+		why.append("no spring of Nova's light")
 	if zone(zid).hazard != "" and pads.is_empty():
 		why.append("%s has no hazard pads" % zid)
 	if zone(zid).hazard == "" and not pads.is_empty():
 		why.append("%s has pads but no hazard" % zid)
-	why.append_array(_reach(pillars))
+	why.append_array(_reach(pillars, [lay.spring] if lay.has("spring") else []))
 	return why
 
 
 ## Flood fill on a 1 m grid: every open cell inside the wall can be walked to from the middle.
-static func _reach(pillars: Array) -> Array[String]:
+static func _reach(pillars: Array, must: Array = []) -> Array[String]:
 	var lim := int(ARENA_RADIUS) - 1
 	var open := {}
 	for x in range(-lim, lim + 1):
@@ -234,6 +325,9 @@ static func _reach(pillars: Array) -> Array[String]:
 				todo.append(n)
 	if seen.size() < open.size():
 		return ["%d spots of floor can't be reached" % (open.size() - seen.size())]
+	for m in must:  # Nova's spring: its middle cell can be walked to
+		if not seen.has(Vector2(roundf((m as Vector3).x), roundf((m as Vector3).z))):
+			return ["Nova's spring can't be reached"]
 	return []
 
 

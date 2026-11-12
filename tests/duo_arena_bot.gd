@@ -11,7 +11,14 @@ extends Node
 ## BOT_GOD=1: players can't be hurt (so the finale can be cleared).
 ## BOT_VR=1 (local): player 1 runs the real VR code with fake hands: it draws the sword over the
 ## shoulder, walks up to monsters and swings (slices, shell cracks), and shoots with the right hand.
+## Second pass (deep.gd): on the host / local game the bot forces a TOLD surprise (its warn ring must be up at once),
+## opens NOVA'S GIFT orbs (the bots shoot one), saves the zone's lost friend when there is one (DA_ZONE=jungle), and
+## checks phases through tests/bot_kit.gd watch_state (net "da_phase" / "da_surprise" / "da_gifts" / "da_friend"),
+## the arena's shape + spring, the season (ARCADE_SEASON_DUO_ARENA) and this run's own telemetry RUN lines.
 const UiKit := preload("res://core/ui_kit.gd")
+const BotKit := preload("res://tests/bot_kit.gd")
+const Gen := preload("res://games/duo_arena/arenagen.gd")
+const Deep := preload("res://games/duo_arena/deep.gd")
 
 const FAKE_PAD := 40
 
@@ -24,12 +31,19 @@ var target := 2
 var script_step := 0
 var vr_draw_t := 0.0
 var end_t: float = preload("res://tests/bot_end.gd").end_at(56.0)  # BOT_END, pulled in before a --quit-after cut
+var kit: BotKit
+var rings_at_surprise := -1  # warn rings up the moment the surprise was forced
 
 
 func _ready() -> void:
 	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
+	kit = BotKit.new()
+	kit.verbose = false
+	add_child(kit)
 	main = load("res://games/duo_arena/main.tscn").instantiate()
 	add_child(main)
+	kit.main = main
+	kit.watch_state(main.net)
 	if not OS.has_environment("DUO_JOIN") and not OS.has_environment("DUO_HOST"):
 		for k in [KEY_SPACE, KEY_ENTER]:
 			_key(k, true)
@@ -77,6 +91,8 @@ func _physics_process(delta: float) -> void:
 		_aim(p)
 	if mode == "client" and t >= end_t - 1.0:
 		_deep_checks()  # a TV machine's verdict too (the host's comes from its content script)
+	if main.game_over:
+		main.game_over_time = 0.0  # (a firing bot must never press "play again": a reload would restart this bot too)
 	if mode != "client":
 		_content_script()
 		if OS.has_environment("BOT_GOD"):
@@ -185,13 +201,38 @@ func _simple_steps() -> Array:
 				print("BOT VR: sword demo shown=%s, swaps=%d, wrist '%s'" % [p0.has_meta("sword_demo"),
 					int(p0.get_meta("swapped", 0)), p0.wrist_label.text])],
 		[30.0, func() -> void: main.debug_event("dive")],
+		[34.0, func() -> void:
+			main.debug_event("surprise")
+			rings_at_surprise = main.zone.rings.count()
+			print("BOT: forced a told surprise in %s, warn rings up %d" % [main.zone.zone_id, rings_at_surprise])],
+		[40.0, func() -> void:
+			main.debug_event("gift")
+			print("BOT: gift orbs %s" % [main.pick_ids])],
+		[48.0, func() -> void:
+			if main.deep.lost_friend() != "":
+				print("BOT: saving %s" % main.deep.lost_friend())
+				main.debug_event("rescue")],
 		[end_t - 1.0, func() -> void: _deep_checks()],
 		[end_t, func() -> void:
 			if not main.game_over:
 				print("BOT: forcing game over")
 				main._on_game_over()
 				print("BOT: end screen:\n%s" % main.center_label.text)],
+		[end_t + 0.4, func() -> void: _telemetry_checks()],
 	]
+
+
+## This run's own RUN lines (kit.my_runs: never another bot's): a game-over line with the second pass's fields.
+func _telemetry_checks() -> void:
+	if main.net.mode == "client":
+		return
+	var mine: Array = kit.my_runs("duo_arena")
+	var over: Array = mine.filter(func(e: Dictionary) -> bool: return String(e.get("end", "")) == "over")
+	kit.assert_true(not over.is_empty(), "this run wrote its game-over RUN line (%d lines of mine)" % mine.size())
+	if not over.is_empty():
+		var e: Dictionary = over[-1]
+		kit.assert_true(e.has("season") and e.has("gifts") and e.has("surprises") and e.has("shape"), "the RUN line has season, gifts, surprises, shape (%s)" % [e.keys()])
+		kit.assert_true(int(e.get("surprises", 0)) >= 1, "the RUN line counts the surprise (%s)" % e.get("surprises"))
 
 
 ## Fake VR: aim the gun hand at the nearest monster and fire; draw the sword over the left shoulder,
@@ -307,23 +348,32 @@ func _deep_checks() -> void:
 	if has_meta("deep_checked"):
 		return
 	set_meta("deep_checked", true)
-	var fails: Array[String] = []
 	var z = main.zone
-	if z == null or z.zone_id == "":
-		fails.append("no zone was built")
-	elif (z.lay.get("pillars", []) as Array).size() < 2:
-		fails.append("zone %s has %d pillars" % [z.zone_id, (z.lay.get("pillars", []) as Array).size()])
+	kit.assert_true(z != null and z.zone_id != "", "a zone was built")
+	if z != null:
+		kit.assert_true((z.lay.get("pillars", []) as Array).size() >= 3, "zone %s has pillars (%d)" % [z.zone_id, (z.lay.get("pillars", []) as Array).size()])
+		kit.assert_true(Gen.SHAPES.has(String(z.lay.get("shape", ""))) and z.lay.has("spring") and z.spring != null, "the arena has a shape and Nova's spring (%s)" % z.lay.get("shape", "-"))
+	kit.assert_true(main.story_shown >= 1, "a story card was shown (%d)" % main.story_shown)
+	kit.assert_true(kit.seen("da_phase", "wave") > 0, "the wave phase was seen (%s)" % [kit.seen_values("da_phase")])
+	var want_season: String = load("res://core/season_kit.gd").override("duo_arena", "", Deep.SEASONS)  # "" = none asked for
+	kit.assert_true(main.deep.season != "" and (want_season == "" or main.deep.season == want_season), "the season is %s (want %s)" % [main.deep.season, want_season if want_season != "" else "any"])
 	if main.net.mode != "client":
-		if main.wave < 1:
-			fails.append("wave 1 never started (pick stage '%s')" % main.pick_stage)
+		kit.assert_true(main.wave >= 1, "wave 1 started (pick stage '%s')" % main.pick_stage)
 		var need: int = main.players.filter(func(p) -> bool: return p.active).size()
-		if main.heroes.size() < mini(need, 1):
-			fails.append("nobody got a hero (%s)" % [main.heroes])
-		if main.run_seed == 0 and not OS.has_environment("DA_SEED"):
-			fails.append("no run seed")
-	if main.story_shown < 1:
-		fails.append("no story card was shown")
-	for f in fails:
-		print("SCRIPT ERROR: duo_arena deep: %s" % f)
-	print("BOT RESULT: %s (deep: zone %s, mode %s, heroes %s, perks %s, wave %d)" % ["PASS" if fails.is_empty() else "FAIL",
-		z.zone_id if z != null else "-", main.game_mode, main.heroes, main.perks, main.wave])
+		kit.assert_true(main.heroes.size() >= mini(need, 1), "everyone got a hero (%s)" % [main.heroes])
+		kit.assert_true(main.run_seed != 0 or OS.has_environment("DA_SEED"), "the run has a seed")
+		if not OS.has_environment("BOT_WAVE"):
+			kit.assert_true(kit.seen("da_phase", "pick:hero") > 0, "the hero orbs were up")
+		kit.assert_true(rings_at_surprise >= 1, "the forced surprise was told by a warn ring at once (%d)" % rings_at_surprise)
+		kit.assert_true(not kit.seen_values("da_surprise").is_empty(), "a surprise counted (da_surprise)")
+		kit.assert_true(kit.seen("da_phase", "pick:gift") > 0, "Nova's gift orbs came up")
+		kit.assert_true(main.deep.gifts.size() >= 1 and not kit.seen_values("da_gifts").is_empty(), "the team got a gift (%s)" % [main.deep.gifts])
+		if OS.get_environment("DA_ZONE") in ["jungle", "lava", "ice", "star"]:
+			kit.assert_true(not kit.seen_values("da_friend").is_empty() and main.deep.friends.size() >= 1, "the lost friend was saved (%s)" % [main.deep.friends])
+	else:
+		if not kit.seen_values("da_surprise").is_empty():
+			kit.assert_true(main.deep.tells_seen >= 1, "the host's surprise was told on this TV machine too (%d)" % main.deep.tells_seen)
+		kit.assert_true(main.deep.season != "", "the host's season reached the TV machine")
+	print("BOT deep: zone %s shape %s, mode %s, heroes %s, perks %s, gifts %s, friends %s, season %s, wave %d, phases %s" % [
+		z.zone_id if z != null else "-", z.lay.get("shape", "-") if z != null else "-", main.game_mode, main.heroes, main.perks,
+		main.deep.gifts, main.deep.friends, main.deep.season, main.wave, kit.seen_values("da_phase")])

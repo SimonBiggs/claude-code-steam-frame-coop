@@ -25,9 +25,15 @@ var hp := 60.0
 var alive := true
 var respawn_t := 0.0
 const DIVE_TIME := 7.0
+const FIRE_TELL := 1.4  # seconds the fireball's spot glows before it is spat (+ its flight)
+const FIRE_TELL_GENTLE := 2.2
+const FIREBALL_SPEED := 11.0
+const FIREBALL_TELL_R := 2.2
+const Looks := preload("res://games/duo_arena/looks.gd")
 var dive_start := -1.0  # unix time the current dive started (where it leaves / rejoins the orbit)
 var dive_u := -1.0  # 0..1 through the current dive in game time (-1: not diving), mirrored to the TV
 var dive_target := Vector3.ZERO
+var aim_at := Vector3.ZERO  # host: where the told fireball goes
 var slice_ok := 0  # msec: next time the sword may slice
 
 
@@ -271,27 +277,34 @@ func _fireballs(delta: float) -> void:
 	if main.net.mode == "host" and not main.net.connected:
 		return
 	fire_t -= delta
-	if fire_t <= 1.0 and not charging:
+	var tell := FIRE_TELL_GENTLE if main.game_mode == "gentle" else FIRE_TELL
+	if fire_t <= tell and not charging:
+		# TELL: the mouth glows and a ring marks the spot the fireball will hit, from now until it lands.
+		var targets0: Array = main.players.filter(func(p) -> bool: return p.active and not p.is_down)
+		if targets0.is_empty():
+			fire_t = tell + 1.0
+			return
 		charging = true
 		main.sound("big_kill", -4.0, 2.0)  # roar
+		aim_at = targets0.pick_random().global_position
+		aim_at.y = 0.0
+		var travel := (global_position.distance_to(aim_at + Vector3.UP) / FIREBALL_SPEED)
+		main.tell_shape("circle", aim_at, Vector3.FORWARD, Vector2(FIREBALL_TELL_R, 0.0), Looks.FIREBALL_WARN, fire_t + travel,
+			{"style": "disc", "stay": 0.2})
 	if fire_t > 0.0:
 		return
 	charging = false
 	fire_t = randf_range(8.0, 14.0)
-	print("Fish fireball")
-	var targets: Array = main.players.filter(func(p) -> bool: return p.active and not p.is_down)
-	if targets.is_empty():
-		return
-	var target = targets.pick_random()
+	print("Fish fireball (told)")
 	var from := global_position + -global_basis.z * 2.5
-	var aim: Vector3 = target.global_position + Vector3.UP * 1.0 - from
+	var aim: Vector3 = aim_at + Vector3.UP * 1.0 - from
 	var ball := preload("res://games/duo_arena/enemy_shot.gd").new()
 	ball.main = main
 	ball.net_id = main.next_net_id()
 	ball.fireball = true
 	ball.color = Color(1.0, 0.45, 0.1)
 	ball.size = 2.2
-	ball.speed = 11.0
+	ball.speed = FIREBALL_SPEED
 	ball.damage = 12.0
 	ball.life = 6.0
 	ball.direction = aim.normalized()
