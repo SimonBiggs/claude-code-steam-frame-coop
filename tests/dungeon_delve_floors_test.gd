@@ -1,6 +1,6 @@
 extends SceneTree
 ## DUNGEON DELVE deep floors: checks the generator over many seeds (no game, no window).
-##   godot-test --headless --path . -s res://tests/dungeon_delve_floors_test.gd
+##   godot-test --headless --path . -s res://tests/dungeon_delve_floors_test.gd   (GEN_QUICK=1 = the landing sample)
 ## For every zone x floor x difficulty and SEEDS seeds:
 ##  - logic: every room can be reached from the start (keys found before their locked doors, puzzle
 ##    switches on the near side, the secret room behind its wall), the key is never behind its own door;
@@ -35,7 +35,7 @@ var collected: Array = []
 
 
 func _initialize() -> void:
-	var seeds := int(OS.get_environment("SEEDS")) if OS.has_environment("SEEDS") else 60
+	var seeds := Seeded.test_count(60, 6)  # 6 + the family seeds in a landing (GEN_QUICK=1), 60 nightly
 	var t0 := Time.get_ticks_msec()
 	for heroic in [false, true]:
 		for zone in FloorGen.ZONE_COUNT:
