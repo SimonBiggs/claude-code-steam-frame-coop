@@ -30,6 +30,13 @@ extends Node3D
 ## CHAMP races in CPU slot 0 wearing the hat you win by finishing the place; won hats are worn by the drivers
 ## (saved). Split lanes round flower-bed islands have a shorter shortcut lane with a boost arrow. Picture story
 ## cards (TV + VR), a row of place pictures on the results, and one RUN telemetry line per race.
+##
+## SECOND PASS (deep.gd, surprises.gd, town.gd): BOLT'S GIFTS on three pick orbs over the road before the pit stop's
+## gates (drive through one: bubble start / turbo laps / star start / box magnet for the whole next cup; nobody left
+## out); SURPRISES from a series' second race (the cup's gumball / coconut / snowball / meteor, the season's ball /
+## acorn on the tour) ALWAYS told by a steady glowing circle (core/warn_rings.gd) with the thing hanging over it before
+## it lands, on spots trackgen.gd proves leave a clear lane; the cups' puddles and bumpers get glowing outlines as you
+## come up to them; SEASONS dress every roadside (core/season_kit.gd); BOLT'S RACE TOWN grows by the start line.
 
 const VrText := preload("res://core/vr_text.gd")
 const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV player")

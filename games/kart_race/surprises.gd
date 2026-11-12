@@ -3,7 +3,7 @@ extends Node3D
 ##  - Host: from the second race of a cup / tour place, when a person comes up to one of the track's surprise spots
 ##    (trackgen.gd: proven to leave a wide clear lane), it may go off: every machine shows a steady glowing circle on
 ##    the road for Deep.TELL seconds while the thing (gumball, coconut, snowball, meteor, ball, acorn) falls out of the
-##    sky into it; it lands, the circle glows hot for Deep.STAY, and karts inside spin out (harmless; a star or a
+##    sky into it (it hangs wobbling high over the circle the whole time, so it is seen from far off); it lands, the circle glows hot for Deep.STAY, and karts inside spin out (harmless; a star or a
 ##    bubble saves you). It can never land before its circle has shown for TELL seconds (st.early counts any that did).
 ##    Then it bounces off the side of the road and is gone.
 ##  - Every machine, for its own karts: the cups' puddles / ice / moon pads / bumpers get a glowing outline as you
@@ -69,7 +69,8 @@ func host_update(dt: float) -> void:
 				if not k.active or k.finished:
 					continue
 				var d := fposmod(float(sp[0]) - k.s, tr.length)
-				if d > Deep.TRIGGER[0] and d < Deep.TRIGGER[1]:
+				var eta := d / maxf(absf(k.speed), 1.0)  # it lands just before they get there: told the whole way
+				if d > Deep.TRIGGER[0] and d < Deep.TRIGGER[1] and eta > Deep.TELL + Deep.LEAD[0] and eta < Deep.TELL + Deep.LEAD[1]:
 					cool[i] = 14.0  # one roll per approach
 					if randf() < float(rate.chance) or OS.has_environment("KART_SURPRISE"):
 						main.surprise(i, kind)
@@ -125,22 +126,24 @@ func update(dt: float) -> void:
 		var t := float(d.t)
 		var n: Node3D = d.node
 		var c: Vector3 = d.pos
-		var fall := 0.9  # seconds of falling at the end of the tell (before that it waits high up, out of sight)
+		var fall := 0.7  # seconds of falling at the end of the tell; before that it hangs wobbling high over its circle
 		if t < Deep.TELL:
 			var f := clampf((t - (Deep.TELL - fall)) / fall, 0.0, 1.0)
-			n.visible = f > 0.0
-			n.position = c + Vector3(0, 1.2 + 26.0 * (1.0 - f * f), 0)
+			n.visible = true
+			n.position = c + Vector3(sin(t * 7.0) * 0.25 * (1.0 - f), 1.2 + (12.0 + sin(t * 3.0) * 0.6) * (1.0 - f * f), 0)
 			n.rotation.x += dt * 4.0
 		else:
 			if was < Deep.TELL:
 				st.lands += 1
 				main.surprise_landed(c, String(d.kind))
-			var a := t - Deep.TELL  # bounce off the side of the road and away
+			var a := maxf(0.0, t - Deep.TELL - Deep.STAY * 0.7)  # sits in its circle a moment, then bounces off the road
 			var side := Vector3(-d.dir.z, 0, d.dir.x) * float(d.side)
 			n.position = c + side * a * 7.0 + Vector3(0, 1.2 + absf(sin(a * 5.0)) * 2.2 * maxf(0.0, 1.0 - a * 0.6), 0)
 			n.rotation.z -= dt * 6.0 * float(d.side)
 			n.scale = Vector3.ONE * clampf(2.2 - a, 0.01, 1.0)
-		if t > Deep.TELL + 2.2:
+			if a <= 0.0:
+				n.position = c + Vector3(0, 1.2 + absf(sin((t - Deep.TELL) * 9.0)) * 0.5, 0)
+		if t > Deep.TELL + Deep.STAY + 2.2:
 			n.queue_free()
 			drops.remove_at(i)
 			continue

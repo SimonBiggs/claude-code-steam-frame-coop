@@ -35,7 +35,7 @@ const STAR_START := 3.0  # seconds of star at GO
 ## Surprises: kind -> picture, colours (body, detail), the ring colour.
 const SURPRISES := {
 	"gumball": {"pic": "gumball", "body": Color(1.0, 0.4, 0.62), "detail": Color(1.0, 1.0, 1.0)},
-	"coconut": {"pic": "coconut", "body": Color(0.5, 0.33, 0.18), "detail": Color(0.3, 0.2, 0.1)},
+	"coconut": {"pic": "coconut", "body": Color(0.5, 0.8, 0.3), "detail": Color(0.35, 0.25, 0.12)},  # a green one (brown hid on the mud road)
 	"bigsnowball": {"pic": "bigsnowball", "body": Color(0.96, 0.98, 1.0), "detail": Color(0.75, 0.85, 0.95)},
 	"meteor": {"pic": "meteor", "body": Color(0.45, 0.38, 0.4), "detail": Color(1.0, 0.55, 0.15)},
 	"bouncyball": {"pic": "bouncyball", "body": Color(1.0, 0.3, 0.3), "detail": Color(1.0, 0.9, 0.3)},
@@ -48,10 +48,11 @@ const RING_COLOR := Color(1.0, 0.62, 0.12)  # the steady glowing circle: orange 
 const HOT_COLOR := Color(1.0, 0.25, 0.2)  # the moment it lands
 const HAZARD_TELL := Color(1.0, 0.9, 0.25)  # puddles' / bumpers' outlines as you come up to them
 const TELL := 2.6  # seconds a surprise is told before it lands (it can't land sooner)
-const STAY := 0.5  # seconds the landing spot is "hot"
+const STAY := 1.2  # seconds the landing spot is "hot" (it rolls about in the circle, then bounces off the road)
 const R := 2.6  # the circle's radius (trackgen.gd keeps a CLEAR_LANE beside it)
 const LAT := 2.6  # the circle's centre this far off the middle of the road (left or right)
-const TRIGGER: Array[float] = [55.0, 85.0]  # a person this far before a spot sets it off (metres along the road)
+const TRIGGER: Array[float] = [40.0, 140.0]  # a person this far before a spot may set it off (metres along the road)...
+const LEAD: Array[float] = [0.3, 1.1]  # ...when they'd get there this many seconds after it lands (so it drops just ahead)
 ## Per speed: how many may be told at once, the chance a spot goes off when someone comes up to it, and none at all.
 const RATE := {"gentle": {"max": 1, "chance": 0.45}, "zoom": {"max": 2, "chance": 0.8}, "trial": {"max": 0, "chance": 0.0}}
 const SPOTS := 3  # surprise spots trackgen.gd tries to place on a track
@@ -122,9 +123,9 @@ static func check(has_picture: Callable) -> Array[String]:
 			why.append("no surprise for %s" % s)
 	if TELL < 2.0:
 		why.append("surprises told for under 2 s")
-	# The tell must come before a kart can get there: at the fastest a kart goes, TRIGGER[0] metres takes longer than TELL.
-	if TRIGGER[0] / 30.0 < TELL * 0.6:
-		why.append("a fast kart reaches a spot long before it is told")
+	# It goes off only for a kart that will get there after it lands, and never closer than TRIGGER[0] (seen coming).
+	if LEAD[0] < 0.2 or TRIGGER[0] < 35.0:
+		why.append("a surprise could go off right under someone")
 	for t in TOWN:
 		if not has_picture.call(String(t[1])):
 			why.append("town %s: no picture %s" % [t[0], t[1]])

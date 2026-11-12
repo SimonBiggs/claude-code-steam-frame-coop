@@ -203,6 +203,11 @@ func on_frame_limit(_note := "") -> void:
 			gen += 1
 	BotEnd.check(gen >= 1, "a generated track was built (mode %s, t=%.0f)" % [main.net.mode, t])
 	BotEnd.check(races >= 1 or main.state in ["race", "countdown", "results"], "racing started (mode %s, races %d, state %s)" % [main.net.mode, races, main.state])
+	BotEnd.check(int(main.surprises.st.early) == 0, "no surprise landed on anyone before its circle had shown (%s)" % str(main.surprises.st))
+	if main.season != "" and gen >= 1:
+		BotEnd.check(season_seen, "the season's things by the road (%s)" % main.season)
+	if pit_seen:
+		BotEnd.check(gift_orbs_seen == 3, "Bolt's three gift orbs at the pit stop (%d)" % gift_orbs_seen)
 
 
 func _end_run(mode: String) -> void:
