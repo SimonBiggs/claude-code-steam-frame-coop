@@ -20,6 +20,8 @@ extends Node3D
 ##   icon_y, icon_scale, bob (m), label_y, label_px, font, two_lines (one word a line), dot_r, dot_y, dot_size
 ##   touch (m, walking in), hit_r / hit_height (shots), max_y (at_point ignores players above), group (node group),
 ##   pop (the picks grow in one after another), punch (picture pops this much on a take)
+##   for_others (true: only other players can take these, never the VR player - Obstacle Rush's runners' orbs over
+##   the start while the giant watches; VrViewCheck.pick_hidden doesn't ask the VR head to see them)
 ## MODES: the GENTLE / BRAVE / HARD team pick every game uses (one place: names, pictures, colours, lines). Games
 ## that had their own ids keep them in saves and net state; ALIASES maps them (mega / heroic -> hard, zoom -> brave).
 
@@ -28,6 +30,7 @@ const MeshKit := preload("res://core/mesh_kit.gd")
 ## Every orb is in this group while it shows: VR cards, banners and words move clear of it (UiKit.vr_dodge) and
 ## core/vr_view_check.gd fails a VR bot whose panel covers one. A game never lifts its orbs out of a card's way.
 const KEEP_CLEAR := preload("res://core/vr_view_check.gd").KEEP_CLEAR
+const FOR_OTHERS := preload("res://core/vr_view_check.gd").FOR_OTHERS_META
 
 const MODES: Array[Dictionary] = [
 	{"id": "gentle", "name": "GENTLE", "pic": "heart", "color": Color(0.45, 1.0, 0.55), "waves": 0, "fx": []},
@@ -137,6 +140,8 @@ func show_orbs(new_stage: String, list: Array, origin: Vector3, gap: float = 2.6
 		o2.collision_layer = collision_layer
 		o2.collision_mask = 0
 		o2.add_to_group(KEEP_CLEAR)
+		if bool(_o("for_others", false)):
+			o2.set_meta(FOR_OTHERS, true)
 		if String(_o("group", "")) != "":
 			o2.add_to_group(String(_o("group", "")))
 		if collision_layer != 0:

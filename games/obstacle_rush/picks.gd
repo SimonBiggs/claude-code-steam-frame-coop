@@ -98,9 +98,10 @@ func show_row(new_stage: String, entries: Array, at: Array, vr: bool) -> void:
 	if vr:  # a modest ball an arm's reach away; the names just under each ball, never at the giant's eyes
 		orbs.show_orbs(new_stage, entries, at[0], 0.0, 0.0, {"at": at, "scale": Deep.VR_SCALE, "pop": true, "font": 56,
 			"label_y": -1.15, "label_px": 0.0042, "two_lines": true, "bob": 0.01 * Deep.VR_S, "hit_r": PickOrbs.BALL_R, "dot_r": 0.8})
-	else:  # the names over the balls: under them they met the runners' nameplates
+	else:  # the names over the balls: under them they met the runners' nameplates. Only runners take these: a VR giant
+		# watching from beside the table may see one behind a course piece (for_others).
 		orbs.show_orbs(new_stage, entries, at[0], 0.0, 0.0, {"at": at, "scale": Deep.ORB_SCALE, "pop": true, "font": 64,
-			"label_y": 1.25, "label_px": 0.0105, "two_lines": true, "bob": 0.08})
+			"label_y": 1.25, "label_px": 0.0105, "two_lines": true, "bob": 0.08, "for_others": main.vr_rig != null})
 	main.pick_banner()
 
 
