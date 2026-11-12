@@ -63,7 +63,7 @@ func _ready() -> void:
 			kit.join_bot(main.party))  # a flat host (TV / Deck hosting): one pad hero here, in slot 0
 	kit.every(4.0, _report)
 	kit.every(0.5, _results)
-	var full := 150.0 if host else (140.0 if client else 185.0)  # (+ the pick orbs: the mode once, a module each mission)  # the whole trip: four missions, then docking
+	var full := 150.0 if host else (130.0 if client else 185.0)  # (a client ends well before its host: a late joiner too)  # (+ the pick orbs: the mode once, a module each mission)  # the whole trip: four missions, then docking
 	var end: float = preload("res://tests/bot_end.gd").end_at(full)  # (BOT_END, --quit-after, the runner's deadline)
 	short = end < full - 1.0
 	kit.at(end, "finish", func() -> void:
@@ -72,6 +72,8 @@ func _ready() -> void:
 
 
 func _results() -> String:
+	if main == null or not is_instance_valid(main) or main.space == null:
+		return ""
 	seen_missions[int(main.net.state_get("mission", 0))] = true
 	max_objs = maxi(max_objs, main.space.objs.size())
 	if main.results_showing():
@@ -145,9 +147,9 @@ func _vr_bot(delta: float) -> void:
 			kit.vr_reach(rig, VrRig.RIGHT, Vector3(0.5, 0.6, 0.25), 1.0, delta)
 			# (the ghost glove shows on the first mission's practice ring; a lone pilot steers onto the picks before that)
 			var alone: bool = main._crew_slots().is_empty() and main.picks.showing()
-			if String(main.net.state_get("phase", "")) != "play" and not alone:
+			if String(main.net.state_get("phase", "")) != "play" and not alone and vr_t > 1.0:
 				vr_t = 0.0
-			if vr_t > 3.5 or alone:
+			if vr_t > 3.5 or (alone and vr_t > 1.5):
 				vr_step = "reach"
 				vr_t = 0.0
 		"reach":
@@ -194,6 +196,8 @@ func _vr_bot(delta: float) -> void:
 
 
 func _report() -> String:
+	if main == null or not is_instance_valid(main) or main.space == null:
+		return ""
 	return "BOT %s: mission %d phase %s stars %d off (%.1f,%.1f) objs %d rings %d pops %s lasers %d mode %s gift %s orbs %d tells %d hits %d" % [
 		main.net.mode, int(main.net.state_get("mission", 0)), String(main.net.state_get("phase", "")),
 		int(main.net.state_get("stars", 0)), main.space.off.x, main.space.off.y, main.space.objs.size(),
