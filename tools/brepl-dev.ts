@@ -634,6 +634,17 @@ export async function nightly(tests: string[] = []) {
   return (await sh(`duo-nightly-tests ${tests.join(" ")} 2>&1 | tail -1`)).out;
 }
 
+/** The worktree that has `branch` checked out (git worktree list), else ~/GodotProjects/wt-<branch>. Agents name their
+ *  worktrees freely (2026-11-12: deep-kart2 lived in wt-deep-kart and dev.land stopped with "not a git repository"). */
+export async function branchDir(branch: string): Promise<string> {
+  const wl = (await sh("git worktree list --porcelain", LIVE)).out;
+  for (const blk of wl.split("\n\n")) {
+    const p = blk.match(/^worktree (.+)$/m)?.[1];
+    if (p && blk.split("\n").some(l => l.trim() === `branch refs/heads/${branch}`)) return p;
+  }
+  return join(GP, `wt-${branch}`);
+}
+
 export async function land(branch: string, genTests: string[], botId: string, otherBots: string[], msg: string) {
   // A landing that stopped leaves its merge in wt-merge (and its files in staging) for a retry. Landing a DIFFERENT
   // branch next must not carry it along (2026-10-31: a tools-only landing nearly deployed saga-deep, whose tests had
@@ -648,8 +659,9 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   // The branch's worktree must be fully committed: land merges the BRANCH, so anything uncommitted (an edit, or an
   // untracked .uid / .gd a re-import made) would silently stay behind (2026-11-11: marble-deep2's
   // marble_maze_deep_test.gd.uid; land used to print tracked changes only and carry on).
-  const dirty = (await sh(`git status --porcelain | head -5`, join(GP, `wt-${branch}`))).out.trim();
-  if (dirty) return { stop: "uncommitted", out: `wt-${branch} has uncommitted files (commit them on the branch, or ask its agent):\n${dirty}` };
+  const bdir = await branchDir(branch);
+  const dirty = (await sh(`git status --porcelain | head -5`, bdir)).out.trim();
+  if (dirty) return { stop: "uncommitted", out: `${bdir} has uncommitted files (commit them on the branch, or ask its agent):\n${dirty}` };
   // Every script carries its .uid in git: a missing one is made by each machine's next import, so live and the
   // devices get untracked files and different uids (2026-11-12: paint-deep2's tests/paint_and_guess_deep_test.gd.uid).
   const m = await sh(`cd ${GP}/wt-merge && git merge --no-edit ${branch} 2>&1 | tail -1; git diff --name-only --diff-filter=U`);
@@ -659,7 +671,7 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     return { stop: "merge", out: m.out + "\n(resolve in ~/GodotProjects/wt-merge and commit, or git merge --abort there)" };
   // (checked on the merge: a branch made before main got a missing .uid shouldn't be blamed for it)
   const noUid = (await sh(`git ls-files '*.gd' | while read f; do [ -n "$(git ls-files "$f.uid")" ] || echo "$f"; done | head -5`, join(GP, "wt-merge"))).out.trim();
-  if (noUid) { await sh("git reset -q --hard main", join(GP, "wt-merge")); return { stop: "missing-uid", out: `wt-${branch}: scripts with no .uid in git (run godot-test --headless --path . --import there, then commit the .uid files):\n${noUid}` }; }
+  if (noUid) { await sh("git reset -q --hard main", join(GP, "wt-merge")); return { stop: "missing-uid", out: `${bdir}: scripts with no .uid in git (run godot-test --headless --path . --import there, then commit the .uid files):\n${noUid}` }; }
   const drift = await sh(`for d in ${DEPLOYED.join(" ")}; do diff -rq --exclude='*.uid' --exclude='*.import' duo-arena/$d .duo-arena-stage/$d; done`, GP);
   // A retry after a stopped landing (a flaky bot, a fix committed in wt-merge): live is clean and every file where
   // staging differs from live is one merge-arcade changes (so it came from the earlier copy), not someone's edit.
@@ -766,7 +778,7 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   await writeFile(msgFile, `Merge branch 'merge-arcade' (${branch}: uids, tests)\n\nCo-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>\nClaude-Session: https://claude.ai/code/session_01UPzLapMn8qMpWGwygUaPCg\n`);
   const d = await sh(`duo-deploy ${JSON.stringify(String(msg).split("\n")[0].trim())} 2>&1 | grep -v offline | tail -4; [ \${PIPESTATUS[0]} -eq 0 ] || { echo "DEPLOY REFUSED by duo-deploy: live main not merged"; exit 1; }; duo-deploy-deck 2>&1 | grep -v offline | tail -4; cd ${LIVE} && git merge -q --no-edit merge-arcade -F ${msgFile} && rm -f ${msgFile} && cd ../wt-merge && git merge -q --ff-only main && echo MERGED; cd ${LIVE} && git log --oneline -2 | cut -c1-60`);
   // The branch's worktree goes only after its Godots quit (an agent's offscreen run may still be up).
-  const rm = /MERGED/.test(d.out) ? await removeWorktree(join(GP, `wt-${branch}`), branch) : { quit: [], out: "not removed: the merge into main didn't finish" };
+  const rm = /MERGED/.test(d.out) ? await removeWorktree(bdir, branch) : { quit: [], out: "not removed: the merge into main didn't finish" };
   // Tools the branch changed in the repo (tools/multibot.ts, tools/brepl-dev.ts, ...) get installed where they run,
   // so the repo copy and the installed one never drift (2026-10-30: late-join's multibot.ts --late sat uninstalled).
   const installed = /MERGED/.test(d.out) ? await installTools(`${(await sh("git rev-parse HEAD^1", LIVE)).out}`) : [];
