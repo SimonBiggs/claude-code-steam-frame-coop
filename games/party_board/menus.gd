@@ -53,7 +53,11 @@ func _ready() -> void:
 		var bm := BoxMesh.new()
 		bm.size = Vector3(0.006, 0.006, 1.0)
 		laser.mesh = bm
-		laser.material_override = MeshKit.material(Color(1.0, 0.9, 0.4, 0.8), 2.0)
+		# See-through and far-reaching: drawn under VR cards (UiKit.VR_PRIO_UNDER_UI), or the beam behind a card is
+		# blended over it. Its own copy: MeshKit.material is shared by everything of that colour.
+		var lm := MeshKit.material(Color(1.0, 0.9, 0.4, 0.8), 2.0).duplicate() as StandardMaterial3D
+		lm.render_priority = UiKit.VR_PRIO_UNDER_UI
+		laser.material_override = lm
 		laser.visible = false
 		main.add_child(laser)
 

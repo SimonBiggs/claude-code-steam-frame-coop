@@ -18,9 +18,14 @@ extends Node
 ## the bot collects every text a guesser could see (Label3Ds on the layers a TV camera draws, the TV
 ## HUD lines and banner) and at the reveal checks none contains the word ("BOT LEAK" = failure); the artist's
 ## picture of it must be up (artist-only layer) and no 3D picture a TV camera draws may show it.
+## Second pass (games/paint_and_guess/deep.gd): the artist (flat cursor, VR laser, or the VR hand on the VR row) and the
+## guessers' rings take the picks (the mode, then a gift for every later game); surprises come from the first round
+## (PG_TRICKS_NOW, unless BOT_NO_TRICKS) and every one must stay bare canvas (nobody's paint inside it); with nobody to
+## guess (a lone Deck, the VR artist alone) Smudge guesses and the game moves on.
 
 const FAKE_PAD := 40
 const BotEnd := preload("res://tests/bot_end.gd")  # check(): counted checks, so every run ends with a real BOT RESULT
+const Deep := preload("res://games/paint_and_guess/deep.gd")
 
 var main
 var t := 0.0
@@ -48,6 +53,14 @@ var leaks := 0
 var word_checks := 0
 var card_seen := ""
 var pic_seen := ""  # the artist-only picture above the easel, as seen during this round
+var hz_last := {}  # the surprise showing (host: checked bare when it ends)
+var hz_checked := 0
+var picks_seen := 0
+var lone_reveals := 0  # host: rounds that ended with nobody to guess ...
+var smudge_seen := 0  # ... and how many of them Smudge guessed
+var stamp_rounds := 0  # rounds painted with the STAMPS gift (flat bot taps now and then) ...
+var stamps_total := 0  # ... and the stars it stamped
+var last_stamps := 0
 var seen_pics := {}  # every 3D picture a guesser could see during the draw (secret-picture check)  # the artist-only word card above the easel, as seen during this round
 
 
@@ -62,6 +75,8 @@ class RealPadFilter extends Node:
 
 func _ready() -> void:
 	preload("res://tests/bot_end.gd").arm(self)  # end by itself in networked runs
+	if not OS.has_environment("BOT_NO_TRICKS"):
+		OS.set_environment("PG_TRICKS_NOW", "1")  # surprises from the first round (a short run sees them)
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keeps running if the Start check opened the pause menu
 	main = load("res://games/paint_and_guess/main.tscn").instantiate()
 	add_child(main)
@@ -74,11 +89,16 @@ func _ready() -> void:
 ## The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
 func _exit_tree() -> void:
 	if main != null and is_instance_valid(main):
-		if main.net.mode == "host" and not main.net.connected:
-			# Solo VR host (the Frame alone): nobody to guess, so the game waits for a TV machine.
-			BotEnd.check(main.state == "wait", "a VR host alone waits for TV guessers (state %s)" % main.state)
-		else:
-			BotEnd.check(rounds_done >= 1, "a drawing round was played (mode %s, t=%.0f)" % [main.net.mode, t])
+		BotEnd.check(rounds_done >= 1, "a drawing round was played (mode %s, t=%.0f)" % [main.net.mode, t])
+		if main.net.mode != "client":
+			BotEnd.check(picks_seen >= 1 or OS.has_environment("PG_MODE"), "the picks came up and were taken (%d)" % picks_seen)
+			if lone_reveals >= 1:
+				# A lone painter (a lone Deck, the VR artist alone) makes real progress: Smudge guesses.
+				BotEnd.check(smudge_seen >= 1, "Smudge guessed for a lone painter (%d of %d rounds)" % [smudge_seen, lone_reveals])
+			if stamp_rounds >= 1:
+				BotEnd.check(stamps_total >= 1, "a tap stamped a star with the STAMPS gift (%d)" % stamps_total)
+			print("BOT %s: picks %s, surprises %s (%d checked bare), museum %d" % [main.net.mode, str(main.picks.history),
+				str(main.hazards.seen), hz_checked, int(main.save.data.get("museum_n", 0))])
 
 
 func _pad_press(device: int, button: JoyButton) -> void:
@@ -151,10 +171,13 @@ func _process(delta: float) -> void:
 			g.bot = true
 	if mode != "client":
 		var a = main.players[0]
-		if a.fake_vr:
+		if main.state == "pick":
+			_drive_pick(a, delta)
+		elif a.fake_vr:
 			_drive_vr(a, delta)
 		elif not a.vr:
 			_drive_flat(a, delta)
+		_check_surprise()
 		# Short runs: skip the intros (after a moment to read them).
 		if main.state == "intro" and main.state_t > 1.5 and main.state_t < 4.0:
 			main.state_t = 99.0
@@ -188,6 +211,58 @@ func _join_players(mode: String) -> void:
 	for i in extra:
 		var p = main.debug_join()
 		print("BOT: debug_join -> %s" % ("P%d" % (p.index + 1) if p != null else "none"))
+
+
+## The picks: the artist rests its brush under an orb (canvas row: flat cursor or the VR laser) or moves its hand into
+## one and keeps it there (VR row). Each new pick its own orb, so every one gets taken now and then.
+func _drive_pick(a, _delta: float) -> void:
+	var pk = main.picks
+	if not pk.active():
+		return
+	var want: int = (int(pk.history.size()) + 1) % 3
+	if a.fake_vr:
+		a.bot_trigger = false
+		a.bot_lstick = Vector2.ZERO
+		a.bot_a = false
+		if pk.row == "vr":
+			var at: Vector3 = pk.orb_position(want)
+			if at != Vector3.INF and pk.t > 1.2:
+				a.bot_hand_pos = at
+				a.bot_hand_fwd = (at - a.head.global_position).normalized()
+			else:
+				a.bot_hand_pos = a.head.global_position + Vector3(0.25, -0.45, -0.1)
+		else:
+			var u: Vector2 = pk.under_point(want)
+			if u != Vector2.INF and pk.t > 1.2:
+				var from: Vector3 = main.canvas.canvas_to_world(Vector2(0.1, -0.1), 1.0)
+				a.bot_hand_pos = from
+				a.bot_hand_fwd = (main.canvas.canvas_to_world(u, 0.0) - from).normalized()
+		return
+	a.bot = true
+	a.bot_paint = false
+	var u2: Vector2 = pk.under_point(want)
+	if u2 != Vector2.INF and pk.t > 1.2:
+		a.bot_cursor = a.bot_cursor.move_toward(u2, 0.6 * get_process_delta_time())
+
+
+## Host: every surprise stays bare canvas from its tell to its end (nobody's paint gets in: deep.gd blocks()).
+func _check_surprise() -> void:
+	var now: Dictionary = main.hazards.now
+	if var_to_str(now) == var_to_str(hz_last):
+		return
+	if not hz_last.is_empty():
+		var bare := Deep.bare(hz_last, main.canvas.export_strokes())
+		hz_checked += 1
+		if not bare:
+			for s in main.canvas.export_strokes():
+				var pts: PackedVector2Array = s[3]
+				for i in pts.size():
+					if Deep.inside(hz_last, pts[i], Deep.PAD + float(s[2]) * 0.5) or (i > 0 and Deep.blocks(hz_last, pts[i - 1], pts[i], float(s[2]) * 0.5)):
+						print("BOT: paint in the surprise: stroke %d (owner %d, colour %d, width %.3f, %d points) point %d %s" % [s[0], s[4], s[1], s[2], pts.size(), i, pts[i]])
+						break
+		BotEnd.check(bare, "the %s surprise stayed bare canvas (stopped the brush %d times)" % [hz_last.kind, main.hazards.stopped])
+		print("BOT: %s surprise over: bare=%s, brush stopped %d times" % [hz_last.kind, bare, main.hazards.stopped])
+	hz_last = now.duplicate()
 
 
 ## A doodle point for shape k at phase u (0..1), in canvas metres.
@@ -255,6 +330,10 @@ func _drive_flat(a, delta: float) -> void:
 		if shape % 7 == 6:
 			main.artist_clear()
 		return
+	if main.gift == "stamps" and shape % 4 == 1:  # STAMPS: a quick tap stamps a star
+		a.bot_paint = u < 0.04
+		a.bot_cursor = _doodle(shape, 0.3)
+		return
 	a.bot_paint = u < 1.0
 	a.bot_cursor = _doodle(shape, minf(u, 1.0))
 
@@ -266,7 +345,11 @@ func _drive_vr(a, delta: float) -> void:
 	vr_t += delta
 	if t > 30.0 and not has_meta("vr_sat_down"):
 		set_meta("vr_sat_down", true)
-		a.head.position.y -= 0.4  # the headset goes to a smaller kid / they sit down: the easel should follow
+		# The headset goes to a smaller kid / they sit down: the easel should follow. Never below a seated player's eyes
+		# (core/vr_rig.gd FAKE_EYE_SEATED; a seated run - BOT_VR_SEATED - already sits there, it stays put).
+		var seated: float = preload("res://core/vr_rig.gd").FAKE_EYE_SEATED
+		if a.head.position.y > seated + 0.2:
+			a.head.position.y = seated
 		print("BOT VR: head drops to %.2f m" % a.head.global_position.y)
 	a.bot_lstick = Vector2.ZERO
 	a.bot_a = false
@@ -369,12 +452,23 @@ func _drive_vr(a, delta: float) -> void:
 
 func _track(mode: String) -> void:
 	var st: String = main.state
+	if int(main.stamps) != last_stamps:
+		stamps_total += maxi(0, int(main.stamps) - last_stamps)
+		last_stamps = int(main.stamps)
+	if main.picks != null and main.picks.history.size() > picks_seen:
+		picks_seen = main.picks.history.size()
+		print("BOT %s: picked %s" % [mode, str(main.picks.history.back())])
 	max_points = maxi(max_points, main.canvas.point_count)
 	seen_types[main.round_type] = true
 	if st != last_state:
 		if st == "reveal":
 			_check_leaks(mode)
 			rounds_done += 1
+			if mode != "client" and main.active_guessers().is_empty() and main.round_type != "team":
+				lone_reveals += 1
+				smudge_seen += 1 if main.smudge_got else 0
+			if mode != "client" and main.gift == "stamps" and not main.players[0].fake_vr:
+				stamp_rounds += 1
 			var got := 0
 			for g in main.active_guessers():
 				if g.got:
@@ -382,8 +476,8 @@ func _track(mode: String) -> void:
 			print("BOT %s: ROUND %d (%s, %s) COMPLETE - '%s' guessed by %d/%d, canvas %d strokes / %d points, gallery %d" % [mode,
 				main.round_n, main.round_type, main.theme, main.reveal_word, got, main.active_guessers().size(),
 				main.canvas.strokes.size(), main.canvas.point_count, main.room.pictures.size()])
-			if main.net.mode != "local":  # every machine agrees what it was (tools/multibot.ts)
-				print("BOT AGREE game%d_round%d=%s" % [games_done, main.round_n, main.reveal_word])
+			if main.net.mode == "client" or (main.net.mode == "host" and main.net.peer_count() > 0):  # every machine still here agrees what it was (tools/multibot.ts)
+				print("BOT AGREE game%d_round%d=%s" % [games_done, main.reveal_round, main.reveal_word])
 			# Jump ahead so a short run sees every kind of round, the vote and the final scores:
 			# default: 1 -> TEAM PAINT (3) -> vote; 4+ players: 1 -> SPEED (4) -> GOLDEN FINAL (5) -> vote;
 			# host / fake VR: 1 -> TEAM PAINT (3) -> GOLDEN FINAL (5) -> vote.
@@ -395,7 +489,7 @@ func _track(mode: String) -> void:
 		elif st == "vote":
 			print("BOT %s: VOTE with %d pictures %s" % [mode, main.vote_count(), str(main.vote_words)])
 		elif st == "over":
-			if main.net.mode != "local":  # ... and on Smudge's family gallery
+			if main.net.mode == "client" or (main.net.mode == "host" and main.net.peer_count() > 0):  # ... and on Smudge's family gallery
 				print("BOT AGREE family_game%d=%d" % [games_done, main.family.size()])
 			games_done += 1
 			print("BOT %s: GAME OVER seen (%s) awards: %s; gallery %d, rounds seen %s" % [mode, main._scoreboard(),
