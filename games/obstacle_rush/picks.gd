@@ -26,6 +26,7 @@ var stage := ""  # host: "" | "mode" | "gift"
 var options: Array = []
 var spots: Array = []  # every machine: the orbs' middles (Vector3)
 var vr_row := false  # every machine: the small row in front of the VR giant
+var entries_now: Array = []  # host: the shown row's entries (a VR refit puts the row up again in front of the head)
 var t := 0.0
 var chosen := -1
 var chosen_by := -1
@@ -64,10 +65,26 @@ func begin(new_stage: String, entries: Array, opts: Array, vr: bool, done: Calla
 	inside = {}
 	dwell = {}
 	var in_vr: bool = vr and main.vr_rig != null
+	entries_now = entries
+	if in_vr and not main.vr_rig.refitted.is_connected(_on_refit):
+		main.vr_rig.refitted.connect(_on_refit)
 	var at := Deep.vr_spots(main.vr_rig.head_position(), entries.size(), main.course.desc) if in_vr else Deep.row_spots(main.course.desc, entries.size())
 	show_row(new_stage, entries, at, in_vr)
 	main.net.event("orbs", [new_stage, entries, spots, vr_row])
 	print("PICKS %s: %s (%s)" % [new_stage, opts, "in front of the VR giant" if vr_row else "over the start"])
+
+
+## Host / local: the VR head was fitted (first fit, a kid took the headset, someone sat down) while the small row is
+## up: put it again an arm's reach in front of the head where it is now. The session's first mode pick comes up before
+## the first fit, from the unfitted head down at the giant's feet: the row sat under the table and the lawn (2026-11-12).
+func _on_refit(_h: float) -> void:
+	if not vr_row or stage == "" or chosen >= 0 or main.vr_rig == null:
+		return
+	var at := Deep.vr_spots(main.vr_rig.head_position(), entries_now.size(), main.course.desc)
+	show_row(stage, entries_now, at, true)
+	main.net.event("orbs", [stage, entries_now, spots, vr_row])
+	inside = {}
+	dwell = {}
 
 
 ## Every machine: the row of orbs ("" stage: none).
