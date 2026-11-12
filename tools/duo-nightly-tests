@@ -5,7 +5,7 @@
 # every date, so nothing the sample skips goes unchecked for more than a day (2026-11-12).
 # Runs on a snapshot of live main (~/.cache/duo-nightly/src, its own project name so user:// is separate), headless
 # via godot-test (no controllers, SCHED_IDLE through test-throttle), 2 at a time. Writes
-#   ~/.cache/duo-arena/nightly/latest.json   {"date", "commit", "secs", "tests": {name: {"pass", "secs", "tail"}}}
+#   ~/.cache/duo-arena/nightly/latest.json (partial.json for named tests)  {"date", "commit", "secs", "tests": {name: {"pass", "secs", "tail"}}}
 # and posts a one-line summary to the brepl channel. dev.debt() reports failures and a missing/old run.
 #   duo-nightly-tests [TEST ...]     (names without .gd; default every tests/*_test.gd)
 set -u
@@ -34,7 +34,9 @@ export -f run_one; export OUT
 rm -f "$OUT/.results"
 T0=$(date +%s)
 printf '%s\n' "${TESTS[@]}" | xargs -P 2 -I{} bash -c 'run_one {}'
-python3 - "$OUT" "$COMMIT" "$(( $(date +%s) - T0 ))" <<'PY'
+# A run of named tests (dev.nightly(["x"])) writes partial.json: only a whole sweep is "the nightly" dev.debt reads.
+NAME=latest.json; [ $# -gt 0 ] && NAME=partial.json
+python3 - "$OUT" "$COMMIT" "$(( $(date +%s) - T0 ))" "$NAME" <<'PY'
 import json, sys, os, re, datetime
 out, commit, secs = sys.argv[1], sys.argv[2], int(sys.argv[3])
 tests = {}
@@ -48,7 +50,7 @@ for line in open(os.path.join(out, ".results")):
         ok = code == "0" and any("PASS" in l for l in verdict)
     tests[t] = {"pass": ok, "secs": int(s), "code": int(code), "tail": "\n".join(verdict[-3:])[:600]}
 res = {"date": datetime.datetime.now().isoformat(timespec="minutes"), "commit": commit, "secs": secs, "tests": tests}
-json.dump(res, open(os.path.join(out, "latest.json"), "w"), indent=1)
+json.dump(res, open(os.path.join(out, sys.argv[4]), "w"), indent=1)
 fails = sorted(t for t, r in tests.items() if not r["pass"])
 print(f"nightly full tests @{commit}: {len(tests) - len(fails)}/{len(tests)} pass in {secs // 60} min" + (f"; FAIL: {', '.join(fails)}" if fails else ""))
 PY
