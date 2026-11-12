@@ -167,6 +167,10 @@ func show_orbs(new_stage: String, list: Array, origin: Vector3, gap: float = 2.6
 		l.outline_modulate = LABEL_OUTLINE
 		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		l.position = Vector3(0, float(_o("label_y", -0.95)) * sc, 0)
+		# Drawn after other see-through words (a far player's name tag in line with it was sorted over the pick's name:
+		# Rhythm Band's P2 over GENTLE, 2026-11-12); still depth-tested, so scenery in front hides it (VrViewCheck pick_hidden).
+		l.render_priority = 3
+		l.outline_render_priority = 2
 		o2.add_child(l)
 		o2.dots = Node3D.new()
 		o2.dots.position.y = float(_o("dot_y", 0.0 if not _custom() else float(_o("icon_y", 0.0)))) * sc

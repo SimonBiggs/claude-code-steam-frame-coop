@@ -154,6 +154,8 @@ class Tally extends Logger:
 	var checks := 0
 	var fails := 0
 	var said := false
+	var said_pass := false  # a "BOT RESULT: PASS" line (a bot's own verdict may miss failures it didn't count)
+	var said_fail := false
 	var first_fail := ""
 
 	func _log_message(message: String, _error: bool) -> void:
@@ -161,6 +163,8 @@ class Tally extends Logger:
 		for line in message.split("\n", false):
 			if "BOT RESULT:" in line:
 				said = true
+				said_pass = said_pass or "BOT RESULT: PASS" in line
+				said_fail = said_fail or "BOT RESULT: FAIL" in line
 			elif is_fail_line(line):
 				fails += 1
 				if first_fail == "":
@@ -216,7 +220,18 @@ static func said() -> bool:
 
 ## Print the tally's BOT RESULT unless one was said already (or no tally ran: a test that isn't a bot).
 static func say_result(note := "") -> void:
-	if _tally == null or _tally.said:
+	if _tally == null:
+		return
+	if _tally.said:
+		# A bot's own "BOT RESULT: PASS" while failure lines were printed (Rhythm Band 2026-11-12: a VR view problem
+		# from core/vr_view_watch.gd, then "BOT RESULT: PASS (stopped early ...)"): the last verdict line must say FAIL.
+		_tally.mutex.lock()
+		var f := _tally.fails
+		var first_f := _tally.first_fail
+		var lie := _tally.said_pass and not _tally.said_fail and f > 0
+		_tally.mutex.unlock()
+		if lie:
+			printerr("SCRIPT ERROR: BOT RESULT: FAIL (the bot said PASS, but %d failure line(s) were printed%s; first: %s)" % [f, note, first_f])
 		return
 	_tally.mutex.lock()
 	var checks := _tally.checks
