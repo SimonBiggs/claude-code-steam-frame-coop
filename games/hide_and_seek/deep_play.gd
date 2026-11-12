@@ -361,7 +361,7 @@ func show_tell(a: Array) -> void:
 	if kind == "hoover":
 		rings.shape("line", a[1], a[2], a[3], col, float(a[4]), {"style": "flash", "stay": Deep.HOOVER_ROLL})
 	else:
-		rings.shape("circle", a[1], a[2], a[3], col, float(a[4]), {"style": "disc", "stay": 0.6})
+		rings.warn(a[1], (a[3] as Vector2).x, col, float(a[4]), 0.08, {"style": "rings", "stay": 0.6})
 	main.local_sound("beep", -4.0, 1.4 if kind == "pepper" else 0.9)
 
 
