@@ -11,6 +11,11 @@ extends Node3D
 ## first round each day is the same gold harvest on every machine (golden tree). Telemetry: one RUN line
 ## per round and on quit. Networked: the host sends [seed, level, daily, secs] ("harvest"), the dish
 ## number, the fruit got so far and the orchard as state; every machine rebuilds the rest.
+## SECOND PASS (deep.gd; tests/fruit_catch_deep_test.gd): GENTLE / BRAVE / HARD picked once a session and NUTMEG'S
+## BASKET GIFTS before every round from the second, both on pick orbs in front of the giant (picks.gd: walk under one /
+## reach into one); warned WINDFALLS of rotten apples and WASPS told by steady rings on the grass (hazards.gd); the
+## orchard dressed for the season, winter's magic snow globe (season.gd); NUTMEG'S PANTRY grows every few dishes
+## (pantry.gd). State: "deep" [mode, gift, season], "hz" (the surprise showing), "pantry"; events "orbs" (sticky), "take".
 
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
@@ -34,6 +39,12 @@ const G := preload("res://games/fruit_catch/harvestgen.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const Deep := preload("res://games/fruit_catch/deep.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const PicksScript := preload("res://games/fruit_catch/picks.gd")
+const HazardsScript := preload("res://games/fruit_catch/hazards.gd")
+const SeasonScript := preload("res://games/fruit_catch/season.gd")
+const PantryScript := preload("res://games/fruit_catch/pantry.gd")
 const NUTMEG_POS := Vector3(2.35, 0.0, 2.1)  ## Nutmeg's stump, right of the bowl
 const ORCHARD_CHEERS := {1: "Our first tree!", 5: "Five trees!", 10: "Ten trees!", 20: "A big orchard!", 36: "A whole forest!"}
 
@@ -139,6 +150,24 @@ var nutmeg: Node3D
 var nutmeg_hop := 0.0
 var story_queue: Array = []  # beats waiting to show: [line, pic, color]
 var story_t := 0.0
+# --- Second pass (deep.gd) ---
+var picks: Node  # picks.gd
+var hazards: Node3D  # hazards.gd (every machine draws the "hz" state)
+var season_node: Node3D  # season.gd
+var pantry: Node3D  # pantry.gd
+var mode := "brave"
+var mode_picked := false  # host: this session's mode pick is done
+var gift := ""  # every machine: this round's gift ("" none; from the "deep" state)
+var gift_round := -1  # host: the round the gift was picked for
+var season := ""
+var hz_list: Array = []  # host: this round's surprises
+var hz_i := 0  # host: the next surprise
+var hz_now := {}  # host: the surprise being told / going off
+var hz_fired := false  # host: its apples fell / its wasp set off
+var hz_bumped := {}  # host: slots the wasp bumped this time
+var hz_count := 0  # host: surprises this round (telemetry)
+var bumps := 0  # host: wasp bumps + windfall apples caught this round (telemetry)
+var bot_surprises := false  # bots: surprises from round 1, from 3 s
 
 
 func _ready() -> void:
@@ -159,7 +188,8 @@ func _ready() -> void:
 	save.game_id = GAME_ID
 	# orchard: [[fruit kind, play-day planted, golden, dishes], ...]; days: days played; daily: the date
 	# TODAY'S HARVEST was done.
-	save.defaults = {"best": 0, "orchard": [], "trees": 0, "dishes": 0, "days": 0, "last_day": "", "daily": "", "sessions": 0}
+	save.defaults = {"best": 0, "orchard": [], "trees": 0, "dishes": 0, "days": 0, "last_day": "", "daily": "", "sessions": 0,
+		"mode": "", "last_gift": ""}
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -172,6 +202,10 @@ func _ready() -> void:
 	hints = Hints.new()
 	add_child(hints)
 	hints.bind_party(party)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
 	if OS.has_environment("DUO_JOIN"):
 		net.join_finished.connect(func(ok: bool) -> void: _setup("client" if ok else "local"))
 		net.join(OS.get_environment("DUO_JOIN"))
@@ -209,7 +243,7 @@ func _setup(mode: String) -> void:
 	if mode != "client":
 		net.state_set("best", int(save.data["best"]))
 		_begin_session()
-		_start_round()
+		_next_round()
 	if vr_rig != null:
 		hints.hint("vr_shake", "Grab a branch and SHAKE!", {"to": "vr"})
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -285,6 +319,17 @@ func _build_world(vr: bool) -> void:
 	orchard = Node3D.new()
 	orchard.name = "Orchard"
 	add_child(orchard)
+	hazards = HazardsScript.new()
+	hazards.main = self
+	add_child(hazards)
+	season_node = SeasonScript.new()
+	season_node.name = "Season"
+	season_node.main = self
+	add_child(season_node)
+	pantry = PantryScript.new()
+	pantry.name = "PantryNode"
+	pantry.main = self
+	add_child(pantry)
 
 
 ## Point branch k at its (displaced) tip.
@@ -411,6 +456,7 @@ func _on_player_joined(slot: int, _device: int) -> void:
 	awards.set_player(slot, party.name_of(slot))
 	_refresh_group()
 	_refresh_hud()
+	_refresh_baskets()
 	sound("ui_notify", -6.0)
 
 
@@ -472,7 +518,7 @@ func _move_local_players(delta: float) -> void:
 	var send := send_t <= 0.0
 	if send:
 		send_t = 1.0 / 30.0
-	var playing := String(net.state_get("phase", "play")) == "play"
+	var playing := String(net.state_get("phase", "play")) in ["play", "pick"]
 	for slot in party.local_slots():
 		if not avatars.has(slot):
 			continue
@@ -554,7 +600,7 @@ func on_request(_slot: int, action: String, _args: Array) -> void:
 			net.state_set("shared", not bool(net.state_get("shared", false)))
 		"next_round":
 			if String(net.state_get("phase", "")) == "results":
-				_start_round()
+				_next_round()
 
 
 func on_pause_changed(paused: bool, by_slot: int) -> void:
@@ -642,6 +688,33 @@ func _on_state_changed(key: String, value: Variant) -> void:
 				_banner("FRUIT STORM!", "", "warning")
 		"bowl":
 			_set_pile(int(value))
+		"deep":
+			var dv: Array = value if value is Array else []
+			if dv.size() >= 3:
+				mode = String(dv[0])
+				var was := gift
+				gift = String(dv[1])
+				season = String(dv[2])
+				if season_node != null and season != "":
+					season_node.set_season(season)
+				_refresh_baskets()
+				if gift != "" and gift != was:
+					var gd := Deep.gift(gift)
+					_banner(String(gd.name), "", "victory")
+					_story(String(gd.line), String(gd.pic), gd.color)
+		"hz":
+			var hz := Deep.unpack(value if value is Array else [])
+			if hazards != null:
+				hazards.show_now(hz)
+			if not hz.is_empty():
+				_banner(String(Deep.KIND_NAMES[String(hz.kind)]), "", "warning")
+		"pantry":
+			if pantry != null:
+				var grew: bool = pantry.count >= 0 and int(value) > pantry.count
+				pantry.set_pieces(int(value), true)
+				if grew:
+					var pk: String = Deep.PANTRY[clampi(int(value) - 1, 0, Deep.PANTRY.size() - 1)]
+					_story("Our pantry grew!", String(Deep.PANTRY_PICS[pk]), Color(1.0, 0.8, 0.35))
 		"phase":
 			if String(value) == "results":
 				_show_results(net.state_get("results", {}))
@@ -667,6 +740,25 @@ func _begin_session() -> void:
 	net.state_set("days", int(save.data.days))
 	net.state_set("orchard", (save.data.orchard as Array).duplicate(true))
 	net.state_set("grew", grew)
+	season = Seeded.season()
+	if OS.has_environment("FC_SEASON") and Deep.SEASONS.has(OS.get_environment("FC_SEASON")):
+		season = OS.get_environment("FC_SEASON")
+	if String(save.data.mode) != "":
+		mode = Deep.mode_of(String(save.data.mode))
+	if OS.has_environment("FC_MODE"):
+		mode = Deep.mode_of(OS.get_environment("FC_MODE"))
+		mode_picked = true  # (What's New "try": straight in)
+	if OS.has_environment("FC_GIFT") and not Deep.gift(OS.get_environment("FC_GIFT")).is_empty():
+		mode_picked = true
+		gift = OS.get_environment("FC_GIFT")  # (What's New "try": the first round with that gift)
+		gift_round = 1
+	if OS.has_environment("FC_SURPRISES_NOW"):
+		bot_surprises = true
+		mode_picked = true
+	_send_deep()
+	net.state_set("pantry", Deep.pantry(int(save.data.dishes)))
+	var sd := Deep.season_data(season)
+	_story(String(sd.line), String(sd.pic), sd.drift)
 	print("Fruit Catch orchard: %d trees (%d planted in all), day %d, today's harvest %s, session seed %d" % [
 		(save.data.orchard as Array).size(), int(save.data.trees), int(save.data.days),
 		"done" if String(save.data.daily) == Seeded.today() else "due", session_seed])
@@ -680,7 +772,7 @@ func _start_round() -> void:
 	frenzy = false
 	session_round += 1
 	var daily := String(save.data.daily) != Seeded.today()
-	var lv := G.DAILY_LEVEL if daily else G.level(session_round, int(save.data.trees))
+	var lv := G.DAILY_LEVEL if daily else Deep.level(session_round, int(save.data.trees), mode)
 	var seed_value := G.daily_seed() if daily else G.round_seed(session_seed, session_round)
 	harvest = G.harvest(seed_value, lv, daily, round_time)
 	drop_i = 0
@@ -690,6 +782,21 @@ func _start_round() -> void:
 	caught_round = 0
 	shakes_round = 0
 	round_live = true
+	if gift_round != session_round:
+		gift = ""
+	_send_deep()
+	var hz_spec := {"mode": mode, "season": season, "round": session_round}
+	if bot_surprises:
+		hz_spec["round"] = Deep.FIRST_ROUND
+		hz_spec["first"] = Deep.SHORT_FIRST
+	hz_list = Deep.hazards(harvest, hz_spec)
+	hz_i = 0
+	hz_now = {}
+	hz_count = 0
+	bumps = 0
+	net.state_set("hz", [])
+	print("Fruit Catch surprises: %s mode, %s, gift %s: %s" % [mode, season, gift if gift != "" else "none",
+		str(hz_list.map(func(e: Dictionary) -> String: return "%s@%.0f" % [e.kind, float(e.t)]))])
 	print("Fruit Catch harvest: level %d, seed %d%s, dishes %s, %d drops, wind %.2f" % [lv, seed_value,
 		" (TODAY'S HARVEST)" if daily else "", str(harvest.dishes), (harvest.drops as Array).size(), (harvest.wind as Vector2).length()])
 	net.state_set("frenzy", false)
@@ -715,7 +822,9 @@ func _run_line(end: String) -> void:
 		"score": int(net.state_get("score", 0)), "caught": caught_round, "rotten": rotten_caught, "dunks": int(net.state_get("bowl", 0)),
 		"shakes": shakes_round, "players": party.active_slots().size(), "vr": vr_rig != null, "mode": String(net.mode),
 		"wind": snappedf((harvest.wind as Vector2).length(), 0.01), "trees": int(save.data.trees),
-		"orchard": (save.data.orchard as Array).size(), "days": int(save.data.days), "best": int(save.data.best)})
+		"orchard": (save.data.orchard as Array).size(), "days": int(save.data.days), "best": int(save.data.best),
+		"difficulty": mode, "gift": gift, "season": season, "surprises": hz_count, "bumps": bumps,
+		"pantry": Deep.pantry(int(save.data.dishes)), "picks": picks.history.size() if picks != null else 0})
 
 
 func _exit_tree() -> void:
@@ -727,6 +836,9 @@ func _exit_tree() -> void:
 func _end_round() -> void:
 	for id in fruits.keys():
 		_free_fruit(int(id))
+	hz_now = {}
+	net.state_set("hz", [])
+	net.state_set("pantry", Deep.pantry(int(save.data.dishes)))
 	var score := int(net.state_get("score", 0))
 	var planted := _plant_tree()
 	_run_line("round")
@@ -794,7 +906,13 @@ func _process(delta: float) -> void:
 	if results_showing():
 		results_t += delta
 		if results_t > 12.0:
-			_start_round()  # play again by itself
+			_next_round()  # play again by itself (Nutmeg's gift pick first)
+		return
+	if picks.active():
+		picks.tick(delta)
+		var pl := int(ceil(picks.left()))
+		if pl != int(net.state_get("time", 0)) and picks.active():
+			net.state_set("time", pl)
 		return
 	time_left -= delta
 	if int(ceil(time_left)) != int(net.state_get("time", 0)):
@@ -819,6 +937,7 @@ func _process(delta: float) -> void:
 		drop_i += 1
 	if vr_rig != null:
 		_vr_hands(delta)
+	_tick_surprises()
 	_simulate_fruit(delta)
 
 
@@ -976,10 +1095,12 @@ func _simulate_fruit(delta: float) -> void:
 					f.state = FALL
 			FALL:
 				var v: Vector3 = f.vel
-				v.y = maxf(v.y - FALL_G * delta, -5.0)
+				v.y = maxf(v.y - FALL_G * Deep.fall_share(gift) * delta, -5.0)  # (SLOW FALL floats it down)
 				f.vel = v
-				var w: Vector2 = harvest.get("wind", Vector2.ZERO)
+				var w: Vector2 = Vector2.ZERO if f.has("calm") else harvest.get("wind", Vector2.ZERO) * Deep.wind_share(gift)
 				n.position += (v + Vector3(w.x, 0.0, w.y)) * delta  # the breeze (harvestgen.gd plans for it)
+				if gift == "magnet" and int(f.kind) != Art.ROTTEN and n.position.y < Deep.MAGNET_Y:
+					_magnet_pull(n, delta)
 				if _in_bowl(n.position):  # fell straight in: it bounces off the fruit pile
 					fx("land", n.position, Art.FRUIT_COLORS[int(f.kind)], int(f.kind))
 					_free_fruit(int(id))
@@ -1032,9 +1153,13 @@ func _try_catch(id: int, f: Dictionary) -> bool:
 	var rotten := int(f.kind) == Art.ROTTEN
 	for slot in avatars:
 		var top := basket_top(int(slot))
-		if Vector2(p.x - top.x, p.z - top.z).length() < 0.6 and p.y < top.y + 0.35 and p.y > top.y - 0.35:
-			if rotten:
+		if Vector2(p.x - top.x, p.z - top.z).length() < Deep.catch_r(gift) and p.y < top.y + 0.35 and p.y > top.y - 0.35:
+			if rotten and gift == "umbrella":
+				fx("bounce", top, Art.FRUIT_COLORS[Art.ROTTEN], int(slot))  # UMBRELLA: it bounces off
+			elif rotten:
 				rotten_caught += 1
+				if f.has("calm"):
+					bumps += 1
 				fx("splat", top, Art.FRUIT_COLORS[Art.ROTTEN], int(slot))
 			else:
 				_add_score(1, int(slot), top, Art.FRUIT_COLORS[int(f.kind)])
@@ -1044,7 +1169,11 @@ func _try_catch(id: int, f: Dictionary) -> bool:
 	if vr_rig != null and (int(f.state) == FALL or float(f.t) < 0.0):
 		var h := vr_rig.touching_any(p, 0.3)
 		if h >= 0 and not branch_hand.has(h) and _held_by(h) < 0:
-			if rotten:
+			if rotten and gift == "umbrella":
+				vr_rig.pulse(h, 0.3, 0.05)
+				fx("bounce", p, Art.FRUIT_COLORS[Art.ROTTEN], -1)
+				_free_fruit(id)
+			elif rotten:
 				vr_rig.pulse(h, 0.8, 0.12)
 				fx("splat", p, Art.FRUIT_COLORS[Art.ROTTEN], 0)
 				_free_fruit(id)
@@ -1143,13 +1272,13 @@ func _dish_done() -> void:
 	dishes_done += 1
 	save.data.dishes = int(save.data.dishes) + 1
 	save.mark_dirty()
-	var bonus := 5
+	var bonus := Deep.dish_bonus(gift)  # (GOLDEN DISH: double)
 	var score := int(net.state_get("score", 0)) + bonus
 	net.state_set("score", score)
 	if score > int(save.data["best"]):
 		save.data["best"] = score
 		net.state_set("best", score)
-	fx("dish", NUTMEG_POS + Vector3.UP * 1.2, Color(1.0, 0.85, 0.3), dishes_done)
+	fx("dish", NUTMEG_POS + Vector3.UP * 1.2, Color(1.0, 0.85, 0.3), dishes_done, bonus)
 	net.state_set("got", [0, 0, 0, 0])
 	net.state_set("dish", int(net.state_get("dish", 0)) + 1)
 	print("Fruit Catch dish %d done at %.1f s" % [dishes_done, round_clock])
@@ -1289,6 +1418,141 @@ func _animate_nutmeg(delta: float) -> void:
 	body.rotation.z = sin(clock * 1.3) * 0.06
 
 
+# --- Second pass: picks, surprises, gifts (deep.gd, picks.gd, hazards.gd) ----------------------------------------
+
+## Host: the mode, the gift and the season for every machine.
+func _send_deep() -> void:
+	net.state_set("deep", [mode, gift, season])
+
+
+## Nobody here could take a pick (no giant, no TV player): the middle comes sooner.
+func pick_nobody() -> bool:
+	return vr_rig == null and avatars.is_empty()
+
+
+## Host: the next round, after the mode pick (once a session) or Nutmeg's gift pick (every round from the second).
+func _next_round() -> void:
+	if net.mode == "client" or picks == null or picks.active():
+		return
+	if not mode_picked:
+		_start_pick("mode")
+	elif session_round >= 1 and gift_round != session_round + 1:
+		_start_pick("gift")
+	else:
+		_start_round()
+
+
+func _start_pick(stage: String) -> void:
+	for id in fruits.keys():
+		_free_fruit(int(id))
+	var entries: Array = []
+	var opts: Array = []
+	if stage == "mode":
+		opts = PickOrbs.mode_ids(Deep.mode_of(String(save.data.mode)) if String(save.data.mode) != "" else "brave")
+		for id in opts:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
+		_story("Easy or tricky?", "squirrel", Art.FUR)
+	else:
+		opts = Deep.gift_choices(Deep.pantry(int(save.data.dishes)), String(save.data.last_gift),
+			Seeded.derive(session_seed, "gift%d" % session_round))
+		for id in opts:
+			var gd := Deep.gift(String(id))
+			entries.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
+		_story("A gift for you!", "gift", Art.FUR)
+	net.state_set("hz", [])
+	net.state_set("phase", "pick")
+	_banner("PICK ONE!", "", "default")
+	picks.begin(stage, entries, opts, _on_picked)
+	sound("whistle", -8.0, 1.3)
+
+
+## Host: the team picked (or the middle one was taken for them).
+func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
+	if stage == "mode":
+		mode_picked = true
+		mode = Deep.mode_of(String(opt))
+		save.data.mode = mode
+		_story(String(PickOrbs.MODE_LINES.get(mode, "Let's go!")), String(PickOrbs.mode(mode).pic), PickOrbs.mode_color(mode))
+		_banner(PickOrbs.mode_name(mode), "", "victory")
+	else:
+		gift = String(opt)
+		gift_round = session_round + 1
+		save.data.last_gift = gift
+	save.mark_dirty()
+	print("Picked %s: %s" % [stage, str(opt)])
+	_next_round()
+
+
+## Host, every frame of a round: tell the next surprise, set it off, clear it.
+func _tick_surprises() -> void:
+	if hz_now.is_empty():
+		if hz_i < hz_list.size() and round_clock >= float((hz_list[hz_i] as Dictionary).t):
+			hz_now = hz_list[hz_i]
+			hz_i += 1
+			hz_fired = false
+			hz_bumped = {}
+			hz_count += 1
+			net.state_set("hz", Deep.pack(hz_now))
+		return
+	var since := round_clock - float(hz_now.t)
+	if since >= float(hz_now.warn):
+		if not hz_fired:
+			hz_fired = true
+			if String(hz_now.kind) == "windfall":
+				_windfall(hz_now)
+		if String(hz_now.kind) == "wasp":
+			var wp := Deep.wasp_at(hz_now, since - float(hz_now.warn))
+			for slot in avatars:
+				if hz_bumped.has(slot):
+					continue
+				var a: Node3D = avatars[slot]
+				if Vector2(a.position.x - wp.x, a.position.z - wp.z).length() < float(hz_now.r) + Deep.WASP_HIT:
+					hz_bumped[slot] = true
+					bumps += 1
+					fx("bump", basket_top(int(slot)), Deep.WASP_COLOR, int(slot))
+	if since >= Deep.span(hz_now):
+		hz_now = {}
+		net.state_set("hz", [])
+
+
+## Host: a windfall's rotten apples tumble into its circle (no wind: they land where the circle said).
+func _windfall(e: Dictionary) -> void:
+	fx("windfall", Vector3(float(e.x), 0.1, float(e.z)), Deep.WINDFALL_COLOR, 0)
+	for k in int(e.n):
+		if fruits.size() >= MAX_FRUIT + 10:
+			break
+		var at := Deep.windfall_spot(e, k)
+		next_fruit += 1
+		var f := _make_fruit(next_fruit, Art.ROTTEN, Vector3(at.x, DROP_HEIGHT, at.y))
+		f.state = HANG
+		f.t = 0.08 * k  # one after another
+		f["calm"] = true
+
+
+## MAGNET: a good fruit near a basket drifts into it.
+func _magnet_pull(n: Node3D, delta: float) -> void:
+	var best := Vector3.INF
+	var bd := Deep.MAGNET_R
+	for slot in avatars:
+		var top := basket_top(int(slot))
+		var d := Vector2(top.x - n.position.x, top.z - n.position.z).length()
+		if d < bd and n.position.y > top.y - 0.2:
+			bd = d
+			best = top
+	if best != Vector3.INF and bd > 0.05:
+		var to := Vector2(best.x - n.position.x, best.z - n.position.z).normalized() * minf(Deep.MAGNET_PULL * delta, bd)
+		n.position += Vector3(to.x, 0.0, to.y)
+
+
+## Every machine: baskets look as big as the gift makes them.
+func _refresh_baskets() -> void:
+	for slot in baskets:
+		var bk: Node3D = baskets[slot]
+		if is_instance_valid(bk) and bk.get_child_count() > 0:
+			(bk.get_child(0) as Node3D).scale = Vector3.ONE * (Deep.BIG_SCALE if gift == "big" else 1.0)
+
+
 # --- Effects (host / local play them and send them; the TV machine plays the same) ---------
 
 func fx(kind: String, pos: Vector3, color: Color, n: int = -1, m: int = 0) -> void:
@@ -1335,18 +1599,38 @@ func fx(kind: String, pos: Vector3, color: Color, n: int = -1, m: int = 0) -> vo
 			nutmeg_hop = 1.2
 			_burst(pos, Color(1.0, 0.85, 0.3), 26, 4.0)
 			_burst(pos, Color(1.0, 0.5, 0.6), 14, 3.0)
-			HudKit.score(self, pos + Vector3.UP * 0.3, 5, {"color": "gold", "size": 2.0})
+			HudKit.score(self, pos + Vector3.UP * 0.3, m if m > 0 else Deep.DISH_BONUS, {"color": "gold", "size": 2.0})
 			sfx.play_at("kaching", pos, 0.0, 1.2)
 			sound("fanfare", -8.0)
 		"nutmeg":  # the giant patted Nutmeg
 			nutmeg_hop = 0.6
 			sfx.play_at("boing", pos, -4.0, 1.8)
+		"bump":  # the wasp bumped a basket: dizzy for a moment
+			_burst(pos, Deep.WASP_COLOR, 12, 2.5)
+			sfx.play_at("boing", pos, -2.0, 0.7)
+			if avatars.has(n):
+				dizzy[n] = float(Deep.mode_data(mode).dizzy)
+				Creatures.anim(avatars[n]).hurt(Deep.WASP_COLOR, Vector3.UP)
+		"bounce":  # UMBRELLA: a rotten apple bounces off
+			_burst(pos + Vector3.UP * 0.2, Color(0.7, 0.5, 1.0), 10, 2.5)
+			sfx.play_at("boing", pos, -4.0, 1.3)
+			if baskets.has(n):
+				_bounce(baskets[n], 1.3)
+		"windfall":  # the rotten apples start to tumble
+			if crown != null:
+				_wobble(crown, 0.06)
+			sfx.play_at("pop", pos, -4.0, 0.5)
 		"boop":
 			sfx.play_at("boing", pos, -2.0, 1.5)
 			if avatars.has(n):
 				Creatures.anim(avatars[n]).play("jump", 0.5)
 	if net.mode == "host":
 		net.event("fx", [kind, pos, color, n, m])
+
+
+## (picks.gd and pantry.gd burst too)
+func burst(pos: Vector3, color: Color, amount: int, speed: float) -> void:
+	_burst(pos, color, amount, speed)
 
 
 func _burst(pos: Vector3, color: Color, amount: int, speed: float) -> void:
@@ -1457,3 +1741,9 @@ func apply_event(kind: String, args: Array) -> void:
 	match kind:
 		"fx":
 			fx(String(args[0]), args[1], args[2], int(args[3]), int(args[4]))
+		"orbs":
+			if picks != null and args.size() >= 3:
+				picks.show_row(String(args[0]), args[1], args[2])
+		"take":
+			if picks != null and args.size() >= 2:
+				picks.take_fx(int(args[0]), int(args[1]))

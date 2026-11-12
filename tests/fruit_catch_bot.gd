@@ -6,6 +6,9 @@ extends Node
 ## Local:      godot --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/fruit_catch_bot.tscn
 ## Networked:  DUO_PORT=81xx DUO_HOST=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
+## Second pass (games/fruit_catch/deep.gd): the TV players walk under a pick orb (the mode pick before round 1, Nutmeg's
+## gift pick before round 2); a giant alone reaches into one and holds it there. Surprises start at 3 s from round 1
+## (main.bot_surprises): the TV players step out of a windfall's circle and off a wasp's band while it is told.
 
 const BotKit := preload("res://tests/bot_kit.gd")
 
@@ -17,6 +20,8 @@ var vr_t := 0.0
 var vr_caught := 0
 var saw_dish := false  # Nutmeg's dish moved on (a dish was finished)
 var orchard_start := -1
+var deep := {}  # second-pass things seen (picks, surprises, season)
+var pick_t := 0.0
 
 
 func _ready() -> void:
@@ -25,6 +30,7 @@ func _ready() -> void:
 	add_child(kit)
 	main = load("res://games/fruit_catch/main.tscn").instantiate()
 	main.set("round_time", 16.0)
+	main.set("bot_surprises", true)
 	add_child(main)
 	kit.main = main
 	want = BotKit.bot_players(2, 6)
@@ -50,10 +56,10 @@ func _ready() -> void:
 	kit.drop_in_out(main.party, t0 + 11.0, 3.0, func(slot: int) -> bool:
 		return main.avatars.has(slot) and main.baskets.has(slot) and main.huds.has(slot) and main.cams.has(slot))
 	if host:
-		kit.at(27.0, "host checks (the TV machine is still connected)", _checks)
-		kit.at(37.0, "finish", kit.finish)
+		kit.at(31.0, "host checks (the TV machine is still connected)", _checks)
+		kit.at(41.0, "finish", kit.finish)
 	else:
-		kit.at(31.0 if client else 27.0, "finish", func() -> void:
+		kit.at(35.0 if client else 31.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)
@@ -64,6 +70,17 @@ func _ready() -> void:
 func _watch_story() -> String:
 	if int(main.net.state_get("dish", 0)) > 0:
 		saw_dish = true
+	if main.picks != null and main.picks.showing():
+		deep["orbs_seen"] = true
+	if main.hazards != null:
+		for k in main.hazards.seen:
+			deep["told_" + String(k)] = true
+		if not main.hazards.now.is_empty():
+			# a surprise's tell shows on the grass while it is told (steady: the warn rings never drop it)
+			if main.hazards.rings.count() < 1:
+				deep["untold"] = true
+	if main.season_node != null and String(main.season_node.season) != "":
+		deep["dressed"] = String(main.season_node.season)
 	if orchard_start < 0 and main.net.state_get("orchard", null) is Array:
 		orchard_start = (main.net.state_get("orchard", []) as Array).size()
 	return ""
@@ -109,6 +126,10 @@ func _press(action: String) -> void:
 func _physics_process(delta: float) -> void:
 	if main == null or not main.ready_to_play:
 		return
+	if main.picks != null and main.picks.showing():
+		pick_t += delta
+	else:
+		pick_t = 0.0
 	for slot in main.party.local_slots():
 		_steer(slot)
 	if main.vr_rig != null:
@@ -122,12 +143,25 @@ func _steer(slot: int) -> void:
 	var a: Node3D = main.avatars[slot]
 	var target := Vector3.INF
 	var bd := INF
+	if main.picks != null and main.picks.showing() and pick_t > 0.5:
+		target = main.picks.orb_position(slot % 3)  # walk under a pick orb (each player its own)
+		if target != Vector3.INF:
+			_go(slot, a, target)
+			return
+	var hz: Dictionary = main.hazards.now if main.hazards != null else {}
+	if not hz.is_empty():
+		var away := _escape(a.position, hz)
+		if away != Vector3.INF:
+			_go(slot, a, away)
+			return
 	for id in main.fruits:
 		var f: Dictionary = main.fruits[id]
 		if int(f.kind) == 4:
 			continue
 		var p: Vector3 = (f.node as Node3D).position
 		var d := Vector2(p.x - a.position.x, p.z - a.position.z).length() + p.y
+		if not hz.is_empty() and main.Deep.inside(hz, Vector2(p.x, p.z), 0.6):
+			continue  # (never into a told surprise)
 		if d < bd:
 			bd = d
 			target = p
@@ -146,6 +180,42 @@ func _steer(slot: int) -> void:
 	kit.slot_stick(main.party, slot, "left", v)
 
 
+## Walk slot towards a point (relative to the camera this slot sees).
+func _go(slot: int, a: Node3D, target: Vector3) -> void:
+	var d := target - a.position
+	d.y = 0.0
+	var v := Vector2.ZERO
+	if d.length() > 0.1:
+		d = d.normalized()
+		var cam: Camera3D = main.split.active_camera(slot)
+		var f := -cam.global_basis.z
+		f.y = 0.0
+		f = f.normalized()
+		var r := Vector3(-f.z, 0.0, f.x)
+		v = Vector2(d.dot(r), -d.dot(f))
+	kit.slot_stick(main.party, slot, "left", v)
+
+
+## Where to step to get out of a told surprise (INF: already clear).
+func _escape(p: Vector3, hz: Dictionary) -> Vector3:
+	var flat := Vector2(p.x, p.z)
+	if not main.Deep.inside(hz, flat, 0.7):
+		return Vector3.INF
+	var out := Vector2.ZERO
+	if String(hz.kind) == "windfall":
+		out = (flat - Vector2(float(hz.x), float(hz.z))).normalized()
+	else:
+		var dir := Vector2(float(hz.dx), float(hz.dz)).normalized()
+		var n := Vector2(-dir.y, dir.x)
+		out = n if (flat - Vector2(float(hz.x), float(hz.z))).dot(n) >= 0.0 else -n
+	if out == Vector2.ZERO:
+		out = Vector2(1.0, 0.0)
+	var to := flat + out * 2.5
+	if to.length() > main.ARENA - 0.8 or to.length() < main.TRUNK_R + 0.6:
+		to = flat - out * 2.5  # (cornered: the other side)
+	return Vector3(to.x, 0.0, to.y)
+
+
 ## Fake VR: the right glove shakes branch 0 for 4 s then pulls away (it springs free); the left glove
 ## catches nearby fruit and dunks it in the bowl.
 func _drive_vr(delta: float) -> void:
@@ -153,6 +223,15 @@ func _drive_vr(delta: float) -> void:
 	rig.camera.position.y = 1.6
 	kit.vr_stick(rig, Vector2.ZERO)
 	vr_t += delta
+	if main.picks != null and main.picks.showing():
+		# A giant alone reaches into an orb on purpose and holds it (with TV players: after they've had a go).
+		var o: Vector3 = main.picks.orb_position(1)
+		if o != Vector3.INF and (kit.tv_players() == 0 or pick_t > 5.0) and pick_t > 1.0:
+			kit.vr_reach(rig, 1, o, 1.5, delta)
+		else:
+			kit.vr_reach(rig, 1, Vector3(0.6, 1.0, 3.3), 3.0, delta)
+		kit.vr_reach(rig, 0, Vector3(-0.6, 1.0, 3.3), 3.0, delta)
+		return
 	var tip: Vector3 = main.branch_rest[0]
 	var cyc := fmod(vr_t, 6.0)
 	if cyc < 4.0:
@@ -193,6 +272,18 @@ func _report() -> String:
 
 func _checks() -> void:
 	var mode: String = main.net.mode
+	print("BOT DEEP: mode=%s %s picks=%s pantry=%s gift=%s" % [mode, str(deep), str(main.picks.history), str(main.pantry.count), main.gift])
+	kit.assert_true(deep.has("orbs_seen"), "%s: the pick orbs showed" % mode)
+	if mode != "client":
+		var stages: Array = main.picks.history.map(func(h: Array) -> String: return String(h[0]))
+		kit.assert_true(stages.has("mode"), "%s: the mode pick was taken (%s)" % [mode, str(main.picks.history)])
+		kit.assert_true(stages.has("gift") or int(main.session_round) < 2, "%s: Nutmeg's gift pick came before round 2 (%s)" % [mode, str(main.picks.history)])
+		if kit.tv_players() > 0 or main.vr_rig != null:
+			kit.assert_true(main.picks.history.any(func(h: Array) -> bool: return int(h[2]) >= 0), "%s: a player really took a pick (%s)" % [mode, str(main.picks.history)])
+	kit.assert_true(deep.has("told_windfall") or deep.has("told_wasp"), "%s: a surprise was told on the grass (%s)" % [mode, str(deep)])
+	kit.assert_true(not deep.has("untold"), "%s: no surprise went without its tell (%s)" % [mode, str(deep)])
+	kit.assert_true(String(deep.get("dressed", "")) != "" and String(deep.get("dressed", "")) == String(main.season), "%s: the orchard is dressed for the season (%s)" % [mode, str(deep)])
+	kit.assert_true(main.pantry != null and main.pantry.count >= 0, "%s: Nutmeg's pantry is built" % mode)
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode == "client":
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)

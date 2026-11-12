@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "fc-gifts", "date": "2026-11-12", "game": "fruit_catch", "pic": "bigbasket", "line": "Nutmeg's basket gifts!", "try": {"FC_GIFT": "magnet"}},
+	{"id": "fc-surprises", "date": "2026-11-12", "game": "fruit_catch", "pic": "wasp", "line": "Windfalls and wasps! Look!", "try": {"FC_SURPRISES_NOW": "1"}},
+	{"id": "fc-modes", "date": "2026-11-12", "game": "fruit_catch", "pic": "squirrel", "line": "Gentle, brave or hard!"},
+	{"id": "fc-pantry", "date": "2026-11-12", "game": "fruit_catch", "pic": "pantry", "line": "Nutmeg's pantry grows!"},
+	{"id": "fc-seasons", "date": "2026-11-12", "game": "fruit_catch", "pic": "snowglobe", "line": "Magic snow globe orchard", "try": {"FC_SEASON": "winter"}},
 	{"id": "rb-gifts", "date": "2026-11-11", "game": "rhythm_band", "pic": "goldmic", "line": "Doodle's instrument gifts!", "try": {"RB_GIFT": "bigdrum"}},
 	{"id": "rb-changes", "date": "2026-11-11", "game": "rhythm_band", "pic": "spotlight", "line": "Fast bits, slow bits, solos!", "try": {"RB_CHANGES_NOW": "1"}},
 	{"id": "rb-modes", "date": "2026-11-11", "game": "rhythm_band", "pic": "frog", "line": "Gentle, brave or hard!"},

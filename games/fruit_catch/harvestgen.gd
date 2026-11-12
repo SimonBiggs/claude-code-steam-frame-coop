@@ -235,8 +235,9 @@ static func path_len(a: Vector2, b: Vector2) -> float:
 
 ## One player alone, greedy: runs under the next fruit the current dish needs when they can get there in
 ## time. share = share of full speed; vr = a giant is here (the tree drops half as much by itself).
+## skip(i, drop) -> true: a drop this player keeps away from (deep.gd: under a warned windfall or a wasp's line).
 ## Returns the times each dish was finished (fewer entries = dishes not finished).
-static func solo(h: Dictionary, share: float, vr: bool) -> Array:
+static func solo(h: Dictionary, share: float, vr: bool, skip: Callable = Callable()) -> Array:
 	var pos := START
 	var free_t := 0.0
 	var dish := 0
@@ -249,7 +250,7 @@ static func solo(h: Dictionary, share: float, vr: bool) -> Array:
 			continue
 		var d: Array = drops[i]
 		var kind := int(d[2])
-		if kind == ROTTEN:
+		if kind == ROTTEN or (skip.is_valid() and bool(skip.call(i, d))):
 			continue
 		var need: Array = (dishes[dish] as Array)[1]
 		if int(got[kind]) >= int(need[kind]):
