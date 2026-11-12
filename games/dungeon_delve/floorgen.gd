@@ -51,6 +51,18 @@ const ZONES: Array[Dictionary] = [
 const FEATURE := {"shards": {"warn": 1.4, "period": 5.5, "len": 6.0, "width": 1.1},
 	"vents": {"warn": 1.3, "period": 4.6, "radius": 1.05}}
 const MIN_WARN := 0.9  ## nothing that hurts may glow for less than this (tests: features, boss tells)
+## Traps: seconds each one is TOLD on the floor (a flashing orange core/warn_rings.gd shape, deep.gd _traps_step) before
+## it hurts: the spike band before the spikes come up, the boulder's lane before it rolls, a crumbly tile once stepped on.
+const TRAP_WARN := {"spikes": 1.2, "boulder": 1.2, "collapse": 1.0}
+const SPIKES_UP := 0.9  ## seconds the spikes stay up
+
+## Every floor's own name (the banner under the biome's name): two words from the biome's lists, seeded by the floor.
+const NAME_WORDS := {
+	"caves": [["GOOEY", "DRIPPY", "MOSSY", "BOUNCY", "SQUISHY", "GREEN"], ["HOLLOW", "TUNNELS", "GROTTO", "BURROW", "PUDDLES", "POOLS"]],
+	"crypt": [["DUSTY", "SPOOKY", "CREAKY", "MISTY", "SILENT", "OLD"], ["HALLS", "VAULT", "STAIRS", "TOMBS", "ARCHES", "CELLARS"]],
+	"crystal": [["SPARKLY", "SHINY", "FROSTY", "GLOWING", "TWINKLY", "ICY"], ["GROTTO", "HALLS", "GARDEN", "MAZE", "POOLS", "DEN"]],
+	"forge": [["SMOKY", "TOASTY", "RUMBLY", "FIERY", "SOOTY", "GLOWING"], ["FORGE", "FURNACE", "ANVILS", "BELLOWS", "CHIMNEYS", "PITS"]],
+}
 
 ## Pillar layouts (local rects: [cx, cz, half_x, half_z]).
 const LAYOUTS: Array = [
@@ -72,6 +84,12 @@ static func modifier(seed_value: int, zone: int, floor_i: int) -> String:
 	if zone < ZONE_COUNT:
 		return ""
 	return MODS[absi(hash([seed_value, zone, floor_i, "mod"])) % MODS.size()]
+
+
+static func floor_name(seed_value: int, zone: int, floor_i: int) -> String:
+	var w: Array = NAME_WORDS[String(zone_data(zone)["id"])]
+	var h := absi(hash([seed_value, zone, floor_i, "name"]))
+	return "%s %s" % [String((w[0] as Array)[h % (w[0] as Array).size()]), String((w[1] as Array)[(h / 7) % (w[1] as Array).size()])]
 
 
 ## A zone's look and monsters (the endless depths go round the biomes again). Always use this,
