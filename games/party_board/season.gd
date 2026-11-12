@@ -51,6 +51,7 @@ func set_season(s: String) -> void:
 	add_child(props)
 	drift = SeasonKit.drift(Deep.season_data(s).drift, s, {"box": DRIFT_BOX, "at": Vector3(0.0, DRIFT_Y, 0.0), "amount": 40,
 		"size": 0.3, "speed": Vector2(0.6, 1.2), "lifetime": 9.0})
-	drift.local_coords = true  # (under the scaled stage: tiny on the VR table, big on the TV)
+	drift.local_coords = true  # (under the scaled stage: tiny on the VR table, big on the TV; the billboarded leaves
+	((drift.mesh as QuadMesh).material as StandardMaterial3D).billboard_keep_scale = true  # keep the stage's scale too)
 	add_child(drift)
 	print("Party Board: %s island" % s)
