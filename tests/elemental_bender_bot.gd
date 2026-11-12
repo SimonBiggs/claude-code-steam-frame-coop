@@ -21,6 +21,8 @@ const FrameGrab := preload("res://core/frame_grab.gd")
 const BotKit := preload("res://tests/bot_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
 const E := preload("res://games/elemental_bender/elem.gd")
+const Telemetry := preload("res://core/telemetry.gd")
+const WarnRings := preload("res://core/warn_rings.gd")
 
 var kit: BotKit
 var main: Node
@@ -46,10 +48,13 @@ var vr_target := Vector3.ZERO
 var vr_slam_t := 6.0
 var vr_jab_t := 3.0
 var vr_a_t := 0.0
+var start_unix := 0
+var dodges := 0
 
 
 func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS
+	start_unix = int(Time.get_unix_time_from_system())
 	kit = BotKit.new()
 	add_child(kit)
 	if OS.has_environment("EB_SHOT"):
@@ -207,6 +212,9 @@ func _tv_bot(slot: int, delta: float) -> void:
 		mv = -dn
 	else:
 		mv = Vector3(-dn.z, 0.0, dn.x) * (0.5 if slot % 2 == 0 else -0.5)
+	var out := _dodge(bp)  # a told surprise / boss ring underfoot: step out of it first
+	if out != Vector3.ZERO:
+		mv = out
 	kit.slot_stick(main.party, slot, "left", _stick_for(slot, mv))
 	kit.pad_trigger(dev, "rt", 1.0 if dist < 30.0 and not hold else 0.0)
 	if float(c["jump"]) <= 0.0:
@@ -221,6 +229,24 @@ func _tv_bot(slot: int, delta: float) -> void:
 	if float(c["spirit"]) <= 0.0 and main.team_spirit_full() and not hold:
 		c["spirit"] = 2.0
 		kit.slot_press(main.party, slot, "l3")
+
+
+## Kiko's warned surprises and the bosses' rings (the shared WarnRings tells): the way out of one we stand in.
+func _dodge(p: Vector3) -> Vector3:
+	if main.hazards == null or main.hazards.rings == null:
+		return Vector3.ZERO
+	for t in main.hazards.rings.tells():
+		if float(t.t) > float(t.secs) or not WarnRings.inside(String(t.kind), t.pos, t.dir, t.size, p, 1.2):
+			continue
+		dodges += 1
+		var away := Vector3.ZERO
+		if String(t.kind) == "line":
+			away = -Vector3(p.x, 0.0, p.z)  # (bands never cross the temple: home is out of it)
+		else:
+			away = p - (t.pos as Vector3)
+		away.y = 0.0
+		return away.normalized() if away.length() > 0.1 else Vector3.BACK
+	return Vector3.ZERO
 
 
 ## A world direction -> this slot's stick (y DOWN), relative to the camera it sees.
@@ -376,6 +402,12 @@ func _checks() -> void:
 		if max_wave >= 2:
 			kit.assert_true(main.log_runs >= 1, "%s: a RUN line per cleared wave (%d)" % [mode, main.log_runs])
 			kit.assert_true(int(main.save.data.waves) >= 1, "%s: the Spirit Tree grew (saved waves %d)" % [mode, int(main.save.data.waves)])
+	# Second pass: a warned surprise never goes off without its full warning (every machine); the season dressed the
+	# island; the mode stones closed into a team mode.
+	kit.assert_true(main.log_untold == 0, "%s: every surprise was told first (%d went off early)" % [mode, main.log_untold])
+	kit.assert_true(main.season != "" and main.season_dress != null, "%s: the season dressed the island (%s)" % [mode, main.season])
+	if OS.has_environment("EB_SURPRISE") and max_wave >= 1 and not giving_up():
+		kit.assert_true(main.log_surprises >= 1, "%s: a surprise was told (%d)" % [mode, main.log_surprises])
 	if mode == "client":
 		kit.assert_true(client_saw_raiders > 0, "client: raider ghosts mirrored from the host")
 		kit.assert_true(max_wave >= 1, "client: waves reached the TV machine (%d)" % max_wave)
@@ -407,6 +439,15 @@ func _checks() -> void:
 			kit.assert_true(main.log_arenas.has(OS.get_environment("EB_ARENA")), "%s: the run started on %s" % [mode, OS.get_environment("EB_ARENA")])
 			if main.log_boss:
 				kit.assert_true(main.log_tells >= 1, "%s: the island boss told its attacks (%d)" % [mode, main.log_tells])
+		if max_wave >= 1:
+			kit.assert_true(main.log_mode != "", "%s: the team picked a mode on the altar (%s)" % [mode, main.log_mode])
+			if OS.has_environment("EB_MODE"):
+				kit.assert_eq(main.team_mode, main.Deep.mode_id(OS.get_environment("EB_MODE")), "%s: the mode is %s" % [mode, OS.get_environment("EB_MODE")])
+		if main.log_runs >= 1:
+			# Only this run's RUN lines (its temple seed, written since the bot started): never an older run's.
+			var mine := Telemetry.read("elemental_bender").filter(func(r: Dictionary) -> bool:
+				return int(r.get("seed", -1)) == main.temple_seed and int(r.get("t", 0)) >= start_unix)
+			kit.assert_true(not mine.is_empty() and String(mine[-1].get("mode", "")) != "", "%s: this run's RUN lines carry the mode (%d lines)" % [mode, mine.size()])
 		if main.hazards.hazard != "" and max_wave >= 2:
 			kit.assert_true(main.log_vents >= 1, "%s: the island's hazard went off (%d)" % [mode, main.log_vents])
 	else:
@@ -420,6 +461,8 @@ func _checks() -> void:
 		kit.assert_true(m.jabs > 0, "VR: left jabs (%d)" % m.jabs)
 		kit.assert_true(m.slams > 0, "VR: slam specials (%d)" % m.slams)
 		kit.assert_true(int(main.log_hits_by.get(0, 0)) > 0, "VR: the master hit raiders (%d)" % int(main.log_hits_by.get(0, 0)))
+	print("BOT deep: mode %s season %s surprises %d went off %d untold %d dodges %d friends %d" % [main.log_mode, main.season,
+		main.log_surprises, main.log_surprise_hits, main.log_untold, dodges, main.log_friends])
 	print("BOT islands %s bosses %s masters %d picks %d %s tells %d vents %d phase2 %d" % [str(main.log_arenas.keys()), str(main.log_bosses),
 		main.log_masters, main.log_picks, str(main.run_picks), main.log_tells, main.log_vents, main.log_phase2])
 	print("BOT stats: practice %d waves %d boss %s swaps %d counters %d ring outs %d specials %s spirits %d downs %d hits %s" % [

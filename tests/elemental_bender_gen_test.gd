@@ -19,6 +19,7 @@ const StoryCard := preload("res://core/story_card.gd")
 const Arenas := preload("res://games/elemental_bender/arenas.gd")
 const Bosses := preload("res://games/elemental_bender/bosses.gd")
 const Boons := preload("res://games/elemental_bender/boons.gd")
+const Deep := preload("res://games/elemental_bender/deep.gd")
 
 var fails := 0
 const E_FIRE := 3
@@ -32,7 +33,14 @@ func _initialize() -> void:
 			var all: Array = []
 			for players in range(1, G.MAX_PLAYERS + 1):
 				for n in range(1, G.MAX_WAVE + 1):
-					all.append(G.plan(s, n, players))
+					all.append(G.plan(s, n, players, false, "temple", Deep.MODE_IDS[(players + n) % 3]))
+			# Kiko's island surprises (deep.gd) in every mode on every island, and the season props.
+			for a in Arenas.ids():
+				var aseed := Arenas.layout_seed(s, a)
+				all.append({"season": Arenas.layout(a, aseed)})
+				for m in Deep.MODE_IDS:
+					for n in range(1, G.MAX_WAVE + 1):
+						all.append({"surp": Deep.surprises(s, n, a, m), "n": n, "arena": a, "aseed": aseed, "mode": m})
 			# The other islands (only ever from wave 6 on): a few party sizes.
 			for a in Arenas.ids():
 				if a == "temple":
@@ -40,7 +48,7 @@ func _initialize() -> void:
 				all.append({"island": a, "seed": Arenas.layout_seed(s, a)})
 				for players in [1, 3, G.MAX_PLAYERS]:
 					for n in range(Arenas.SEGMENT + 1, G.MAX_WAVE + 1):
-						all.append(G.plan(s, n, players, false, a))
+						all.append(G.plan(s, n, players, false, a, Deep.MODE_IDS[(players + n) % 3]))
 			# The altar's gifts at every unlock level.
 			for lv in [[0, 0], [6, 0], [12, 1], [40, 4]]:
 				var open := Boons.unlocked_boons(lv[0], lv[1])
@@ -50,7 +58,11 @@ func _initialize() -> void:
 		func(all: Array) -> Array:
 			var why: Array = []
 			for p in all:
-				if p.has("island"):
+				if p.has("surp"):
+					why.append_array(Deep.check_surprises(p.surp, int(p.n), String(p.arena), int(p.aseed), String(p.mode)))
+				elif p.has("season"):
+					why.append_array(Deep.check_season(p.season))
+				elif p.has("island"):
 					why.append_array(Arenas.check(String(p.island), int(p.seed)))
 				elif p.has("offer"):
 					why.append_array(Boons.check_offer(p.offer, p.open))
@@ -112,13 +124,19 @@ func _initialize() -> void:
 						island = Arenas.arena_for(ds, seg, open, island if seg > 0 else "")
 						if island != "temple":
 							all.append({"island": island, "seed": Arenas.layout_seed(ds, island)})
-					all.append(G.plan(ds, n, 1 + (absi(hash(date)) + n) % G.MAX_PLAYERS, false, island))
+					var dm: String = Deep.MODE_IDS[absi(hash(date + str(lv))) % 3]  # (the family's mode that day)
+					all.append(G.plan(ds, n, 1 + (absi(hash(date)) + n) % G.MAX_PLAYERS, false, island, dm))
+					all.append({"surp": Deep.surprises(ds, n, island, dm), "n": n, "arena": island, "aseed": Arenas.layout_seed(ds, island), "mode": dm})
 					all.append({"offer": Boons.offer(ds, n, boons), "open": boons})
 			return all,
 		func(all: Array) -> Array:
 			var why: Array = []
 			for p in all:
-				if p.has("island"):
+				if p.has("surp"):
+					why.append_array(Deep.check_surprises(p.surp, int(p.n), String(p.arena), int(p.aseed), String(p.mode)))
+				elif p.has("season"):
+					why.append_array(Deep.check_season(p.season))
+				elif p.has("island"):
 					why.append_array(Arenas.check(String(p.island), int(p.seed)))
 				elif p.has("offer"):
 					why.append_array(Boons.check_offer(p.offer, p.open))
@@ -126,6 +144,7 @@ func _initialize() -> void:
 					why.append_array(G.check(p))
 			return why, 400, "TODAY'S RAIDERS", ["2026-11-11", "2026-11-12"])
 	fails += (rs.failures as Array).size()
+	_deep_checks()
 	# The story rules.
 	for s in 30:
 		_expect(G.plan(s, 1, 1).palette != G.plan(s, 2, 1).palette, "waves 1 and 2 bring different elements (seed %d)" % s)
@@ -262,3 +281,60 @@ func _expect(ok: bool, what: String) -> void:
 	if not ok:
 		fails += 1
 		print("SCRIPT ERROR: ELEMENTAL BENDER GEN: " + what)
+
+
+## Second pass (deep.gd): modes, surprises, friends, seasons.
+func _deep_checks() -> void:
+	# Modes really change the waves: GENTLE fewer raiders than HARD; the team's mode vote.
+	var g := G.plan(31, 6, 2, false, "temple", "gentle")
+	var h := G.plan(31, 6, 2, false, "temple", "hard")
+	_expect((g.spawns as Array).size() < (h.spawns as Array).size(), "GENTLE brings fewer raiders than HARD (%d vs %d)" % [(g.spawns as Array).size(), (h.spawns as Array).size()])
+	_expect(Deep.team_mode({1: "hard", 2: "gentle"}) == "gentle", "a tied mode vote stays gentle")
+	_expect(Deep.team_mode({1: "hard", 2: "hard", 3: "brave"}) == "hard", "the most picked mode wins")
+	_expect(Deep.team_mode({}, "hard") == "hard", "nobody picked: the family's last mode")
+	_expect(Deep.mode_id("mega") == "hard" and Deep.mode_id("zzz") == "brave", "old / unknown mode ids map through PickOrbs")
+	# Surprises: none early or on boss waves; HARD has two; every island's tricks have pictures and names.
+	_expect(Deep.surprises(5, 2, "temple", "hard").is_empty() and Deep.surprises(5, 5, "ice", "hard").is_empty(), "no surprises in waves 1-2 or on a boss wave")
+	var kinds := {}
+	var hard_two := 0
+	for s in 60:
+		var l := Deep.surprises(s + 3, 4 + s % 5 if (4 + s % 5) != 5 else 6, ["temple", "ice", "volcano", "sky"][s % 4], "hard")
+		if l.size() == 2:
+			hard_two += 1
+		for x in l:
+			kinds[String(x.kind)] = true
+	_expect(kinds.size() == 2, "both tricks (rain and sweep) come %s" % str(kinds.keys()))
+	_expect(hard_two >= 50, "HARD waves have two surprises (%d of 60)" % hard_two)
+	for a in Deep.TRICKS:
+		for k in ["rain", "sweep"]:
+			var tr := Deep.trick(String(a), k)
+			_expect(StoryCard.has_picture(String(tr.pic)), "%s %s has a picture (%s)" % [a, k, tr.pic])
+			_expect(String(tr.name).length() <= 14, "%s %s's name fits a banner" % [a, k])
+	# The validator really catches unfair surprises.
+	var good := Deep.surprises(77, 4, "temple", "brave")
+	_expect(not good.is_empty() and Deep.check_surprises(good, 4, "temple", Arenas.CLASSIC_SEED, "brave").is_empty(), "a normal surprise passes")
+	var bad := good.duplicate(true)
+	bad[0]["tell"] = 0.6
+	_expect(not Deep.check_surprises(bad, 4, "temple", Arenas.CLASSIC_SEED, "brave").is_empty(), "the validator catches a too-short warning")
+	var bad2 := good.duplicate(true)
+	bad2[0]["shapes"] = [["circle", Vector3(4, 0, 0), Vector3.FORWARD, Vector2(2.4, 0)]]
+	_expect(not Deep.check_surprises(bad2, 4, "temple", Arenas.CLASSIC_SEED, "brave").is_empty(), "the validator catches a surprise on the temple steps")
+	var bad3 := good.duplicate(true)
+	bad3[0]["shapes"] = [["line", Vector3(-30, 0, 5), Vector3.RIGHT, Vector2(60, 4.4)]]
+	_expect(not Deep.check_surprises(bad3, 4, "temple", Arenas.CLASSIC_SEED, "brave").is_empty(), "the validator catches a band across the temple")
+	_expect(not Deep.check_surprises(good, 1, "temple", Arenas.CLASSIC_SEED, "brave").is_empty(), "the validator catches a surprise in wave 1")
+	# Spirit friends and houses grow from the saved bosses.
+	_expect(Deep.friends({}).is_empty(), "no friends before any boss")
+	_expect(Deep.friends({"general": 1, "drake": 6}) == [["general", 1], ["drake", 3]], "friends freed by their bosses, growing to level 3 (%s)" % str(Deep.friends({"general": 1, "drake": 6})))
+	_expect(Deep.spirit_houses({"general": 3, "giant": 2}) == 2 and Deep.spirit_houses({"general": 99}) == Deep.SPIRIT_HOUSES_MAX, "spirit houses grow every 2 bosses, capped")
+	for k in Deep.FRIENDS:
+		_expect(StoryCard.has_picture(String(Deep.FRIENDS[k].pic)), "friend %s has a picture" % k)
+		_expect(Bosses.LIST.has(k), "friend %s belongs to a boss" % k)
+	for st in range(1, 6):
+		for i in 4:
+			var fp := Deep.friend_at(i, 1.3 * i, st)
+			_expect(Vector2(fp.x, fp.z).length() > G.crown_r(st), "friend %d flies outside the crown at stage %d" % [i, st])
+	# Seasons: every season has a line and a picture; the override is the shared one.
+	for s in Deep.SEASONS:
+		_expect(StoryCard.has_picture(String(Deep.SEASONS[s].pic)), "season %s has a picture" % s)
+	_expect(Deep.SEASONS.has(Deep.season()), "the season is one of ours (%s)" % Deep.season())

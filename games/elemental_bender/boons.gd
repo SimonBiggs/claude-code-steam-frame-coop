@@ -13,6 +13,7 @@ extends RefCounted
 ## mods(perk) turns a player's master + boons into numbers; shape_shots() applies them to that player's shots.
 
 const E := preload("res://games/elemental_bender/elem.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
 const Seeded := preload("res://core/seeded.gd")
 
 const OFFER := 3
@@ -58,10 +59,14 @@ static func master(id: String) -> Dictionary:
 
 
 static func pick_name(kind: String, id: String) -> String:
+	if kind == "mode":
+		return PickOrbs.mode_name(id)  # (GENTLE / BRAVE / HARD: the shared names)
 	return String((master(id) if kind == "master" else boon(id)).get("name", id.to_upper()))
 
 
 static func pick_color(kind: String, id: String) -> Color:
+	if kind == "mode":
+		return PickOrbs.mode_color(id)
 	if kind == "master":
 		var e := int(master(id).get("element", -1))
 		return E.COLORS[e] if e >= 0 else Color(1.0, 0.95, 0.7)
