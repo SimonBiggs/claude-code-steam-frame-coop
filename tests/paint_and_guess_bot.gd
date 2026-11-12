@@ -465,7 +465,7 @@ func _track(mode: String) -> void:
 			print("BOT %s: ROUND %d (%s, %s) COMPLETE - '%s' guessed by %d/%d, canvas %d strokes / %d points, gallery %d" % [mode,
 				main.round_n, main.round_type, main.theme, main.reveal_word, got, main.active_guessers().size(),
 				main.canvas.strokes.size(), main.canvas.point_count, main.room.pictures.size()])
-			if main.net.mode != "local":  # every machine agrees what it was (tools/multibot.ts)
+			if main.net.mode == "client" or (main.net.mode == "host" and main.net.peer_count() > 0):  # every machine still here agrees what it was (tools/multibot.ts)
 				print("BOT AGREE game%d_round%d=%s" % [games_done, main.reveal_round, main.reveal_word])
 			# Jump ahead so a short run sees every kind of round, the vote and the final scores:
 			# default: 1 -> TEAM PAINT (3) -> vote; 4+ players: 1 -> SPEED (4) -> GOLDEN FINAL (5) -> vote;
@@ -478,7 +478,7 @@ func _track(mode: String) -> void:
 		elif st == "vote":
 			print("BOT %s: VOTE with %d pictures %s" % [mode, main.vote_count(), str(main.vote_words)])
 		elif st == "over":
-			if main.net.mode != "local":  # ... and on Smudge's family gallery
+			if main.net.mode == "client" or (main.net.mode == "host" and main.net.peer_count() > 0):  # ... and on Smudge's family gallery
 				print("BOT AGREE family_game%d=%d" % [games_done, main.family.size()])
 			games_done += 1
 			print("BOT %s: GAME OVER seen (%s) awards: %s; gallery %d, rounds seen %s" % [mode, main._scoreboard(),
