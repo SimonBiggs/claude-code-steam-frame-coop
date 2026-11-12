@@ -438,7 +438,7 @@ func _mission_done() -> void:
 		var friend: Dictionary = Deep.CREW[crew_before]
 		get_tree().create_timer(3.8).timeout.connect(func() -> void:
 			if is_inside_tree():
-				_story({"who": Story.CAPTAIN, "line": "%s joins the crew!" % String(friend.name), "pic": String(friend.pic), "color": friend.color, "duration": 3.5}))
+				_story({"who": Story.CAPTAIN, "line": "%s joins the crew!" % String(friend.name), "pic": String(friend.pic), "color": friend.color, "duration": 3.5}))  # who-ok: a story crew friend, not a player
 	_clear_surprise()
 	gift = ""
 	_send_deep()

@@ -159,7 +159,8 @@ func _check_no_generic(fails: Array[String]) -> void:
 			var lines := FileAccess.get_file_as_string(path).split("\n")
 			for i in lines.size():
 				var line := lines[i].strip_edges()
-				if line.begins_with("#") or line.contains("print(") or line.contains("push_warning("):
+				# "# who-ok: <why>": text about a story character, not a player (Starship Crew's "%s joins the crew!" friends).
+				if line.begins_with("#") or line.contains("print(") or line.contains("push_warning(") or line.contains("# who-ok:"):
 					continue
 				for r in res:
 					if (r[0] as RegEx).search(line) != null:
