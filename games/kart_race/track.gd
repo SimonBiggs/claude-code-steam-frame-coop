@@ -155,6 +155,9 @@ var hazards: Array = []  # cups (trackgen.gd): [s0, lat, "patch" / "bump", half 
 var bumpers: Array = []  # the round ones: [centre, radius, s, lat]
 var hz_style := ""  # cups.gd HAZARDS key ("candy", "jungle", "ice", "space") or ""
 var hz_effect := ""  # what a patch does here ("slow", "ice", "float")
+var surprises: Array = []  # deep.gd surprise spots (trackgen.gd): [s metres, lat]
+var season := ""  # Seeded.season the roadside is dressed for (main.gd sets it before a build; "" = none)
+var season_drift: CPUParticles3D  # the season's blossom / leaves / snow, kept round whoever this machine watches
 var splits: Array = []  # split lanes: [s0, len, extra half width, island half width, shortcut side] (trackgen.gd)
 var key := ""  # what is built (main compares it: "classic:2", "gen:...")
 var build_n := 0  # counts builds (views redraw the minimap / gate when it changes)
@@ -436,6 +439,7 @@ func build_info(d: Dictionary, k: String) -> void:
 	add_child(built)
 	dinos.clear()
 	snow = null
+	season_drift = null
 	_build_sky()
 	_build_road()
 	_build_pads()
@@ -524,6 +528,9 @@ func _features() -> void:
 		if String(ha[2]) == "bump":
 			var bp: Array = point_at(s0, float(ha[1]))
 			bumpers.append([bp[0], float(ha[3]), s0, float(ha[1])])
+	surprises.clear()
+	for sp in info.get("surprises", []):
+		surprises.append([float(sp[0]) * length, float(sp[1])])
 	boxes.clear()
 	box_t.clear()
 	for f in info["items"]:
@@ -1312,6 +1319,8 @@ func excite(amount: float = 1.0) -> void:
 func follow_weather(p: Vector3) -> void:
 	if snow != null and is_instance_valid(snow):
 		snow.global_position = p + Vector3(0, 9.0, 0)
+	if season_drift != null and is_instance_valid(season_drift):
+		season_drift.global_position = p + Vector3(0, 7.0, 0)
 
 
 func box_state() -> Array:

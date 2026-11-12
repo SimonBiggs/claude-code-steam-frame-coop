@@ -14,8 +14,6 @@ var main: Node
 var want := 2
 var saw_results := false
 var saw_finale := false
-var saw_pick := false  # Poppy's ride was finished and the next round began with the ride pick (story.gd)
-var saw_play := false
 var jumps := 0
 var late := false  # this machine joined a game already running (BOT_LATE)
 var saw_orbs := false  # the pick orbs showed on this machine (skies.gd modes / Poppy's gifts)
@@ -39,6 +37,7 @@ func _ready() -> void:
 	main.set("pick_wait_scale", 0.2)  # quick picks (bots run into the orbs anyway)
 	add_child(main)
 	kit.main = main
+	kit.watch_state(main.net)  # phases counted as they happen (kit.seen): a 0.25 s poll misses quick ones under load
 	want = BotKit.bot_players(2, 6)
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
@@ -99,10 +98,6 @@ func _watch_results() -> String:
 		saw_gust_rings = true
 	if ph == "play" and main.gusts != null:
 		gusts_planned = maxi(gusts_planned, main.gusts.list.size())
-	if ph == "pick":
-		saw_pick = true
-	elif ph == "play":
-		saw_play = true
 	if main.results_showing() and not saw_results:
 		saw_results = true
 		kit.assert_true(main.balloons.is_empty(), "the finale popped every balloon")
@@ -246,7 +241,7 @@ func _checks() -> void:
 		kit.assert_true(main.popped_by_tv > 0, "TV players popped balloons")
 	if main.vr_rig != null:
 		kit.assert_true(main.popped_by_vr > 0, "the fake VR player popped balloons")
-	kit.assert_true(saw_play or (late and int(main.net.state_get("round", 0)) >= 2), "%s: a generated round played" % mode)
+	kit.assert_true(kit.seen("phase", "play") > 0 or (late and int(main.net.state_get("round", 0)) >= 2), "%s: a generated round played" % mode)
 	kit.assert_true((main.net.state_get("fair", {}) as Dictionary).has("rides"), "%s: the fair state reached this machine" % mode)
 	if not late:  # (a late joiner may arrive after the picks)
 		kit.assert_true(saw_orbs, "%s: the pick orbs showed here" % mode)
@@ -254,7 +249,8 @@ func _checks() -> void:
 	kit.assert_true(main.net.state_get("parade", null) != null, "%s: Poppy's parade reached this machine" % mode)
 	if mode != "client":
 		kit.assert_true(Story.rides_built(main.save.data.rides) >= 1, "Poppy's first ride was built (%s)" % str(main.save.data.rides))
-		kit.assert_true(saw_pick or (main.net.state_get("offers", []) as Array).size() == 2, "%s: the next round began with the ride pick" % mode)
+		kit.assert_true(kit.seen("phase", "pick") > 0 or  # (Poppy's ride finished: the next round began with the ride pick, story.gd)
+			 (main.net.state_get("offers", []) as Array).size() == 2, "%s: the next round began with the ride pick" % mode)
 		kit.assert_true(not main.round_desc.is_empty() and int(main.save.data.rounds) >= 1, "%s: rounds came from a seed and were saved" % mode)
 		var stages := {}
 		for h in main.picks.history:

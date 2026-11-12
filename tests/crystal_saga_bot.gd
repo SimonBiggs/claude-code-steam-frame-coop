@@ -21,6 +21,10 @@ extends Node
 ## are up (CS_JOURNEYS=3 BOT_NO_DAILY=1: several regions open; the VR bot touches the second stone, so the world
 ## is rebuilt for another region on every machine), find the region's quest things (shoot / touch them), and fight
 ## the crystal guardian; with CS_TRY=guardian (or a deep CS_REGION) the guardian's tells (rain / roll / call) show.
+## saga-deep2 checks: TV bots step out of any told shape (guardian or road surprise) as a child would; with
+## CS_TRY=surprises the road's surprises are told and drawn on every machine; Nox waits at the shrine and leaves when
+## the crystal is restored; Lumi's crystal garden grows a flower (every machine); the season dresses the road; a
+## golden slime that came out was caught or went home.
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const BotEnd := preload("res://tests/bot_end.gd")
@@ -58,6 +62,12 @@ var saw_tells := {}  ## tell kinds seen drawn on this machine
 var quest_max := 0
 var region_changes := 0
 var last_biome := -1
+var saw_hazards := {}  ## road surprise kinds drawn on this machine
+var saw_nox := false  ## Nox shown by the broken crystal
+var nox_left := false  ## ... and gone from it once the crystal was restored
+var dodges := 0
+var gold_due := false  ## host: the party got past a place where a golden slime hides
+var saw_gold := false  ## host: ... and it came out  ## TV bots stepping out of a told shape
 var short := false  ## the run ends before a whole journey (solo VR host BOT_END=62, a 60 s local run): check progress
 
 
@@ -70,6 +80,7 @@ func _ready() -> void:
 	main = load("res://games/crystal_saga/main.tscn").instantiate()
 	add_child(main)
 	kit.main = main
+	kit.watch_state(main.net)  # (phases counted as they happen: a 0.25 s poll missed a quick level-up touch under load)
 	want = BotKit.bot_players(2, 6)
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
@@ -94,6 +105,8 @@ func _watch() -> String:
 		return ""
 	max_mons = maxi(max_mons, main.monsters.count())
 	saw_restored = saw_restored or bool(main.net.state_get("restored", false))
+	if bool(main.net.state_get("restored", false)) and main.nox_where != "shrine":
+		nox_left = true
 	if _phase() == "choose":
 		saw_choose += 1
 		if main.world.offer.size() >= 2 and main.world.choice_ids.size() == 3 and (main.world.props[main.world.choice_ids[0]]["node"] as Node3D).visible:
@@ -104,6 +117,15 @@ func _watch() -> String:
 			saw_map_client = true
 	for a in main.monsters.tells_shown:
 		saw_tells[String(a)] = true
+	for a2 in main.hazards.tells_shown:
+		saw_hazards[String(a2)] = true
+	if main.net.mode != "client":
+		var gd: Dictionary = (main.plan.get("road", {}) as Dictionary).get("gold", {})
+		if not gd.is_empty() and _zone() > int(gd.zone) and main.log_zones.has(int(gd.zone)) and _phase() != "results":
+			gold_due = true
+		saw_gold = saw_gold or main.gold_state != ""
+	if main.world.nox != null and main.world.nox.visible and main.nox_where == "shrine" and _zone() == 4:
+		saw_nox = true
 	quest_max = maxi(quest_max, int(main.net.state_get("quest", 0)))
 	var bio := int(main.plan.get("biome", -1))
 	if last_biome >= 0 and bio != last_biome:
@@ -221,6 +243,11 @@ func _tv_bot(slot: int, delta: float) -> void:
 			if main.vr_rig == null and w.offer.size() >= 2:
 				target = w.prop_center(w.choice_ids[slot % w.offer.size()])
 				reach = 3.0
+	var away := _dodge(pos)
+	if away != Vector3.ZERO:  # a warning shape under the hero: step out first (that's what the tell is for)
+		dodges += 1
+		kit.slot_stick(main.party, slot, "left", Vector2(away.x, away.z).normalized())
+		return
 	if target == Vector3.INF:
 		kit.slot_stick(main.party, slot, "left", Vector2.ZERO)
 		return
@@ -237,6 +264,37 @@ func _tv_bot(slot: int, delta: float) -> void:
 		return
 	var steer := _around_rocks(pos, to)
 	kit.slot_stick(main.party, slot, "left", Vector2(steer.x, steer.z).normalized())
+
+
+## Which way out of a told shape the hero stands in (ZERO: none). Reads the tells every machine draws.
+func _dodge(pos: Vector3) -> Vector3:
+	var WarnRings := preload("res://core/warn_rings.gd")
+	var all: Array = []
+	if main.monsters.rings != null:
+		all.append_array(main.monsters.rings.tells())
+	all.append_array(main.hazards.rings.tells())
+	for tl in all:
+		if float(tl.t) >= float(tl.secs):
+			continue
+		var p := Vector3(pos.x, 0.0, pos.z)
+		if not WarnRings.inside(String(tl.kind), tl.pos, tl.dir, tl.size, p, 0.35):
+			continue
+		var c: Vector3 = tl.pos
+		if String(tl.kind) == "line":
+			var d: Vector3 = (tl.dir as Vector3).normalized()
+			var side := Vector3(-d.z, 0.0, d.x)
+			var off := (p - c).dot(side)
+			var out := side * (1.0 if off >= 0.0 else -1.0)
+			if absf(p.x + out.x * 1.5) > World.HALF_W - 0.3:
+				out = -out
+			return out
+		var v := Vector3(p.x - c.x, 0.0, p.z - c.z)
+		if v.length() < 0.05:
+			v = Vector3(1.0 if p.x < 0.0 else -1.0, 0.0, 0.0)
+		if absf(p.x + v.normalized().x * 1.2) > World.HALF_W - 0.3:
+			v.x = -v.x
+		return v.normalized()
+	return Vector3.ZERO
 
 
 ## The nearest quest thing still to find in this zone (INF: none, or the quest is done).
@@ -420,12 +478,19 @@ func _checks() -> void:
 		print("BOT AGREE biome=%d" % first_biome)  # ... in the same region
 	kit.assert_true(main.stories_shown > 0, "%s: Lumi's story cards showed (%d)" % [mode, main.stories_shown])
 	if mode == "client":
-		kit.assert_true(saw_choose == 0 or saw_offer_client, "client showed the level-up stones")
+		if saw_choose > 0:  # (a look during the level-up: the stones were up; whether it happened: kit.seen)
+			kit.assert_true(saw_offer_client, "client showed the level-up stones")
 		kit.assert_true(max_mons >= (1 if OS.has_environment("CS_TRY") else 2), "client mirrors the monsters (%d)" % max_mons)
-		kit.assert_true(int(main.net.state_get("open", 0)) >= 2 or saw_results, "client saw barriers open")
-		kit.assert_true(saw_map == 0 or saw_map_client, "client showed the map stones")
+		kit.assert_true(int(main.net.state_get("open", 0)) >= 2 or kit.seen("phase", "results") > 0, "client saw barriers open")
+		if saw_map > 0:
+			kit.assert_true(saw_map_client, "client showed the map stones")
 		if main.log_regions.is_empty() and OS.has_environment("CS_TRY"):
 			kit.assert_true(not saw_tells.is_empty(), "client drew the guardian's tells (%s)" % str(saw_tells))
+		if OS.get_environment("CS_TRY") == "surprises":
+			kit.assert_true(not saw_hazards.is_empty(), "client drew the road's surprises (%s)" % str(saw_hazards))
+		if saw_results:
+			kit.assert_true(main.world.garden_count > 0, "client grew Lumi's crystal garden (%d)" % main.world.garden_count)
+		_deep2_common(mode)
 		return
 	var first := int(OS.get_environment("CS_ZONE")) if OS.has_environment("CS_ZONE") else 0
 	if OS.get_environment("CS_TRY") == "guardian":
@@ -441,11 +506,11 @@ func _checks() -> void:
 			kit.assert_true(main.log_zones.has(z), "%s: zone %d was entered" % [mode, z])
 		kit.assert_true(saw_restored, "%s: the Crystal of Light was restored" % mode)
 		kit.assert_true(main.runs_logged > 0, "%s: a RUN telemetry line was written" % mode)
-		kit.assert_true(saw_results, "%s: the results showed" % mode)
+		kit.assert_true(kit.seen("phase", "results") > 0, "%s: the results showed" % mode)
 		var atk0: Array = (main.plan.get("guardian", {}) as Dictionary).get("attacks", [])
 		kit.assert_true(main.log_stomps > 0 or first > 3 or not atk0.has("stomp") or not main.log_tells.is_empty(), "%s: the guardian stomped (%d) %s" % [mode, main.log_stomps, str(main.log_tells)])
 	if first <= 1:
-		kit.assert_true(saw_choose > 0 and not (main.save.data.skills as Dictionary).is_empty(), "%s: the party levelled up (%s)" % [mode, str(main.save.data.skills)])
+		kit.assert_true(kit.seen("phase", "choose") > 0 and not (main.save.data.skills as Dictionary).is_empty(), "%s: the party levelled up (%s)" % [mode, str(main.save.data.skills)])
 	kit.assert_true(int(main.save.data.shards) > 0, "%s: crystal shards were found (%d)" % [mode, int(main.save.data.shards)])
 	var atk: Array = (main.plan.get("guardian", {}) as Dictionary).get("attacks", [])
 	if OS.has_environment("CS_TRY") or OS.has_environment("CS_REGION"):
@@ -468,9 +533,32 @@ func _checks() -> void:
 		if first <= 2 and not short:  # (the cave orb's thunder comes late in a journey)
 			kit.assert_true(main.hands.thunders > 0, "the hero cast thunder (%d)" % main.hands.thunders)
 		kit.assert_true(main.log_pokes.size() >= 6, "props reacted (%s)" % str(main.log_pokes))
+	if OS.get_environment("CS_TRY") == "surprises" and main.log_zones.has(2):
+		var hz := 0
+		for k2 in ["cones", "log", "drips", "boulder"]:
+			hz += int(main.log_tells.get(k2, 0))
+		kit.assert_true(hz > 0, "%s: the road's surprises were told (%s)" % [mode, str(main.log_tells)])
+		kit.assert_true(not saw_hazards.is_empty(), "%s: ... and drawn (%s)" % [mode, str(saw_hazards)])
+	if saw_restored and not short:
+		kit.assert_true((main.save.data.garden as Array).size() > 0 and main.world.garden_count > 0, "%s: Lumi's crystal garden grew (%s)" % [mode, str(main.save.data.garden)])
+		kit.assert_true(saw_nox, "%s: Nox waited by the broken crystal" % mode)
+		kit.assert_true(nox_left, "%s: Nox left when the light came back" % mode)
+	if gold_due:
+		kit.assert_true(saw_gold, "%s: the golden slime came out on its road" % mode)
+	_deep2_common(mode)
 	if mode == "local" and not OS.has_environment("CS_TRY"):  # (CS_TRY: the VR hero may beat the guardian alone)
 		var tv := 0
 		for s in main.log_hits:
 			if int(s) > 0 or main.vr_rig == null:
 				tv += int(main.log_hits[s])
 		kit.assert_true(tv > 0, "the TV party hit monsters (%d)" % tv)
+
+
+## Every machine: the season dressed the road (CS_SEASON, else the day's).
+func _deep2_common(mode: String) -> void:
+	var se := String(main.plan.get("season", ""))
+	var want_se := OS.get_environment("CS_SEASON") if OS.has_environment("CS_SEASON") else preload("res://core/seeded.gd").season()
+	kit.assert_eq(se, want_se, "%s: the road is dressed for the season" % mode)
+	kit.assert_true(main.world.season_props != null, "%s: the season's props stand by the road" % mode)
+	if dodges > 0:
+		kit.info("TV bots stepped out of told shapes %d times" % dodges)

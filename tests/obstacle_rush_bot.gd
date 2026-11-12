@@ -27,7 +27,6 @@ var kit: BotKit
 var main: Node
 var want := 2
 var brains := {}  # slot -> CpuBrain
-var seen_courses := {}
 var saw_results := false
 var again_t := -1.0
 var vr_step := "idle"
@@ -59,6 +58,7 @@ func _ready() -> void:
 		OS.set_environment("OR_TRICKS_NOW", "1")
 	add_child(main)
 	kit.main = main
+	kit.watch_state(main.net)  # phases counted as they happen (kit.seen): a 0.25 s poll misses quick ones under load
 	want = BotKit.bot_players(2, 6)
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
@@ -83,7 +83,6 @@ func _ready() -> void:
 
 
 func _results() -> String:
-	seen_courses[int(main.net.state_get("course", 0))] = true
 	if fans0 < 0 and main.ready_to_play:
 		fans0 = int(main.net.state_get("fans", 0))
 	var bits := int(main.net.state_get("stars", 0))
@@ -282,7 +281,8 @@ func _checks() -> void:
 	if mode != "host":
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 	var several := 2 if short else 3  # (a cut-short run: solo VR host BOT_END=62, a 60 s local run)
-	kit.assert_true(seen_courses.size() >= several, "%s: played through several courses (%d%s)" % [mode, seen_courses.size(), ", short run" if short else ""])
+	var courses := kit.seen_values("course").size()
+	kit.assert_true(courses >= several, "%s: played through several courses (%d%s)" % [mode, courses, ", short run" if short else ""])
 	kit.assert_true(gen_checked >= several, "%s: checked the courses it built (%d)" % [mode, gen_checked])
 	kit.assert_true(main.stands.fans == mini(int(main.net.state_get("fans", 0)), Story.MAX_FANS), "%s: the grandstand shows the fans (%d)" % [mode, main.stands.fans])
 	_deep_checks(mode)
@@ -291,7 +291,7 @@ func _checks() -> void:
 		kit.assert_true(main.course.checkpoints.size() > 0, "client built the course")
 		return
 	if not short:
-		kit.assert_true(saw_results, "%s: the show ended with the results" % mode)
+		kit.assert_true(kit.seen("phase", "results") > 0, "%s: the show ended with the results" % mode)
 	kit.assert_true(short or int(main.net.state_get("fans", 0)) > fans0, "%s: fans joined the grandstand (%d -> %d)" % [mode, fans0, int(main.net.state_get("fans", 0))])
 	kit.assert_true(grabs > 0, "%s: a star got grabbed" % mode)
 	var natural := {}
