@@ -205,7 +205,14 @@ var village_days := 0
 var village_count := -1
 var story_queue: Array = []  # [line, pic, color]
 var story_t := 0.0
-var game_mode := "brave"  # gentle / brave / hard (the MODE pick; siegegen.gd MODE_NUM, bosses.gd)
+## gentle / brave / hard (the MODE pick; siegegen.gd MODE_NUM, bosses.gd). The host's pick rules every machine: set on
+## the host / local game it goes out as net state "mode", and a TV machine takes it from there (_on_state_changed)
+## (2026-11-12: a TV machine kept its own "brave" until a gift pick told it). Never set it on a client by hand.
+var game_mode := "brave":
+	set(v):
+		game_mode = v
+		if net != null and net.mode != "client":
+			net.state_set("mode", v)
 var orbs: PickOrbs  # the pick orbs (every machine draws them)
 var rings: WarnRings  # boss warning rings (every machine)
 var pick_stage := ""  # host / local: "mode" or "gift" while orbs are up
@@ -239,6 +246,7 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.state_changed.connect(_on_state_changed)
 	net.sticky_event("village")  # a machine that joins later gets the latest one (core/net.gd)
 	net.sticky_event("orbs")
 	net.sticky_event("gifts")
@@ -2425,6 +2433,12 @@ func _update_vr_hurt(delta: float) -> void:
 
 
 # --- Bobo's village and the seeded siege ---------------------------------------------------------
+
+## Any machine: a TV machine plays at the host's mode.
+func _on_state_changed(key: String, value: Variant) -> void:
+	if key == "mode" and net.mode == "client" and SiegeGen.MODE_NUM.has(String(value)):
+		game_mode = String(value)
+
 
 ## Host / local: a new game. Count the play-day (igloos grow a stage each day), pick the siege (TODAY'S
 ## BLIZZARD first each day), show the village and tell the story.

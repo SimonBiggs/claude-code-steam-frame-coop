@@ -237,7 +237,14 @@ var run_info := {}             # this round's telemetry
 # Second pass (picks.gd, gardengen.gd modes / wasps / storms / gifts, core/warn_rings.gd):
 var picks: Node                # the shared pick orbs between rounds (every machine draws, the host decides)
 var rings: WarnRings           # warning rings on every machine (the host sends "warn")
-var game_mode := "gentle"      # GENTLE / BRAVE / HARD (saved: the family's last one floats in the middle)
+## GENTLE / BRAVE / HARD (saved: the family's last one floats in the middle). The host's pick rules every machine:
+## the host / local game also shares it as net state "mode" (snapshots carry it too), so a TV machine never keeps its
+## own saved mode (2026-11-12: Duo Arena's TV played at its own difficulty). Never set it on a client by hand.
+var game_mode := "gentle":
+	set(v):
+		game_mode = v
+		if net != null and net.mode != "client":
+			net.state_set("mode", v)
 var mode_picked := false
 var gifts: Array = []          # Queen Bea's gifts this visit (ids, gardengen.gd GIFTS)
 var plan_wasp := 0
@@ -334,6 +341,7 @@ func _ready() -> void:
 	net.main = self
 	add_child(net)
 	net.state_changed.connect(_on_state_changed)
+	game_mode = game_mode  # (now net exists: share it)
 	picks = PicksScript.new()
 	picks.main = self
 	add_child(picks)
@@ -2818,6 +2826,8 @@ func _draw_warn(pos: Vector3, r: float, col: Color, secs: float, style: String) 
 
 ## Every machine: sticky net state (the pick orbs, so a machine joining mid-pick sees them too).
 func _on_state_changed(key: String, value: Variant) -> void:
+	if key == "mode" and net.mode == "client" and value != null and GardenGen.MODE_IDS.has(String(value)):
+		game_mode = String(value)  # the host's difficulty, not this machine's saved one
 	if key == "orbs" and net.mode == "client" and value is Array and (value as Array).size() == 3:
 		picks.show_row(String(value[0]), value[1] if value[1] is Array else [], float(value[2]))
 

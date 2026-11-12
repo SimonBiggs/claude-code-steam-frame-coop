@@ -281,6 +281,7 @@ func _ball_debug() -> String:
 func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
+	kit.check_host_mode(main.net, main.mode)  # the TV plays at the host's difficulty (2026-11-12)
 	if mode == "client":
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
 	elif mode == "local":  # (the host checks after the TV machine has gone)

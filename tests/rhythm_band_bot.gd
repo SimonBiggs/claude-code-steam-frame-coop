@@ -200,6 +200,8 @@ func _process(delta: float) -> void:
 		songs_done += 1
 		print("BOT %s: SONG %d COMPLETE ('%s') - %d stars, score %d, crowd %d%%, sync %d" % [mode, int(main.tour_pos) + 1, str(main.song.title),
 			int(main.last_stars), int(main.score), int(main.crowd * 100.0), int(main.sync_count)])
+		if songs_done == 1:
+			_check_host_mode()
 		if simple and songs_done >= 3 and quit_t < 0.0:
 			quit_t = t + 2.0
 			_final_checks(mode)
@@ -412,6 +414,14 @@ func _check_song() -> void:
 		ok = ok and not lanes.has(1)
 	_check("BOT CHECK song %d '%s' %d BPM: lanes %s, gold notes %d, drum level %d, guitar notes %d, drum notes %d -> %s" % [pos + 1,
 		str(g.title), int(g.bpm), str(lanes.keys()), gold, int(main.drum_level), g.g_t.size(), g.d_t.size(), "PASS" if ok else "FAIL"])
+
+
+## Every machine plays at the host's difficulty (a TV machine used to keep its own, 2026-11-12). After the pick.
+func _check_host_mode() -> void:
+	var k := preload("res://tests/bot_kit.gd").new()
+	k.check_host_mode(main.net, String(main.mode))
+	_check("BOT CHECK this %s machine plays at the host's mode '%s' -> %s" % [main.net.mode, String(main.mode), "PASS" if k.failures == 0 else "FAIL"])
+	k.free()
 
 
 ## A BOT CHECK line (ends "-> PASS" / "-> FAIL"), counted for the BOT RESULT line.

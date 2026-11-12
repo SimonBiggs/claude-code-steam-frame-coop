@@ -571,6 +571,10 @@ func _exit_tree() -> void:
 	if main != null and is_instance_valid(main):
 		BotEnd.check(reported, "a garden day was completed (mode %s, t=%.0f)" % [main.net.mode, t])
 		BotEnd.check(not main.simple or not main.game_over, "no game over in simple mode")
+		# The TV machine plays at the host's difficulty (like bot_kit check_host_mode; 2026-11-12).
+		if main.net.mode in ["host", "client"]:
+			var mode_why: String = preload("res://tests/bot_kit.gd").host_mode_problem(main.net, main.game_mode)
+			BotEnd.check(mode_why == "", mode_why if mode_why != "" else "this machine plays at the host's difficulty")
 	if main != null and is_instance_valid(main) and main.simple:
 		var ks: Array = cues.keys()
 		ks.sort()

@@ -473,6 +473,8 @@ func _checks() -> void:
 	if mode != "host":
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 	kit.assert_true(plan_ok, "%s: the world was built from the journey's plan" % mode)
+	# BRAVE is the difficulty here: the TV builds its road with the host's (net state "plan"; "mode" says it too, 2026-11-12).
+	kit.check_host_mode(main.net, "brave" if bool(main.plan.get("hard", false)) else "gentle")
 	if mode != "local":
 		print("BOT AGREE road=%d" % first_road)  # every machine built the same (first) road
 		print("BOT AGREE biome=%d" % first_biome)  # ... in the same region

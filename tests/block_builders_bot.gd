@@ -533,6 +533,7 @@ func _exit_tree() -> void:
 	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
 	if main != null and is_instance_valid(main):
 		BotEnd.check(cleared_seen >= 1, "a level was cleared (mode %s, t=%.0f, state %s)" % [main.net.mode, t, main.state])
+		_check_host_mode()
 		print("BOT DEEP: picks %s history %s surprises %s hits %d town %d mode %s gift %s season %s" % [str(picks_seen),
 			str(main.picks.history) if main.picks != null else "[]", str(main.hazards.seen) if main.hazards != null else "{}",
 			main.hazards.hits_all if main.hazards != null else 0, int(main.save.data.get("town_total", 0)), main.mode, main.gift, main.season])
@@ -551,3 +552,9 @@ func _exit_tree() -> void:
 		for p in main.players:
 			if p.has_meta("cue_done"):
 				print("BOT CUES: P%d done=%s" % [p.index + 1, p.get_meta("cue_done")])
+
+
+## The TV machine plays at the host's difficulty (like bot_kit check_host_mode; 2026-11-12).
+func _check_host_mode() -> void:
+	var why: String = preload("res://tests/bot_kit.gd").host_mode_problem(main.net, main.mode)  # (one shared check)
+	BotEnd.check(why == "", why if why != "" else "this machine plays at the host's difficulty")

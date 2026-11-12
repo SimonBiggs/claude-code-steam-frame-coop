@@ -530,4 +530,10 @@ func _exit_tree() -> void:
 			fails.append("Old Whiskers pulled without a tell")
 		if not seen.has("pond"):
 			fails.append("no Ollie's pond")
+	# The TV machine plays at the host's difficulty (2026-11-12).
+	var mode_why: String = preload("res://tests/bot_kit.gd").host_mode_problem(main.net, main.game_mode)
+	if mode_why != "":
+		fails.append(mode_why)
+	elif mode in ["host", "client"]:
+		print("BOT: check_host_mode ok (%s machine, %s)" % [mode, main.game_mode])
 	print("BOT RESULT: %s" % ("PASS" if fails.is_empty() else "FAIL " + "; ".join(fails)))

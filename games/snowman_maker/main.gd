@@ -2035,6 +2035,7 @@ func _begin_session() -> void:
 ## Host: the difficulty, the gift and the season for every machine.
 func _send_deep() -> void:
 	net.state_set("deep", [difficulty, gift, season])
+	net.state_set("mode", difficulty)  # (the bots check a TV machine plays at it: tests/bot_kit.gd check_host_mode)
 
 
 ## Nobody here could take a pick (no VR builder, no TV player): the middle comes sooner.

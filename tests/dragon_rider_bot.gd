@@ -402,6 +402,7 @@ func _note(mode: String) -> void:
 func _exit_tree() -> void:
 	if main == null:
 		return
+	_check_host_mode()
 	# Its own verdict, in local AND networked runs (multibot reads it; tests/bot_end.gd ends networked runs).
 	print("BOT RESULT: %s (%d checks%s)" % ["PASS" if fails == 0 else "FAIL", checks, "" if fails == 0 else ", %d failed" % fails])
 	var keys := seen.keys()
@@ -491,3 +492,11 @@ func _ok(ok: bool, what: String) -> void:
 	checks += 1
 	fails += 0 if ok else 1
 	print(("Bot: OK " if ok else "SCRIPT ERROR: BOT: FAILED ") + what)
+
+
+## The TV machine plays at the host's difficulty (like bot_kit check_host_mode; 2026-11-12). Once the host picked.
+func _check_host_mode() -> void:
+	if main.play_mode == "" and main.net.state_get("mode") == null:
+		return  # (the host hasn't picked yet)
+	var why: String = preload("res://tests/bot_kit.gd").host_mode_problem(main.net, main.play_mode)  # (one shared check)
+	_ok(why == "", why if why != "" else "check_host_mode: this machine plays at the host's difficulty")

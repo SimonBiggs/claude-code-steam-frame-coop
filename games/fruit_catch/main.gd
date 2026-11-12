@@ -1434,9 +1434,11 @@ func _animate_nutmeg(delta: float) -> void:
 
 # --- Second pass: picks, surprises, gifts (deep.gd, picks.gd, hazards.gd) ----------------------------------------
 
-## Host: the mode, the gift and the season for every machine.
+## Host: the mode, the gift and the season for every machine (the TV machine takes the host's mode from "deep").
+## "mode" alone too: the shared host-difficulty check reads it (2026-11-12).
 func _send_deep() -> void:
 	net.state_set("deep", [mode, gift, season])
+	net.state_set("mode", mode)
 
 
 ## Nobody here could take a pick (no giant, no TV player): the middle comes sooner.

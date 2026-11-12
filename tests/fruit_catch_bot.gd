@@ -276,6 +276,7 @@ func _report() -> String:
 
 func _checks() -> void:
 	var mode: String = main.net.mode
+	kit.check_host_mode(main.net, main.mode)  # the TV plays at the host's difficulty (2026-11-12)
 	print("BOT DEEP: mode=%s %s picks=%s pantry=%s gift=%s" % [mode, str(deep), str(main.picks.history), str(main.pantry.count), main.gift])
 	kit.assert_true(deep.has("orbs_seen"), "%s: the pick orbs showed" % mode)
 	if mode != "client":

@@ -199,7 +199,14 @@ var picks: Node  # picks.gd
 var hazards: Node3D  # hazards.gd
 var season_node: Node3D  # season.gd
 var festival: Node3D  # festival.gd
-var mode := "brave"
+## The host's pick rules every machine: set on the host / local game it goes out as net state "mode", and a TV
+## machine takes it from there (_on_state_changed) and the snapshot, so its hit windows and warn times match
+## (2026-11-12: TV machines kept their own default). Never set it on a client by hand.
+var mode := "brave":
+	set(v):
+		mode = v
+		if net != null and net.mode != "client":
+			net.state_set("mode", v)
 var mode_picked := false
 var gift := ""  # this song's gift ("" none)
 var gift_for := -1  # the show position the gift was picked for
@@ -2121,8 +2128,11 @@ func _start_fan_club() -> void:
 	_send_fans()
 	season = SeasonKit.override("rhythm_band", Seeded.season(Seeded.today()), Deep.SEASONS)
 	season_node.set_season(season)
+	if OS.has_environment("RB_MODE"):  # tests / What's New "try": this mode (the pick's middle orb too)
+		save.data.mode = Deep.mode_of(OS.get_environment("RB_MODE"))
 	if String(save.data.mode) != "":
 		mode = Deep.mode_of(String(save.data.mode))
+	net.state_set("mode", mode)  # (the TV machines play at it even before the pick)
 	var fest := Deep.festival(int(save.data.songs))
 	festival.set_pieces(fest)
 	net.state_set("fest", fest)
@@ -2183,7 +2193,9 @@ func _new_fan() -> void:
 
 
 ## Every machine: the fan club follows the host's replicated state.
-func _on_state_changed(key: String, _value: Variant) -> void:
+func _on_state_changed(key: String, value: Variant) -> void:
+	if key == "mode" and net.mode == "client" and value != null:
+		mode = Deep.mode_of(String(value))
 	if key == "fans" or key == "days":
 		fan_club.set_fans(net.state_get("fans", []), int(net.state_get("days", 0)))
 	if key == "fest":

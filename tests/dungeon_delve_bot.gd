@@ -367,6 +367,8 @@ func _report() -> String:
 func _checks() -> void:
 	var mode: String = main.net.mode
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
+	# The difficulty lives in net state "mode" (deep.gd heroic() / diff() read it on the TV; 2026-11-12 check).
+	kit.check_host_mode(main.net, main.deep.mode if main.deep.mode != "" else String(main.net.state_get("mode", "")))
 	if kit.t > 6.0 and mode != "client":  # Cinder says hello ~2 s in (a TV machine may join after it)
 		kit.assert_true(main.story_count > 0, "%s: Cinder's story card showed" % mode)
 	if deep_mode != "":

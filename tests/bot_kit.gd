@@ -302,12 +302,20 @@ func assert_near(a: float, b: float, tolerance: float, msg: String) -> bool:
 ## "brave" while the host played gentle, so its pad / charge / fire tells were wrong). tests/net_mode_sync_test.gd
 ## makes every networked game with a difficulty either call this from its bot or say why its clients never read it.
 func check_host_mode(net: Node, mine: String, key := "mode") -> bool:
+	var why := host_mode_problem(net, mine, key)
+	return assert_true(why == "", why if why != "" else "this machine plays at the host's difficulty ('%s': %s)" % [key, mine])
+
+
+## The same check for bots without a BotKit (they record it their own way): "" = fine, else what's wrong.
+static func host_mode_problem(net: Node, mine: String, key := "mode") -> String:
 	if net == null or not (net.mode in ["host", "client"]):
-		return true
+		return ""
 	var host: Variant = net.state_get(key)
-	if not assert_true(host != null, "the host shares its difficulty as net state '%s' (%s machine)" % [key, net.mode]):
-		return false
-	return assert_eq(mine, String(host), "this %s machine plays at the host's difficulty ('%s')" % [net.mode, key])
+	if host == null:
+		return "the host never shared its difficulty as net state '%s' (%s machine)" % [key, net.mode]
+	if mine != str(host):
+		return "this %s machine plays at %s, the host at %s ('%s')" % [net.mode, mine, str(host), key]
+	return ""
 
 
 ## Print the summary and quit (exit code 1 if anything failed).
