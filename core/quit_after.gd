@@ -20,6 +20,12 @@ func _ready() -> void:
 ## The --quit-after frame count, or -1 when not passed. Godot keeps engine options like --quit-after out of
 ## OS.get_cmdline_args(), so read the process's own command line (Linux; tests only run here).
 static func limit() -> int:
+	return arg_int("--quit-after")
+
+
+## An engine option's int value from this process's command line ("--x N" or "--x=N"), or -1 when not passed.
+## (Also --fixed-fps for tests/bot_end.gd run_length.)
+static func arg_int(flag: String) -> int:
 	var args := PackedStringArray()
 	var f := FileAccess.open("/proc/self/cmdline", FileAccess.READ)
 	if f != null:
@@ -32,9 +38,9 @@ static func limit() -> int:
 				cur.append(byte)
 	for i in args.size():
 		var a := str(args[i])
-		if a == "--quit-after" and i + 1 < args.size():
+		if a == flag and i + 1 < args.size():
 			return int(args[i + 1])
-		if a.begins_with("--quit-after="):
+		if a.begins_with(flag + "="):
 			return int(a.get_slice("=", 1))
 	return -1
 

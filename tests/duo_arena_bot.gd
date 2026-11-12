@@ -23,7 +23,7 @@ var pad_step := 0
 var target := 2
 var script_step := 0
 var vr_draw_t := 0.0
-var end_t := float(OS.get_environment("BOT_END")) if OS.has_environment("BOT_END") else 56.0
+var end_t: float = preload("res://tests/bot_end.gd").end_at(56.0)  # BOT_END, pulled in before a --quit-after cut
 
 
 func _ready() -> void:

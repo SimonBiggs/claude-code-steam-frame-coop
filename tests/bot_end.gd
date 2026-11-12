@@ -36,6 +36,43 @@ static func within_deadline(s: float, joining := OS.has_environment("DUO_JOIN"))
 	return clampf(s, 5.0, maxf(5.0, limit))
 
 
+## How many game seconds this run can last at most: BOT_END (e.g. the solo VR host run's 62 s), the runner's deadline
+## (BOT_DEADLINE, as within_deadline pulls a bot's end in) and Godot's --quit-after frame limit (core/quit_after.gd:
+## frames / --fixed-fps, or / 60 without it) all cut it. INF when nothing does (the TV, Decks and VR never pass any).
+static func run_length() -> float:
+	var s := INF
+	if OS.has_environment("BOT_END"):
+		s = float(OS.get_environment("BOT_END"))
+	if OS.has_environment("BOT_DEADLINE"):
+		s = minf(s, within_deadline(INF))
+	var frames: int = load("res://core/quit_after.gd").limit()
+	if frames > 0:
+		var fps: int = load("res://core/quit_after.gd").arg_int("--fixed-fps")
+		s = minf(s, float(frames - 30) / float(fps if fps > 0 else 60))  # (QuitAfter quits 30 frames early)
+	return s
+
+
+## When a bot with its own end (a bot_kit "finish" step, a forced game over) should end: BOT_END if set, else
+## `default_s` (its whole arc), pulled in to end `spare_s` before the run is cut (run_length: --quit-after, the runner's
+## deadline), so its checks always run. A bot ending at BOT_END=62 in a --quit-after 3600 run was cut at 59.5 s and
+## said "PASS (0 checks)" (crystal_saga, elemental_bender) or FAIL (duo_arena) (2026-11-12).
+static func end_at(default_s: float, spare_s := 2.0) -> float:
+	var s := float(OS.get_environment("BOT_END")) if OS.has_environment("BOT_END") else default_s
+	s = within_deadline(s)
+	var cut := run_length()
+	if cut < INF:
+		s = minf(s, maxf(5.0, cut - spare_s))
+	return s
+
+
+## Whether this run ends before `need_s` game seconds: the time the bot's whole arc needs (a full journey, a docking, a
+## finished round). A cut-short run checks real progress instead of the whole arc (crystal_saga, starship_crew,
+## penalty_shootout: their end checks assumed a full-length run while the solo VR host's BOT_END=62 or a 60 s
+## --quit-after cut it short, 2026-11-12). Never just drop a check: replace it with the progress that run can show.
+static func short_run(need_s: float) -> bool:
+	return run_length() < need_s
+
+
 ## Every bot quits through here (never get_tree().quit(): tests/bot_end_test.gd checks; runs ending at --quit-after
 ## come here too, via the QuitAfter service, core/quit_after.gd). Stops every sound, gives the
 ## audio thread a moment to drop the stopped playbacks, then quits. Quitting while a sound plays leaked its

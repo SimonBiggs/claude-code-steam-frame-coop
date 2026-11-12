@@ -119,7 +119,7 @@ func _content_script() -> void:
 			print("Bot: every fort upgrade + a mega snowball for P1")],
 		[24.0, func() -> void: main.debug_event("sunshine")],
 		[36.0, func() -> void: main.debug_event("cocoa")],
-		[float(OS.get_environment("BOT_END")) if OS.has_environment("BOT_END") else 56.0, func() -> void:
+		[preload("res://tests/bot_end.gd").end_at(56.0), func() -> void:
 			if not main.game_over:
 				print("Bot: forcing game over to show the awards")
 				main._on_game_over("TIME FOR COCOA!")],

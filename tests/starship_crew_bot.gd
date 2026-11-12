@@ -28,6 +28,7 @@ var vr_t := 0.0
 var toy_i := 0
 var grab_at := Vector3.ZERO
 var again_done := 0
+var short := false  ## the run ends before the whole trip (solo VR host BOT_END=62, a 60 s local run): check progress
 
 
 func _ready() -> void:
@@ -50,10 +51,9 @@ func _ready() -> void:
 			kit.join_bot(main.party))  # a flat host (TV / Deck hosting): one pad hero here, in slot 0
 	kit.every(4.0, _report)
 	kit.every(0.5, _results)
-	var end := 125.0 if host else (115.0 if client else 160.0)
-	if OS.has_environment("BOT_END"):
-		end = float(OS.get_environment("BOT_END"))
-	end = preload("res://tests/bot_end.gd").within_deadline(end)
+	var full := 125.0 if host else (115.0 if client else 160.0)  # the whole trip: four missions, then docking
+	var end: float = preload("res://tests/bot_end.gd").end_at(full)  # (BOT_END, --quit-after, the runner's deadline)
+	short = end < full - 1.0
 	kit.at(end, "finish", func() -> void:
 		_checks()
 		kit.finish())
@@ -166,15 +166,18 @@ func _checks() -> void:
 	if mode != "host":
 		kit.assert_eq(kit.seated(), kit.seated_want(want), "%s: all %d TV players are seated" % [mode, want])
 		kit.assert_true(main.lasers_seen > 0, "%s: lasers were drawn (%d)" % [mode, main.lasers_seen])
-	kit.assert_true(seen_missions.size() >= 3, "%s: played through several missions (%d)" % [mode, seen_missions.size()])
+	kit.assert_true(seen_missions.size() >= (2 if short and kit.t < 50.0 else 3), "%s: played through several missions (%d%s)" % [mode, seen_missions.size(), ", short run" if short else ""])
 	kit.assert_true(main.stories_shown >= 3, "%s: Captain Whiskers' story cards showed (%d)" % [mode, main.stories_shown])
 	kit.assert_true(main.cockpit.model_parts == int(main.net.state_get("parts", -1)), "%s: the dashboard station model has every part (%d)" % [mode, main.cockpit.model_parts])
 	if mode == "client":
 		kit.assert_true(max_objs >= 3, "client mirrors the space objects (%d)" % max_objs)
 		return
-	kit.assert_true(saw_results, "%s: the ship docked and the results showed" % mode)
-	kit.assert_true(main.runs_logged >= 4, "%s: a RUN line for every mission (%d)" % [mode, main.runs_logged])
-	kit.assert_true(int(main.net.state_get("parts", 0)) >= 1 + int(OS.get_environment("SC_TRIPS")), "%s: the station grew a part on the way home" % mode)
+	if short:  # cut short before docking: a RUN line for every mission finished so far
+		kit.assert_true(main.runs_logged >= 1 and main.runs_logged >= seen_missions.size() - 1, "%s: a RUN line for every finished mission (%d, missions seen %d, short run)" % [mode, main.runs_logged, seen_missions.size()])
+	else:
+		kit.assert_true(saw_results, "%s: the ship docked and the results showed" % mode)
+		kit.assert_true(main.runs_logged >= 4, "%s: a RUN line for every mission (%d)" % [mode, main.runs_logged])
+		kit.assert_true(int(main.net.state_get("parts", 0)) >= 1 + int(OS.get_environment("SC_TRIPS")), "%s: the station grew a part on the way home" % mode)
 	if not OS.has_environment("SC_MISSION"):
 		kit.assert_eq(int(main.net.state_get("practice", 0)), 3, "both practice targets got done")
 	var tv_pops := 0

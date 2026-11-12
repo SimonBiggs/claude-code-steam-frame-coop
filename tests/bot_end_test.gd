@@ -8,6 +8,7 @@ const HELPERS := ["dungeon_delve_deep_bot.gd"]
 const LATE := 120.0  ## a host end this late must be capped by bot_end.gd within_deadline
 var weak_re := RegEx.create_from_string("slot_stick\\(.*normalized\\(\\) \\* (0\\.[0-2]\\d*)\\b")
 var late_re := RegEx.create_from_string("(\\d+(?:\\.\\d+)?) if host else")
+var bot_end_re := RegEx.create_from_string("float\\(OS\\.get_environment\\(\"BOT_END\"\\)\\)(?!\\s*-)")
 
 
 func _initialize() -> void:
@@ -53,8 +54,14 @@ func _initialize() -> void:
 		var weak := weak_re.search(src)
 		if weak != null:
 			flat.append("%s (stick push %s is inside the 0.2 deadzone)" % [f, weak.get_string(1)])
+		# A bot that ends AT BOT_END (its finish step, a forced game over) is cut first when --quit-after or the
+		# runner's deadline comes sooner (the solo VR host run is BOT_END=62 with --quit-after 3600: cut at 59.5 s, so
+		# crystal_saga said "PASS (0 checks)" and duo_arena FAIL, 2026-11-12): it goes through bot_end.gd end_at(), which
+		# pulls the end in before any cut. (Reading BOT_END minus a margin, "BOT_END")) - 8.0", is fine.)
+		if bot_end_re.search(src) != null and not "end_at(" in src:
+			flat.append(f + " (ends at BOT_END: use tests/bot_end.gd end_at(), a --quit-after / deadline cut may come first)")
 		var m := late_re.search(src)
-		if m != null and float(m.get_string(1)) >= LATE and not "within_deadline(" in src:
+		if m != null and float(m.get_string(1)) >= LATE and not ("within_deadline(" in src or "end_at(" in src):
 			late.append("%s (%s s)" % [f, m.get_string(1)])
 	# Every tests/*_test.gd prints an explicit verdict (a PASS line, or BOT RESULT through bot_kit finish()): dev.land
 	# reads the PASS line, and a test that only says "SKY: 400 flights checked, 0 failures" and exits 0 looked the same

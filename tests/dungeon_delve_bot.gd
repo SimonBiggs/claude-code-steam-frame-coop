@@ -52,6 +52,7 @@ var off_floor := 0
 var max_foes := 0
 var floors_seen := {}
 var goal_done := false
+var short := false  ## the run ends before the bot's whole run (solo VR host BOT_END=62, a 60 s local run)
 
 
 func _ready() -> void:
@@ -87,10 +88,9 @@ func _ready() -> void:
 			main.deep.process(0.016)
 			kit.assert_true(main.deep.pad_rings.has("daily"), "a pad added by a hot reload gets built"))
 	kit.every(0.25, _watch)
-	var end := 150.0 if host else (140.0 if client else 170.0)
-	if OS.has_environment("BOT_END"):
-		end = float(OS.get_environment("BOT_END"))
-	end = preload("res://tests/bot_end.gd").within_deadline(end)
+	var full := 150.0 if host else (140.0 if client else 170.0)
+	var end: float = preload("res://tests/bot_end.gd").end_at(full)  # (BOT_END, --quit-after, the runner's deadline)
+	short = end < full - 1.0
 	kit.at(end, "finish", func() -> void:
 		_checks()
 		kit.finish())
@@ -381,9 +381,12 @@ func _checks() -> void:
 		kit.assert_true(int(main.net.state_get("open", 0)) >= 2 or saw_results or again_sent, "client saw gates open")
 		return
 	var first := int(OS.get_environment("DD_ROOM")) if OS.has_environment("DD_ROOM") else 0
-	for r in range(first, Dungeon.ROOMS):
-		kit.assert_true(main.log_rooms.has(r), "%s: room %d was entered" % [mode, r])
-	kit.assert_true(saw_results, "%s: the treasure was found and the results showed" % mode)
+	if short:  # cut short (solo VR host BOT_END=62, a 60 s local run): real progress through the rooms
+		kit.assert_true(main.log_rooms.has(first) and main.log_rooms.has(first + 1), "%s: the party moved on from room %d (short run, %s)" % [mode, first, str(main.log_rooms)])
+	else:
+		for r in range(first, Dungeon.ROOMS):
+			kit.assert_true(main.log_rooms.has(r), "%s: room %d was entered" % [mode, r])
+		kit.assert_true(saw_results, "%s: the treasure was found and the results showed" % mode)
 	if not OS.has_environment("DD_ROOM"):
 		if main.vr_rig != null:
 			kit.assert_true(main.dungeon.is_used(main.dungeon.dummy_id) or main.log_rooms.size() > 1, "the knight did the practice")
