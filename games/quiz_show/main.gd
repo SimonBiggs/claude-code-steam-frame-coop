@@ -33,6 +33,7 @@ const QuestionBank := preload("res://games/quiz_show/question_bank.gd")
 const Pictures := preload("res://games/quiz_show/pictures.gd")
 const Rounds := preload("res://games/quiz_show/rounds.gd")
 const Scoring := preload("res://games/quiz_show/scoring.gd")
+const Telemetry := preload("res://core/telemetry.gd")
 
 const GAME_ID := "quiz_show"
 const SCREEN := Vector3(0.0, 3.0, -4.5)  ## centre of the big screen (faces +Z)
@@ -714,6 +715,9 @@ func _end_show() -> void:
 		save.data["best"] = top
 		save.mark_dirty()
 		net.state_set("best", top)
+	var all_scores: Array = contestants().map(func(s: int) -> int: return int(scores.get(s, 0)))
+	Telemetry.run(GAME_ID, {"end": "show", "length": str(show_length), "players": contestants().size(), "scores": all_scores,
+		"top": top, "best": int(save.data["best"])})
 	var data := awards.results({"title": title, "subtitle": "Thanks for playing!", "style": "victory",
 		"stats": [["BEST EVER", str(int(save.data["best"]))]], "score_format": "%d PTS", "continue": "New show"})
 	net.state_set("results", data)

@@ -32,6 +32,7 @@ const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
 const Manor := preload("res://games/mystery_manor/manor.gd")
 const Case := preload("res://games/mystery_manor/case.gd")
+const Telemetry := preload("res://core/telemetry.gd")
 
 const GAME_ID := "mystery_manor"
 const PICK_RANGE := 1.3  ## walk this close to a clue to pick it up
@@ -81,6 +82,7 @@ var vr_results: Node
 var send_t := 0.0
 # The case on screen (every machine builds it from the state store)
 var case_seed := -1
+var case_started_ms := 0  ## host: when this case began (RUN line secs)
 var suspects: Array[Node3D] = []
 var suspect_home: Array[Vector3] = []
 var rings: Array[MeshInstance3D] = []
@@ -740,6 +742,7 @@ func _new_case() -> void:
 	net.state_set("found", [false, false, false])
 	net.state_set("cleared", [])
 	net.state_set("wrong", 0)
+	case_started_ms = Time.get_ticks_msec()
 	net.state_set("hint", -1)
 	net.state_set("case", c)
 	net.state_set("cases", int(net.state_get("cases", 0)) + 1)
@@ -812,6 +815,9 @@ func _end_case() -> void:
 	save.data["stars"] = int(save.data["stars"]) + stars
 	save.mark_dirty()
 	var c: Dictionary = net.state_get("case", {})
+	Telemetry.run(GAME_ID, {"end": "solved", "seed": int(c.get("seed", 0)), "stars": stars, "wrong": int(net.state_get("wrong", 0)),
+		"clues": found.count(true), "solved": int(save.data["solved"]), "players": party.player_count(),
+		"secs": snappedf((Time.get_ticks_msec() - case_started_ms) / 1000.0, 0.1) if case_started_ms > 0 else -1.0})
 	var data := awards.results({"title": "CASE SOLVED!", "subtitle": Case.title(c), "style": "victory",
 		"stats": [["STARS", "%d / 3" % stars], ["CLUES", "%d / 3" % found.count(true)], ["CASES SOLVED", str(int(save.data["solved"]))]],
 		"score_format": "%d PTS", "continue": "Next case"})
