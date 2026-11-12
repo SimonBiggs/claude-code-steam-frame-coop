@@ -581,7 +581,7 @@ export async function guard(game: string, project = STAGE) {
 /** Repo-wide guard tests every landing runs (2026-11-11: gen_budget_test failed on main unnoticed because no landing
  *  ran it; each of these took < 45 s on all of main then). lan_update_test stays out: it compiles a deliberately broken
  *  script, whose expected "Parse Error" would read as a SCRIPT ERROR here. */
-export const REPO_GUARDS = ["gen_budget_test", "who_test", "who_net_test", "classic_seats_test", "menu_test", "party_stale_press_test", "bg_gen_test", "engine_sys_test", "engine_ui_test", "pause_banner_test", "contrast_test", "vr_wrist_menu_test", "bot_phase_watch_test", "season_override_test", "vertex_color_srgb_test", "net_mode_sync_test", "forced_mode_test"];
+export const REPO_GUARDS = ["gen_budget_test", "who_test", "who_net_test", "classic_seats_test", "menu_test", "party_stale_press_test", "bg_gen_test", "engine_sys_test", "engine_ui_test", "pause_banner_test", "contrast_test", "vr_wrist_menu_test", "bot_phase_watch_test", "season_override_test", "vertex_color_srgb_test", "net_mode_sync_test", "forced_mode_test", "thread_quit_test"];
 
 /** Lone flat player (2026-11-11, cove-deep2: a lone Deck gunner ran out of cannonballs, a solo VR host stayed in
  *  practice forever): ONE Deck player, no VR, nobody else (DUO_SOLO=1 DUO_MACHINE_KIND=deck BOT_PLAYERS=1), the
@@ -682,12 +682,13 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   // A landing that stopped leaves its merge in wt-merge (and its files in staging) for a retry. Landing a DIFFERENT
   // branch next must not carry it along (2026-10-31: a tools-only landing nearly deployed saga-deep, whose tests had
   // failed): start again from main, staging included.
+  // (addons/gdev too: staging kept an old gdev control.gd, 2026-11-12.)
   // Staging = the repo as the TV runs it: addons/boot (services: QuitAfter, VrViewWatch, SafeApply...) and project.godot
   // (its Boot autoload) too, not just the deployed dirs (2026-10-31: staging had no Boot, so no bot ran with services).
   const stale = (await sh("git log --merges --first-parent --format=%s main..merge-arcade", join(GP, "wt-merge"))).out.split("\n").filter(Boolean);
   if (stale.some(s => !s.includes(`'${branch}'`))) {
     await sh("git merge --abort 2>/dev/null; git reset -q --hard main", join(GP, "wt-merge"));
-    await sh(`for d in ${DEPLOYED.join(" ")} tools addons/boot; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/; sed 's|^config/name="Duo Arena"$|config/name="Duo Arena Stage"|' wt-merge/project.godot > .duo-arena-stage/project.godot`, GP);
+    await sh(`for d in ${DEPLOYED.join(" ")} tools addons/boot addons/gdev; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/; sed 's|^config/name="Duo Arena"$|config/name="Duo Arena Stage"|' wt-merge/project.godot > .duo-arena-stage/project.godot`, GP);
   }
   // The branch's worktree must be fully committed: land merges the BRANCH, so anything uncommitted (an edit, or an
   // untracked .uid / .gd a re-import made) would silently stay behind (2026-11-11: marble-deep2's
@@ -719,7 +720,7 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     retry = differing.length > 0 && differing.every(f => ours.has(f) || [...ours].some(o => o.startsWith(f + "/")));
   }
   if (drift.out.trim() && !retry) return { stop: "live!=stage", out: drift.out };
-  await sh(`for d in ${DEPLOYED.join(" ")} tools addons/boot; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/; sed 's|^config/name="Duo Arena"$|config/name="Duo Arena Stage"|' wt-merge/project.godot > .duo-arena-stage/project.godot`, GP);
+  await sh(`for d in ${DEPLOYED.join(" ")} tools addons/boot addons/gdev; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/; sed 's|^config/name="Duo Arena"$|config/name="Duo Arena Stage"|' wt-merge/project.godot > .duo-arena-stage/project.godot`, GP);
   const out: Record<string, string> = {};
   if (uidFix.note) out["uid-autocommit"] = uidFix.note;
   let ok = true;
