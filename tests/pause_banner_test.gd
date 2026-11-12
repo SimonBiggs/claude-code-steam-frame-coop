@@ -6,6 +6,8 @@ extends SceneTree
 ## every on_pause_changed (pause_menu _tell_main, core/net.gd). Checks every game whose main shows a tv_banner.
 ##   godot-test --headless --path . -s res://tests/pause_banner_test.gd
 
+const Seeded := preload("res://core/seeded.gd")
+
 var fails := 0
 var checked := 0
 
@@ -16,9 +18,15 @@ func _initialize() -> void:
 
 
 func _run() -> void:
+	var n := 0
 	for id in DirAccess.get_directories_at("res://games"):
 		var path := "res://games/%s/main.gd" % id
 		if not FileAccess.file_exists(path) or not "tv_banner.visible = paused" in FileAccess.get_file_as_string(path):
+			continue
+		n += 1
+		# A landing (GEN_QUICK=1) checks today's quarter of the games (65 s for all 22 on a busy machine); the nightly
+		# full sweep checks every game.
+		if not Seeded.sampled(n - 1):
 			continue
 		await _check(id)
 	if fails == 0 and checked > 0:
