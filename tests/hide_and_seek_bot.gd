@@ -32,6 +32,15 @@ const UiKit := preload("res://core/ui_kit.gd")
 const WorldScript := preload("res://games/hide_and_seek/world.gd")
 const Story := preload("res://games/hide_and_seek/story.gd")
 const Street := preload("res://games/hide_and_seek/street.gd")
+const BotKit := preload("res://tests/bot_kit.gd")
+const WarnRings := preload("res://core/warn_rings.gd")
+const Deep := preload("res://games/hide_and_seek/deep.gd")
+## SECOND PASS (deep_play.gd): every local bot walks under a pick orb (the VR seeker reaches a hand into one);
+## round 2 has a surprise early (deep.first_at) and its hiders step out of the told ring, except P3 (to be bumped /
+## sneeze); "BOT: DEEP OK" once this machine saw the picks (phases counted with BotKit.watch_state, not polled),
+## the gift and (host) a told surprise go off.
+var kit: BotKit
+var dodge := {}  # player index -> where it steps to, out of a told ring
 
 var main
 var t := 0.0
@@ -62,11 +71,17 @@ func _ready() -> void:
 		cfg.load("user://hide_and_seek_best.cfg")
 		cfg.set_value("maps", "next", int(OS.get_environment("BOT_MAP")))
 		cfg.save("user://hide_and_seek_best.cfg")
+	kit = BotKit.new()
+	add_child(kit)
+	kit.remove_from_group("bot_frame_limit")  # (this bot prints its own BOT RESULT; the kit only counts phases)
 	main = load("res://games/hide_and_seek/main.tscn").instantiate()
 	main.count_time = 5.0
 	main.intro_time = 3.0
 	main.seek_override = 25.0
 	add_child(main)
+	kit.main = main
+	kit.watch_state(main.net)
+	main.deep.first_at = 4.0  # a surprise early in the short bot rounds
 	# Real controllers may be plugged into this machine: don't let someone's button presses join players.
 	var no_join := Node.new()
 	add_child(no_join)
@@ -112,7 +127,8 @@ func _physics_process(delta: float) -> void:
 		return
 	if conn_worlds.is_empty() and not conn_done and t > 0.3 and main.net.mode != "client":
 		var builds: Array = [[0, main.map_spec if main.map_idx == 0 else Story.daily()], [0, Story.daily()],
-			[0, {"seed": 4242, "level": 0, "theme": 1}], [0, {"seed": 777, "level": 6, "theme": 3}], [1, {}], [2, {}]]
+			[0, {"seed": 4242, "level": 0, "theme": 1}], [0, {"seed": 777, "level": 6, "theme": 3}],
+			[0, {"seed": 217078, "level": 0, "theme": 0, "daily": false, "friends": [7], "twist": 0, "street": 0, "slot": 0}], [1, {}], [2, {}]]  # 217078: a nook the grid once let through (housegen RASTER_MARGIN)
 		for bi in builds:
 			var i: int = bi[0]
 			var vp := SubViewport.new()
@@ -134,7 +150,7 @@ func _physics_process(delta: float) -> void:
 			_connectivity(space, d, 0.3, 0.9, "hider")
 			vp.queue_free()
 		conn_worlds.clear()
-		print("%sBOT: CONNECTIVITY %s on all %d maps (4 houses)" % ["" if conn_ok else "SCRIPT ERROR: ", "OK" if conn_ok else "FAIL", main.MAPS.size()])
+		print("%sBOT: CONNECTIVITY %s on all %d maps (5 houses)" % ["" if conn_ok else "SCRIPT ERROR: ", "OK" if conn_ok else "FAIL", main.MAPS.size()])
 		if OS.has_environment("BOT_CONN_ONLY"):
 			preload("res://tests/bot_end.gd").quit_quietly(get_tree())
 			return
@@ -144,6 +160,12 @@ func _physics_process(delta: float) -> void:
 		if maps_seen.size() >= 3:
 			print("BOT: MAP ROTATION OK (%s)" % ", ".join(maps_seen.keys()))
 	var mode: String = main.net.mode
+	if main.phase == "pick":
+		set_meta("pick_t", float(get_meta("pick_t", 0.0)) + delta)
+	_pick(delta)
+	_deep_verdict(mode)
+	if mode != "client" and main.round_no == 2 and main.phase == "seek" and main.deep.stats.goes >= 1 and main.deep.live.is_empty() and main.phase_t > 1.5:
+		main.phase_t = 1.5  # the surprise has been: the clock runs out (the hiders win round 2)
 	_result(mode)
 	_friend_verdict(mode)
 	if main.pip_finder >= 0 and not has_meta("pip_ok") and (mode != "host" or main.toys > 0):
@@ -172,7 +194,7 @@ func _physics_process(delta: float) -> void:
 			print("BOT: play again")
 			main._start_round()
 			if main.round_no == 2:
-				main.seek_override = 8.0  # round 2: the seeker dawdles and the hiders win on time
+				main.seek_override = 28.0  # round 2: the seeker dawdles and the hiders win on time (after Rumble's surprise)
 	else:
 		if main.phase == "over" and main.over_t > 2.5 and not has_meta("asked_%d" % main.round_no):
 			set_meta("asked_%d" % main.round_no, true)
@@ -284,6 +306,8 @@ func _hiders(delta: float) -> void:
 			spots[p.index] = choice
 		var spot: Vector3 = spots[p.index]
 		used[spot] = true
+		if main.phase == "seek" and _dodge(p, delta):
+			continue
 		# Pip: in round 2 (the seeker dawdles) the first hider runs to him (squeezing past furniture).
 		if main.phase == "seek" and main.pip_on and main.round_no == 2 and p.index == _pip_hunter():
 			if p.prop_kind >= 0:
@@ -339,9 +363,11 @@ func on_frame_limit(_note := "") -> void:
 	if cue_verdict:
 		BotEnd.check(has_meta("cues_ok"), "the picture cues showed")
 	BotEnd.check(main.round_no >= 1, "a round of hide and seek ran (round %d, t=%.0f)" % [main.round_no, t])
-	for k in ["pip_ok", "friend_ok", "sneak_ok"]:
+	for k in ["pip_ok", "friend_ok", "sneak_ok", "deep_ok"]:
 		if has_meta(k):
 			BotEnd.check(true, k)
+	if kit.seen("phase", "pick") > 0:
+		BotEnd.check(main.deep.mode != "" or main.phase == "pick", "the mode pick ran (%s)" % main.deep.mode)
 
 
 ## One BOT RESULT line per machine once every verdict is in.
@@ -354,7 +380,7 @@ func _result(mode: String) -> void:
 			print("BOT RESULT: %s (VR host alone: %d solo rounds ran)" % ["PASS" if main.solo_round else "FAIL", main.round_no])
 		return
 	var late: bool = main.round_no >= 6  # verdicts still missing by now count as failures
-	if has_meta("result") or (not late and (not cue_verdict or maps_seen.size() < 3 or not has_meta("pip_ok") or not has_meta("friend_ok") or (mode != "client" and not conn_done))):
+	if has_meta("result") or (not late and (not cue_verdict or maps_seen.size() < 3 or not has_meta("pip_ok") or not has_meta("friend_ok") or not has_meta("deep_ok") or (mode != "client" and not conn_done))):
 		return
 	if main.phase != "over" and mode == "local":
 		return
@@ -376,7 +402,9 @@ func _print_result(note: String) -> void:
 		fails.append("pip")
 	if not has_meta("friend_ok"):
 		fails.append("street friend")
-	print("BOT RESULT: %s (5 checks%s)%s" % ["PASS" if fails.is_empty() else "FAIL", note, "" if fails.is_empty() else " failed: " + ", ".join(fails)])
+	if not has_meta("deep_ok"):
+		fails.append("picks / gifts / surprises")
+	print("BOT RESULT: %s (6 checks%s)%s" % ["PASS" if fails.is_empty() else "FAIL", note, "" if fails.is_empty() else " failed: " + ", ".join(fails)])
 
 
 ## PIP'S STREET: a friend found and at Pip's garden party (host / local: in the save too; TV: mirrored from the host).
@@ -504,6 +532,9 @@ func _connectivity(space: PhysicsDirectSpaceState3D, md: Dictionary, radius: flo
 		for i in range(1, spawns.size()):
 			if not _reach_near(spawns[i], 0.5, seen, free, x0, z0, nx, nz):
 				problems.append("spawn %s" % spawns[i])
+		for pk in md.get("pick_spots", []):  # the mode / gift pick orbs (deep.gd): a hider can stand under each
+			if not _reach_near(pk, 0.3, seen, free, x0, z0, nx, nz):
+				problems.append("pick orb spot %s" % pk)
 		for st in md.star_spots:
 			if not _reach_near(st, 0.6, seen, free, x0, z0, nx, nz):
 				problems.append("star spot %s" % st)
@@ -697,7 +728,7 @@ func _cue_verdict() -> void:
 	for k in cues:
 		if str(k).begins_with("back_") or str(k).begins_with("text_err_"):
 			missing.append(str(k))
-	var deadline := 56.0 if mode == "local" else (36.0 if mode == "host" else 31.0)
+	var deadline := (56.0 if mode == "local" else (36.0 if mode == "host" else 31.0)) + float(get_meta("pick_t", 0.0))  # (+ time spent picking: no cues then)
 	if missing.is_empty():
 		cue_verdict = true
 		set_meta("cues_ok", true)
@@ -729,6 +760,17 @@ func _fake_vr(delta: float) -> void:
 		preload("res://core/vr_rig.gd").fake_stand(cam, left, right, 1.0)  # the standard fake player (hands ahead, not below the head: the wrist menu faces it)
 		print("BOT: P1 is a fake VR seeker")
 		return
+	if main.phase == "pick" and main.deep.can_pick(s) and main.deep.stage != "":
+		var spots := Deep.pick_spots(main.md())
+		var ball: Vector3 = main.deep.sp_at(spots, main.round_no % spots.size())
+		var o2: XROrigin3D = s.xr_origin
+		var to2: Vector3 = ball - s.xr_camera.global_position
+		to2.y = 0.0
+		if to2.length() > 0.45:
+			o2.global_position += to2.normalized() * minf(2.5 * delta, to2.length() - 0.45)
+		else:
+			s.hand_r.global_position = ball  # reach into it and hold
+		return
 	if main.phase != "seek":
 		return
 	var best = null
@@ -758,3 +800,79 @@ func _fake_vr(delta: float) -> void:
 	UiKit.look(s.hand_r, c, Vector3.UP)
 	near_t = near_t + delta if to.length() < 1.8 else 0.0
 	s.hand_l.global_position = c if near_t > 2.0 else head + Vector3(-0.2, -0.3, -0.2)
+
+
+## Phase "pick": every local bot that may pick walks under an orb (spread over the three, so the votes differ).
+func _pick(delta: float) -> void:
+	if main.phase != "pick" or main.deep.stage == "":
+		return
+	var spots := Deep.pick_spots(main.md())
+	if spots.size() < 3:
+		return
+	for p in main.players:
+		if not p.active or p.remote or p.ghost or p.vr or not main.deep.can_pick(p):
+			continue
+		var spot: Vector3 = spots[(p.index + main.round_no) % spots.size()]
+		p.collision_mask = 0  # (no path finding round the hall's furniture)
+		_walk_to(p, spot, 0.1, delta, 4.0)
+
+
+## A hider in a told ring steps out of it (except P3 when there are others, so bumps and sneezes happen too).
+func _dodge(p, delta: float) -> bool:
+	if p.index == 2 and main.players.size() > 1 and main.players[1].active and main.net.mode == "local":
+		return false
+	var tells: Array = main.deep.rings.tells()
+	var in_one := false
+	for w in tells:
+		if float(w.t) >= float(w.secs) + float(w.stay):
+			continue
+		if WarnRings.inside(String(w.kind), w.pos, w.dir, w.size, p.global_position, 0.4):
+			in_one = true
+			if not dodge.has(p.index):
+				var away: Vector3
+				if String(w.kind) == "line":
+					var side := Vector3(-(w.dir as Vector3).z, 0, (w.dir as Vector3).x)
+					var rel: Vector3 = p.global_position - (w.pos as Vector3)
+					away = side * (1.0 if side.dot(rel) >= 0.0 else -1.0) * (Deep.HOOVER_W * 0.5 + 0.9 - absf(side.dot(rel)))
+				else:
+					var rel2: Vector3 = p.global_position - (w.pos as Vector3)
+					rel2.y = 0.0
+					var dir2: Vector3 = rel2.normalized() if rel2.length() > 0.05 else Vector3.RIGHT
+					away = dir2 * ((w.size as Vector2).x + 0.9 - rel2.length())
+				dodge[p.index] = p.global_position + away
+				print("BOT: P%d steps out of the %s tell" % [p.index + 1, w.kind])
+	if not in_one and not dodge.has(p.index):
+		return false
+	if p.prop_kind >= 0:
+		p.toggle_disguise()
+	if dodge.has(p.index):
+		p.collision_mask = 0
+		if _walk_to(p, dodge[p.index], 0.1, delta, 4.5) and not in_one:
+			dodge.erase(p.index)
+			p.collision_mask = 1
+	return true
+
+
+## SECOND PASS verdict (once per machine): picks seen as they happened, a gift, a told surprise that went off.
+func _deep_verdict(mode: String) -> void:
+	var d = main.deep
+	if d.orbs.showing() and not has_meta("deep_orbs"):
+		set_meta("deep_orbs", true)
+		print("BOT: pick orbs show (%s: %s)" % [d.stage, str(d.choices)])
+	if d.gift != "" and not has_meta("deep_gift"):
+		set_meta("deep_gift", d.gift)
+		print("BOT: Pip's gift %s for the %s" % [d.gift, d.gift_side])
+	if d.rings.count() > 0 and not has_meta("deep_tell"):
+		set_meta("deep_tell", true)
+		print("BOT: a surprise is told on the floor (round %d)" % main.round_no)
+	if has_meta("deep_ok"):
+		return
+	var picks: int = kit.seen("phase", "pick")
+	var ok := false
+	if mode == "client":
+		ok = picks >= 1 and has_meta("deep_orbs") and d.mode != ""
+	else:
+		ok = picks >= 2 and d.mode != "" and has_meta("deep_gift") and int(d.stats.picks) >= 1 and int(d.stats.tells) >= 1 and int(d.stats.goes) >= 1
+	if ok:
+		set_meta("deep_ok", true)
+		print("BOT: DEEP OK (mode %s, %d picks seen, gift %s, stats %s, season %s, kennel %d)" % [d.mode, picks, str(get_meta("deep_gift", "-")), str(d.stats), d.season, d.kennel_rounds])

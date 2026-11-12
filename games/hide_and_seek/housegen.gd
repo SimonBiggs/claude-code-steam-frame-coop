@@ -24,6 +24,7 @@ extends RefCounted
 const Seeded := preload("res://core/seeded.gd")
 const Story := preload("res://games/hide_and_seek/story.gd")
 const Street := preload("res://games/hide_and_seek/street.gd")
+const Deep := preload("res://games/hide_and_seek/deep.gd")
 
 const TITLE := "THE HOUSE"
 const HALF_Z := 7.0
@@ -35,6 +36,10 @@ const GARDEN_W := 8.0
 const FENCE_T := 0.2
 const JAIL_HALF := 0.65
 const CELL := 0.2
+## Players need this much more room than their radius on the grid: a 0.2 m cell centre could sit in a 3 cm window of a
+## gap only just wider than a hider, which real physics (the bot's capsule) can't get through (2026-11-12: a hiding
+## spot in the 0.63 m slot between a sofa and a wall passed check() and was cut off in the game).
+const RASTER_MARGIN := 0.05
 const HIDER := [0.3, 0.9]  ## radius, height (player.gd)
 const SEEKER := [0.32, 1.6]
 const TOUCH := 0.95  ## main.gd BODY_TOUCH: a flat seeker this close to a hider finds them
@@ -214,6 +219,8 @@ static func generate(seed_value: int, spec: Dictionary = {}) -> Dictionary:
 		if check(g).is_empty():
 			g["ok"] = true
 			break
+	if g.has("hide_spots"):
+		g["pick_spots"] = pick_spots(g)
 	_cache_lock.lock()
 	if _cache.size() > 6:
 		_cache.clear()
@@ -700,8 +707,8 @@ static func raster(g: Dictionary, radius: float, height: float) -> Dictionary:
 		var sz: Vector3 = s[1]
 		if c.y - sz.y / 2.0 > height + 0.02 or c.y + sz.y / 2.0 < 0.02:
 			continue
-		var ex := sz.x / 2.0 + radius
-		var ez := sz.z / 2.0 + radius
+		var ex := sz.x / 2.0 + radius + RASTER_MARGIN
+		var ez := sz.z / 2.0 + radius + RASTER_MARGIN
 		var ix0 := maxi(0, ceili((c.x - ex - x0) / CELL - 0.5))
 		var ix1 := mini(nx - 1, floori((c.x + ex - x0) / CELL - 0.5))
 		var iz0 := maxi(0, ceili((c.z - ez - z0) / CELL - 0.5))
@@ -744,6 +751,14 @@ static func _cell(gr: Dictionary, p: Vector3) -> int:
 	var ix := clampi(int((p.x - float(gr.x0)) / CELL), 0, int(gr.nx) - 1)
 	var iz := clampi(int((p.z - float(gr.z0)) / CELL), 0, int(gr.nz) - 1)
 	return iz * int(gr.nx) + ix
+
+
+## The mode / gift pick orbs (deep.gd): the first row in front of the counting spot that is clear of the spawns, the
+## jail and the bell, over floor a hider and the seeker can both walk to.
+static func pick_spots(g: Dictionary) -> Array:
+	var hg := raster(g, HIDER[0], HIDER[1])
+	var sg := raster(g, SEEKER[0], SEEKER[1])
+	return Deep.pick_spots(data(g), func(p: Vector3) -> bool: return near(hg, p, Deep.PICK_TOUCH * 0.6) and near(sg, p, Deep.PICK_TOUCH * 0.6))
 
 
 ## Is a reachable cell centre within `dist` of p?
@@ -913,4 +928,5 @@ static func in_jail(g: Dictionary, p: Vector3) -> bool:
 static func data(g: Dictionary) -> Dictionary:
 	return {"title": TITLE, "rooms": g.rooms, "doors": g.doors, "hide_spots": g.hide_spots, "star_spots": g.star_spots,
 		"spawns": g.spawns, "jail": g.jail, "bell": g.bell, "bounds": g.bounds, "friend_spots": g.get("friend_spots", []),
-		"dark_room": g.get("dark_room", -1), "party": g.get("party", []), "friends": g.get("friends", []), "twist": g.get("twist", 0)}
+		"dark_room": g.get("dark_room", -1), "party": g.get("party", []), "friends": g.get("friends", []), "twist": g.get("twist", 0),
+		"pick_spots": g.get("pick_spots", [])}
