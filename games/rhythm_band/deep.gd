@@ -87,7 +87,7 @@ const FEST_SPOTS: Array[Vector3] = [Vector3(-7.0, 0, -1.0), Vector3(7.0, 0, -1.0
 const ROW_X: Array[float] = [-0.42, 0.0, 0.42]
 ## (up from -0.12: a seated player's outer orbs sat on the hi-hat and the crash, core/vr_view_check.gd pick_hidden;
 ## up from -0.02: the bobbing outer names still dipped behind the cymbal rims 1 seated run in 3, 2026-11-12)
-const ROW_Y := 0.05
+const ROW_Y := 0.04  # (the deep test keeps it at most 0.05: a small drummer's reach)
 const ROW_Z := -0.72
 ## The row's distance out never shrinks below this share of ROW_Z (a seated player's 0.7 kit scale).
 const ROW_Z_MIN_S := 0.9
