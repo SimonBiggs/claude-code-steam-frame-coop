@@ -6,6 +6,7 @@ extends RefCounted
 const Contrast := preload("res://core/contrast.gd")
 const Data := preload("res://games/mech_titans/data.gd")
 const RoundGen := preload("res://games/mech_titans/roundgen.gd")
+const Tales := preload("res://games/mech_titans/tales.gd")
 
 
 static func _kaiju() -> Dictionary:
@@ -27,6 +28,8 @@ static func key_colors() -> Dictionary:
 	for m in Data.MINIS:
 		if float(Data.MINIS[m].fly) <= 0.0:
 			out["mini %s" % m] = Data.MINIS[m].color
+	for t in Tales.ORDER:  # deep2: the lost toys stand on the streets of every place
+		out["toy %s" % t] = Tales.info(t).color
 	return out
 
 

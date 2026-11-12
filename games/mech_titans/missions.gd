@@ -130,7 +130,7 @@ func tick(delta: float) -> void:
 		extra_t += delta
 		if extra_t >= float(ex[2]) and main.combat.minis_alive() < 6:
 			extra_t = 0.0
-			main.combat.spawn_minis(String(ex[0]), int(ex[1]), false)
+			main.combat.warn_minis(String(ex[0]), int(ex[1]), false)  # a ring first where each one comes in
 	_update_objective()
 	if step_t <= 0.0 and main.combat.blocking_left() == 0:
 		if step + 1 < (info["steps"] as Array).size():
