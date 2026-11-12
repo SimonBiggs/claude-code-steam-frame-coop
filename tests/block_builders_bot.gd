@@ -75,7 +75,7 @@ func _physics_process(delta: float) -> void:
 	if main.simple:
 		_note_cues()
 	var host_side: bool = main.net.mode != "client"
-	if host_side and OS.has_environment("BB_START_LEVEL") and not started_level and main.state == "intro" and t > 2.0 \
+	if host_side and OS.has_environment("BB_START_LEVEL") and not started_level and (main.state == "intro" or main.level < Story.LESSONS) and t > 2.0 \
 			and (main.net.mode != "host" or main.net.connected or main.solo):
 		started_level = true
 		main._start_level(int(OS.get_environment("BB_START_LEVEL")) - 1)
@@ -196,6 +196,8 @@ func _drive_flat_builder(delta: float) -> void:
 	if main.state == "pick":
 		var at := _pick_target()
 		if at != Vector3.INF and (main.picks.row == "flat" or main._people() == 0):
+			if main.picks.t < 1.0:
+				at.z += 2.5  # (a glove resting under an orb when they pop up must leave and come back)
 			b.bot_cell = Vector3i(floori(at.x), 0, floori(at.z))
 			b.cursor = Vector2(at.x, at.z)
 		return

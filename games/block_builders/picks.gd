@@ -88,7 +88,7 @@ func show_row(new_stage: String, entries: Array, at: Array, new_row: String) -> 
 		"vr":  # a modest ball an arm's reach away; the names over each ball, never at the builder's eyes
 			var s := Deep.VR_SCALE * Deep.S
 			orbs.show_orbs(new_stage, entries, at[0], 0.0, 0.0, {"at": at, "scale": s, "pop": true, "font": 56,
-				"label_y": 1.2, "label_px": 0.0042 * Deep.S, "two_lines": true, "bob": 0.01 * Deep.S, "hit_r": PickOrbs.BALL_R, "dot_r": 0.8})
+				"label_y": 1.2, "label_px": 0.0042, "two_lines": true, "bob": 0.01, "hit_r": PickOrbs.BALL_R, "dot_r": 0.8})
 		"flat":
 			orbs.show_orbs(new_stage, entries, at[0], 0.0, 0.0, {"at": at, "scale": Deep.FLAT_SCALE, "pop": true, "font": 64,
 				"label_y": 1.2, "label_px": 0.0105, "two_lines": true, "bob": 0.08})
@@ -179,7 +179,7 @@ func take_fx(i: int, slot: int) -> void:
 	var at := orbs.take(i, col)
 	if at != Vector3.INF:
 		main.local_sound("ding", -4.0, 1.0 + 0.1 * i)
-		main.burst(at, col, 18, 0.06 * Deep.S if row == "vr" else 0.12)
+		main.burst(at, col, 18, 0.2 if row == "vr" else 0.12)
 	if slot == 0 and row == "vr" and main.builder != null and main.builder.vr:
 		main.builder._haptic(0.5, 0.08)
 

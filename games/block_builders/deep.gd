@@ -36,9 +36,9 @@ const PickOrbs := preload("res://core/pick_orbs.gd")
 ## every: seconds between surprises; warn: seconds told first; wind: m/s a gust pushes; wobble_r: a wobble's radius;
 ## dizzy: seconds a wobble stops a runner (0: just a hop).
 const MODES := {
-	"gentle": {"step": -2, "spare": 2, "every": 40.0, "warn": 3.6, "wind": 1.2, "wobble_r": 1.0, "dizzy": 0.0},
-	"brave": {"step": 0, "spare": 1, "every": 30.0, "warn": 3.0, "wind": 2.2, "wobble_r": 1.25, "dizzy": 0.6},
-	"hard": {"step": 2, "spare": 0, "every": 24.0, "warn": 2.6, "wind": 3.0, "wobble_r": 1.5, "dizzy": 1.0},
+	"gentle": {"step": -2, "spare": 2, "every": 40.0, "warn": 3.6, "wind": 1.2, "wobble_r": 0.8, "dizzy": 0.0},
+	"brave": {"step": 0, "spare": 1, "every": 30.0, "warn": 3.0, "wind": 2.2, "wobble_r": 1.0, "dizzy": 0.6},
+	"hard": {"step": 2, "spare": 0, "every": 24.0, "warn": 2.6, "wind": 3.0, "wobble_r": 1.2, "dizzy": 1.0},
 }
 const MAX_ADV := 989  # (story.gd ADVENTURES - 1)
 const MIN_WARN := 2.0
@@ -285,12 +285,13 @@ static func spots(lv: Dictionary, mode: String) -> Array:
 			var mid := (float(g[0]) + float(g[1])) * 0.5
 			var x := float(g[0]) + 0.5
 			while x <= float(g[1]) - 0.5:
-				var z := 0.5
-				var e := _make(kind, g, x, z, md)
-				if _where_problem(lv, g, e) == "":
-					if best.is_empty() or absf(x - mid) < absf(float(best.x) - mid):
-						best = e
-				x += 0.5
+				for z in ([0.5, 1.3, -0.3] if kind == "wobble" else [0.5]):
+					var e := _make(kind, g, x, float(z), md)
+					if _where_problem(lv, g, e) == "":
+						var score := absf(x - mid) + absf(float(z) - 0.5)
+						if best.is_empty() or score < absf(float(best.x) - mid) + absf(float(best.z) - 0.5):
+							best = e
+				x += 0.25
 			if not best.is_empty():
 				out.append(best)
 	return out
