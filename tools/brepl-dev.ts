@@ -652,13 +652,14 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   if (dirty) return { stop: "uncommitted", out: `wt-${branch} has uncommitted files (commit them on the branch, or ask its agent):\n${dirty}` };
   // Every script carries its .uid in git: a missing one is made by each machine's next import, so live and the
   // devices get untracked files and different uids (2026-11-12: paint-deep2's tests/paint_and_guess_deep_test.gd.uid).
-  const noUid = (await sh(`git ls-files '*.gd' | while read f; do [ -n "$(git ls-files "$f.uid")" ] || echo "$f"; done | head -5`, join(GP, `wt-${branch}`))).out.trim();
-  if (noUid) return { stop: "missing-uid", out: `wt-${branch}: scripts with no .uid in git (run godot-test --headless --path . --import there, then commit the .uid files):\n${noUid}` };
   const m = await sh(`cd ${GP}/wt-merge && git merge --no-edit ${branch} 2>&1 | tail -1; git diff --name-only --diff-filter=U`);
   // (tail -1 of a conflicted merge is "Automatic merge failed...", not CONFLICT: party-deep's whats_new conflict
   // once went on to the tests with its markers in, 2026-10-31. The unmerged-files list after it is the sure sign.)
   if (/CONFLICT|fatal|Automatic merge failed|error:/.test(m.out) || (await sh("git diff --name-only --diff-filter=U", join(GP, "wt-merge"))).out.trim())
     return { stop: "merge", out: m.out + "\n(resolve in ~/GodotProjects/wt-merge and commit, or git merge --abort there)" };
+  // (checked on the merge: a branch made before main got a missing .uid shouldn't be blamed for it)
+  const noUid = (await sh(`git ls-files '*.gd' | while read f; do [ -n "$(git ls-files "$f.uid")" ] || echo "$f"; done | head -5`, join(GP, "wt-merge"))).out.trim();
+  if (noUid) { await sh("git reset -q --hard main", join(GP, "wt-merge")); return { stop: "missing-uid", out: `wt-${branch}: scripts with no .uid in git (run godot-test --headless --path . --import there, then commit the .uid files):\n${noUid}` }; }
   const drift = await sh(`for d in ${DEPLOYED.join(" ")}; do diff -rq --exclude='*.uid' --exclude='*.import' duo-arena/$d .duo-arena-stage/$d; done`, GP);
   // A retry after a stopped landing (a flaky bot, a fix committed in wt-merge): live is clean and every file where
   // staging differs from live is one merge-arcade changes (so it came from the earlier copy), not someone's edit.
