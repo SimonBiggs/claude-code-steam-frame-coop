@@ -220,7 +220,9 @@ static func compiles(path: String, text: String) -> bool:
 	if text.contains('preload("%s")' % path) or text.contains("load(\"%s\")" % path):
 		return true
 	var copy := GDScript.new()
-	copy.source_code = text
+	# The copy must not repeat the class_name: a second script claiming it fails with "Class X hides a global script
+	# class", so every class_name script was refused and never hot-reloaded (2026-11-04, Sprout Hop).
+	copy.source_code = RegEx.create_from_string("(?m)^class_name\\s+\\w+").sub(text, "", true)
 	return copy.reload() == OK
 
 
@@ -427,6 +429,14 @@ func _capture_viewport() -> Viewport:
 	if not custom.is_empty() and custom[0] is Viewport:
 		return custom[0]
 	return get_viewport()
+
+
+## Quitting (or swapped out): no encode task may outlive this node's code (a task still running GDScript at exit
+## crashes Godot: Sprout Hop, 2026-11-12). tests/thread_quit_test.gd checks every task user does this.
+func _exit_tree() -> void:
+	for t in tasks:
+		WorkerThreadPool.wait_for_task_completion(t)
+	tasks.clear()
 
 
 func _reap_tasks() -> void:
