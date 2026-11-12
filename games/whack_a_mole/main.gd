@@ -43,6 +43,7 @@ const Picks := preload("res://games/whack_a_mole/picks.gd")
 const Tricks := preload("res://games/whack_a_mole/tricks.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const WarnRingsScript := preload("res://core/warn_rings.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 
 const GAME_ID := "whack_a_mole"
 const KID_SPEED := 2.2
@@ -168,7 +169,7 @@ func _ready() -> void:
 	add_child(net)
 	net.state_changed.connect(_on_state_changed)
 	net.sticky_event("orbs")  # a machine joining mid-pick sees the pick orbs
-	season = OS.get_environment("WM_SEASON") if OS.has_environment("WM_SEASON") else Seeded.season()
+	season = SeasonKit.override("whack_a_mole", Seeded.season(), Deep.SEASONS)
 	if not Deep.SEASONS.has(season):
 		season = "spring"
 	party = Party.new()

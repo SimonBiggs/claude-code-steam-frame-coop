@@ -75,6 +75,7 @@ const Deep := preload("res://games/rocket_workshop/deep.gd")
 const PicksScript := preload("res://games/rocket_workshop/picks.gd")
 const HazardsScript := preload("res://games/rocket_workshop/hazards.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 const SPROCKET_COLOR := Color(0.25, 0.75, 0.8)
 const MUSEUM_CHEERS := {1: "My museum!", 5: "Five rockets!", 10: "Ten rockets!", 20: "Twenty!", 30: "So many!", 40: "Rocket Row is full!"}
 const SIMPLE_MODE := true
@@ -256,7 +257,7 @@ func _ready() -> void:
 	save.game_id = G.GAME_ID
 	save.defaults = {"launched": 0, "museum": [], "daily": "", "sessions": 0, "mode": "brave", "gift": "", "gifts": {}}
 	add_child(save)
-	season = OS.get_environment("RW_SEASON") if OS.has_environment("RW_SEASON") else Seeded.season()
+	season = SeasonKit.override("rocket_workshop", Seeded.season(), Deep.SEASONS)
 	if not Deep.SEASONS.has(season):
 		season = "spring"
 	WorldScript.dress_season(self, season)

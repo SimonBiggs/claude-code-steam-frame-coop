@@ -70,6 +70,7 @@ const HazardsScript := preload("res://games/block_builders/hazards.gd")
 const GiftsScript := preload("res://games/block_builders/gifts.gd")
 const SeasonScript := preload("res://games/block_builders/season.gd")
 const TownScript := preload("res://games/block_builders/town.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 
 const SIMPLE_MODE := true
 const SIMPLE_INTRO_TIME := 2.5
@@ -2607,9 +2608,7 @@ func _begin_deep() -> void:
 	if net.mode == "client":
 		return
 	session_seed = Seeded.fresh_seed()
-	season = Seeded.season()
-	if OS.has_environment("BB_SEASON") and Deep.SEASONS.has(OS.get_environment("BB_SEASON")):
-		season = OS.get_environment("BB_SEASON")
+	season = SeasonKit.override("block_builders", Seeded.season(), Deep.SEASONS)
 	mode = Deep.mode_of(String(save.data.get("mode", "brave")))
 	if OS.has_environment("BB_MODE"):  # (What's New "try" / bots: straight in)
 		mode = Deep.mode_of(OS.get_environment("BB_MODE"))

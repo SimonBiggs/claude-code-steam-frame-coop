@@ -156,20 +156,42 @@ func every(interval: float, fn: Callable) -> void:
 
 
 ## Count every value a replicated net key takes, as it happens (net.state_changed). Use it for "did phase X
-## happen" checks instead of polling state_get from every(): a quick phase (a VR bot touching a level-up stone at
-## once) can come and go between two polls on a busy machine (Crystal Saga flake, 2026-11-12). seen(key, value).
-var _seen := {}
+## happen" checks instead of polling state_get / results_showing() from every(): a quick phase (a VR bot touching
+## a level-up stone at once) can come and go between two polls on a busy machine (Crystal Saga flake, 2026-11-12).
+## Call it right after add_child(main): the values already set then (a phase set in main's _ready) count once.
+## seen(key, value) / seen_values(key). tests/bot_phase_watch_test.gd fails bots that poll for "it happened".
+var _seen := {}  # key -> {str(value): count}
+var _seen_vals := {}  # key -> {str(value): value}
+var _watched: Node = null
 
 
 func watch_state(net: Node) -> void:
-	net.state_changed.connect(func(key: String, value: Variant) -> void:
-		var k := "%s=%s" % [key, str(value)]
-		_seen[k] = int(_seen.get(k, 0)) + 1)
+	if _watched == net:
+		return
+	_watched = net
+	var now: Dictionary = net.state_all()
+	for key in now:
+		_note_state(String(key), now[key])
+	net.state_changed.connect(_note_state)
+
+
+func _note_state(key: String, value: Variant) -> void:
+	if value == null:
+		return
+	var counts: Dictionary = _seen.get_or_add(key, {})
+	var k := str(value)
+	counts[k] = int(counts.get(k, 0)) + 1
+	(_seen_vals.get_or_add(key, {}) as Dictionary)[k] = value
 
 
 ## How many times net key `key` was set to `value` since watch_state().
 func seen(key: String, value: Variant) -> int:
-	return int(_seen.get("%s=%s" % [key, str(value)], 0))
+	return int((_seen.get(key, {}) as Dictionary).get(str(value), 0))
+
+
+## Every distinct value net key `key` has had since watch_state() (e.g. the holes / courses played).
+func seen_values(key: String) -> Array:
+	return (_seen_vals.get(key, {}) as Dictionary).values()
 
 
 ## True once every timeline step has run.

@@ -47,7 +47,7 @@ just: **the builder grabs blocks from the tray and makes a path, the runners run
 - **Puff's town**: every finished sky course adds a house, tower, windmill, lighthouse, tree house or (every tenth) a
   castle on a floating island behind the course, roofs in the mode's colour.
 - Tests: `tests/block_builders_deep_test.gd` (fairness of every surprise spot in every mode, daily over 400+ dates,
-  gifts never break it, modes really ordered), the bot (`BB_TRICKS_NOW=1`, `BB_MODE`, `BB_GIFT`, `BB_SEASON`,
+  gifts never break it, modes really ordered), the bot (`BB_TRICKS_NOW=1`, `BB_MODE`, `BB_GIFT`, `ARCADE_SEASON`,
   `BB_BOT_PICK`, `BB_NO_GIFTS`).
 
 Everything below describes the full game (SIMPLE_MODE = false).

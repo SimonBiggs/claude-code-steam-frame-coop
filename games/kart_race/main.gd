@@ -66,6 +66,7 @@ const BgGen := preload("res://core/bg_gen.gd")
 const Deep := preload("res://games/kart_race/deep.gd")
 const SurprisesScript := preload("res://games/kart_race/surprises.gd")
 const Town := preload("res://games/kart_race/town.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 
 ## Simple mode picture cues on the TV views (no words): [pad button, icons, icon colour].
 ## The "go" button follows the player's controls (A on a pad, W / up on a keyboard), see _cue_button.
@@ -285,7 +286,7 @@ func _setup_game(mode: String) -> void:
 	pit.name = "Pit"
 	pit.main = self
 	add_child(pit)
-	season = OS.get_environment("KART_SEASON") if OS.has_environment("KART_SEASON") else Seeded.season()
+	season = SeasonKit.override("kart_race", Seeded.season())
 	track.season = season
 	surprises = SurprisesScript.new()
 	surprises.name = "Surprises"
