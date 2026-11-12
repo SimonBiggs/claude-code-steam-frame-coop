@@ -38,6 +38,7 @@ var keeper_try := true
 var last_state := ""
 var result_wait := -1.0
 var results := {}
+var match_results := 0  # results of real (not practice) penalties
 var last_round := 0
 var rounds_done := 0
 var matches_done := 0
@@ -149,11 +150,11 @@ func _physics_process(delta: float) -> void:
 		print("BOT: fake controller %d drives P%d, paused=%s" % [FAKE_PAD, int(main.joy_owner.get(FAKE_PAD, -1)) + 1, get_tree().paused])
 	var st: String = main.state
 	var short := 3 if main.simple else 1  # simple mode: 3 rounds, so the FIREBALL unlocks
-	if mode == "local" and st == "intro" and main.rounds_total > short:
+	if mode == "host":
+		short = 2
+	short = _with_star(short)
+	if mode != "client" and st == "intro" and main.rounds_total > short:
 		main.rounds_total = short  # keep the headless match short
-		main.final_shots = 1
-	if mode == "host" and st == "intro" and main.rounds_total > 2:
-		main.rounds_total = 2
 		main.final_shots = 1
 	if mode != "client" and st == "trophy" and main.state_t > 3.0 and main.state_t < 5.0:
 		main.state_t = 99.0  # short runs: a quicker trophy ceremony
@@ -195,6 +196,8 @@ func _physics_process(delta: float) -> void:
 		if result_wait < 0.0:
 			var r: String = main.last_result
 			results[r] = int(results.get(r, 0)) + 1
+			if main.practice == "" and r != "":
+				match_results += 1  # a real penalty (not practice) decided
 			print("BOT %s: result #%d %s" % [mode, _count(), r])
 	if main.round_i > last_round:
 		rounds_done += main.round_i - last_round
@@ -535,11 +538,30 @@ func _tip_error(who: String, text: String) -> void:
 	cues["tip_text"] = true
 
 
+## Rounds to shorten a match to: `want`, or more so the match still reaches its first star kick (Leo's star is the
+## match's story). The solo VR host's 2-round cut ended the computer striker's match after 2 kicks while match 1's
+## first star is kick 3, so no star ever showed (2026-11-12).
+func _with_star(want: int) -> int:
+	if not main.simple or main.mplan.is_empty():
+		return want
+	var stars: Array = main.mplan.get("stars", [])
+	var per: int = 1 if main.cpu else maxi(1, main.active_strikers().size())
+	for k in stars.size():
+		if stars[k] != Vector2.INF:
+			return maxi(want, ceili(float(k + 1) / float(per)))
+	return want
+
+
 func _exit_tree() -> void:
 	if main == null:
 		return
 	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
-	BotEnd.check(rounds_done >= 1, "a round of penalties was played (mode %s, t=%.0f, shots %d)" % [main.net.mode, t, shots_fired])
+	# A whole round needs ~60 s after the practice (which repeats a missed ring); a shorter run (dev.bots.run's 60 s
+	# local, the solo VR host's BOT_END=62) must at least get a real penalty taken and decided (2026-11-12).
+	if BotEnd.short_run(90.0) and rounds_done == 0:
+		BotEnd.check(match_results >= 1, "a match penalty was taken and decided (short run: mode %s, t=%.0f, shots %d, results %s)" % [main.net.mode, t, shots_fired, str(results)])
+	else:
+		BotEnd.check(rounds_done >= 1, "a round of penalties was played (mode %s, t=%.0f, shots %d)" % [main.net.mode, t, shots_fired])
 	if not main.simple:
 		return
 	var ks: Array = cues.keys()
