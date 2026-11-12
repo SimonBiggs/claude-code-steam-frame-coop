@@ -239,35 +239,8 @@ func _seasons() -> void:
 
 
 func _row() -> void:
-	var spots := Deep.row_spots()
-	var head := Deep.VR_START + Vector3(0.0, 1.4, 0.0)  # a standing or sitting giant's shoulders
-	var orb := Deep.orb_r()
-	for i in spots.size():
-		var p: Vector3 = spots[i]
-		var reach := p.distance_to(head)
-		if reach > 1.25 or reach < 0.55:
-			_fail("pick row: orb %d is %.2f m from the giant (an arm's reach, never in the face)" % [i, reach])
-		for j in i:
-			var q: Vector3 = spots[j]
-			if p.distance_to(q) < orb * 2.0 + 0.15:
-				_fail("pick row: orbs %d and %d touch" % [i, j])
-			if Vector2(p.x - q.x, p.z - q.z).length() < Deep.TV_R * 2.0:
-				_fail("pick row: one basket can be under orbs %d and %d" % [i, j])
-		if Vector2(p.x - Deep.SIGN_POS.x, p.z - Deep.SIGN_POS.z).length() < orb + 0.3:
-			_fail("pick row: orb %d in the sign" % i)
-		if p.y - orb < Main.BOWL_TOP + 0.2:
-			_fail("pick row: orb %d sits in the bowl's height" % i)
-		# A TV player's basket gets under it (walking round the bowl, the trunk and the stump: main.gd _push_out).
-		var ok := false
-		for k in 64:
-			var a := float(k) * TAU / 64.0
-			for rr in [0.0, Deep.TV_R * 0.5, Deep.TV_R * 0.9]:
-				var c: Vector2 = Vector2(p.x, p.z) + Vector2(cos(a), sin(a)) * rr
-				if c.length() >= G.TRUNK_R + 0.35 and c.distance_to(Vector2(G.BOWL_POS.x, G.BOWL_POS.z)) >= G.BOWL_R + 0.35 \
-						and c.distance_to(Vector2(Deep.NUTMEG_POS.x, Deep.NUTMEG_POS.z)) >= Deep.STUMP_R + 0.35:
-					ok = true
-		if not ok:
-			_fail("pick row: no TV player can get under orb %d" % i)
+	_row_for(true)
+	_row_for(false)
 	for st in ["mode", "gift"]:
 		if Deep.wait_for(st, false) < 14.0 or Deep.wait_for(st, true) < 5.0:
 			_fail("pick row: too little time to pick (%s)" % st)
@@ -275,6 +248,45 @@ func _row() -> void:
 		_fail("pick row: a glove must stay a moment, not long")
 	if Deep.ORB_SCALE > 0.4:
 		_fail("pick row: the orbs are too big to sit at an arm's reach")
+	if Deep.FLAT_SCALE < 0.45:
+		_fail("pick row: with no giant the orbs are too small to see on a Deck")
+
+
+## vr: the row by the giant (an arm's reach); else the big row on the grass (no giant).
+func _row_for(vr: bool) -> void:
+	var spots := Deep.row_spots(3, vr)
+	var head := Deep.VR_START + Vector3(0.0, 1.4, 0.0)  # a standing or sitting giant's shoulders
+	var orb := Deep.orb_r(vr)
+	var tvr := Deep.tv_r(vr)
+	var tag0 := "pick row (%s)" % ("giant" if vr else "no giant")
+	for i in spots.size():
+		var p: Vector3 = spots[i]
+		var reach := p.distance_to(head)
+		if vr and (reach > 1.25 or reach < 0.55):
+			_fail("pick row: orb %d is %.2f m from the giant (an arm's reach, never in the face)" % [i, reach])
+		if not vr and (Vector2(p.x, p.z).length() > G.ARENA - 2.0 or Vector2(p.x, p.z).length() < G.TRUNK_R + 1.5):
+			_fail("%s: orb %d is not out on the open grass" % [tag0, i])
+		for j in i:
+			var q: Vector3 = spots[j]
+			if p.distance_to(q) < orb * 2.0 + 0.15:
+				_fail("pick row: orbs %d and %d touch" % [i, j])
+			if Vector2(p.x - q.x, p.z - q.z).length() < tvr * 2.0:
+				_fail("pick row: one basket can be under orbs %d and %d" % [i, j])
+		if Vector2(p.x - Deep.SIGN_POS.x, p.z - Deep.SIGN_POS.z).length() < orb + 0.3:
+			_fail("pick row: orb %d in the sign" % i)
+		if Vector2(p.x - G.BOWL_POS.x, p.z - G.BOWL_POS.z).length() < G.BOWL_R + orb and p.y - orb < Main.BOWL_TOP + 0.05:
+			_fail("pick row: orb %d sits in the bowl's height" % i)
+		# A TV player's basket gets under it (walking round the bowl, the trunk and the stump: main.gd _push_out).
+		var ok := false
+		for k in 64:
+			var a := float(k) * TAU / 64.0
+			for rr in [0.0, tvr * 0.5, tvr * 0.9]:
+				var c: Vector2 = Vector2(p.x, p.z) + Vector2(cos(a), sin(a)) * rr
+				if c.length() >= G.TRUNK_R + 0.35 and c.distance_to(Vector2(G.BOWL_POS.x, G.BOWL_POS.z)) >= G.BOWL_R + 0.35 \
+						and c.distance_to(Vector2(Deep.NUTMEG_POS.x, Deep.NUTMEG_POS.z)) >= Deep.STUMP_R + 0.35:
+					ok = true
+		if not ok:
+			_fail("%s: no TV player can get under orb %d" % [tag0, i])
 
 
 func _pantry() -> void:

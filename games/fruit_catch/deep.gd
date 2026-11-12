@@ -22,7 +22,8 @@ extends RefCounted
 ##             table, juice barrel, honey pots ...: saved, for good).
 ##   PICK ROW  three orbs float just in front of the giant's spot (an arm's reach away). A TV player walks under one
 ##             to catch it in their basket; the giant reaches into one on purpose (a hand moves in and stays a
-##             moment: never a resting hand). Nobody in time = the middle (it glows).
+##             moment: never a resting hand). Nobody in time = the middle (it glows). With no giant (a flat host or
+##             local play) the orbs are bigger and stand out on the open grass in front of the tree (FLAT_*).
 
 const Seeded := preload("res://core/seeded.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
@@ -86,14 +87,19 @@ const PANTRY_PICS := {"jam": "jamjar", "pies": "pie", "juice": "juice", "honey":
 	"crates": "fruitbowl", "lanterns": "lantern", "cart": "pantry"}
 const PANTRY_AT := Vector3(10.2, 0.0, 2.6)  # the pantry's middle: beside the park, right of the giant
 ## The pick row: three orbs just in front of the giant (an arm's reach), between the sign and the bowl.
-const ROW_X: Array[float] = [-1.05, -0.35, 0.35]
-const ROW_Y := 1.35
-const ROW_Z := 2.45
+const ROW_X: Array[float] = [-0.95, -0.3, 0.35]
+const ROW_Y := 1.1  # (under the front branch's leaves: the branches can't be grabbed while the orbs are up)
+const ROW_Z := 2.6
 const ORB_SCALE := 0.3
 const HAND_R := 0.1  # a glove this near an orb's edge is in it
 const DWELL := 0.3  # seconds a glove must stay in an orb (a hand sweeping past never picks)
 const TV_R := 0.32  # a basket this near an orb's middle (across) catches it
 const TV_DWELL := 0.15
+const FLAT_X: Array[float] = [-2.3, 0.0, 2.3]  # no giant: big orbs on the open grass, easy to see on a TV / Deck
+const FLAT_Y := 1.6
+const FLAT_Z := 4.7
+const FLAT_SCALE := 0.55
+const FLAT_TV_R := 0.55
 const ROW_WAIT := {"mode": 20.0, "gift": 16.0}  # nobody took one: the middle
 const EMPTY_WAIT := 8.0  # nobody here who could pick at all: sooner
 
@@ -414,14 +420,25 @@ static func pantry_spot(i: int) -> Vector3:
 
 # --- The pick row ---------------------------------------------------------------------------------------------
 
-static func row_spots(n: int = 3) -> Array:
+## The orbs' places: by the giant (vr) or out on the grass (no giant).
+static func row_spots(n: int = 3, vr: bool = true) -> Array:
+	var xs: Array[float] = ROW_X if vr else FLAT_X
 	var out: Array = []
 	for i in n:
-		var x: float = ROW_X[i] if n == 3 else lerpf(ROW_X[0], ROW_X[2], float(i) / maxf(1.0, n - 1))
-		out.append(Vector3(x, ROW_Y, ROW_Z))
+		var x: float = xs[i] if n == 3 else lerpf(xs[0], xs[2], float(i) / maxf(1.0, n - 1))
+		out.append(Vector3(x, ROW_Y if vr else FLAT_Y, ROW_Z if vr else FLAT_Z))
 	return out
 
 
+static func orb_scale(vr: bool) -> float:
+	return ORB_SCALE if vr else FLAT_SCALE
+
+
+## How near (across) a basket must come to an orb's middle.
+static func tv_r(vr: bool) -> float:
+	return TV_R if vr else FLAT_TV_R
+
+
 ## An orb's radius in the world.
-static func orb_r() -> float:
-	return PickOrbs.HIT_R * ORB_SCALE
+static func orb_r(vr: bool = true) -> float:
+	return PickOrbs.HIT_R * orb_scale(vr)

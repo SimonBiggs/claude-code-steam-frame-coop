@@ -204,6 +204,7 @@ func _ready() -> void:
 	add_child(hints)
 	hints.bind_party(party)
 	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
+	net.sticky_event("story")  # ... and Nutmeg's latest beat
 	picks = PicksScript.new()
 	picks.main = self
 	add_child(picks)
@@ -952,7 +953,7 @@ func _update_branches(delta: float) -> void:
 				branch_hand[k] = -1  # pulled too far: it springs out of your hand
 				vr_rig.pulse(h, 0.6, 0.08)
 				fx("snap", branch_tip(k), Color.WHITE, k)
-				if not results_showing():
+				if not results_showing() and not picks.active():
 					_drop_fruit(k)
 				continue
 			var target := to.limit_length(0.9)
@@ -962,7 +963,7 @@ func _update_branches(delta: float) -> void:
 			if branch_energy[k] > 0.8:
 				branch_energy[k] = 0.0
 				vr_rig.pulse(h, 0.35, 0.05)
-				if not results_showing():
+				if not results_showing() and not picks.active():
 					shakes += 1
 					shakes_round += 1
 					_drop_fruit(k)
@@ -977,7 +978,7 @@ func _vr_hands(delta: float) -> void:
 	for h in 2:
 		var p := vr_rig.hand_point(h)
 		var busy := branch_hand.has(h) or _held_by(h) >= 0
-		if not busy:
+		if not busy and not picks.active():  # (the pick orbs sit under the front branch: no grabs while they're up)
 			for k in BRANCHES:
 				if branch_hand[k] < 0 and p.distance_to(branch_tip(k)) < 0.42:
 					branch_hand[k] = h
@@ -1761,7 +1762,7 @@ func apply_event(kind: String, args: Array) -> void:
 			_banner(String(args[0]), "", String(args[1]))
 		"orbs":
 			if picks != null and args.size() >= 3:
-				picks.show_row(String(args[0]), args[1], args[2])
+				picks.show_row(String(args[0]), args[1], args[2], float(args[3]) if args.size() >= 4 else Deep.ORB_SCALE)
 		"take":
 			if picks != null and args.size() >= 2:
 				picks.take_fx(int(args[0]), int(args[1]))

@@ -3,7 +3,8 @@ extends Node
 ##   "mode"  GENTLE / BRAVE / HARD once a session (the family's last mode in the middle), before the first round.
 ##   "gift"  NUTMEG'S GIFTS before every round from the second: three of BIG BASKET, MAGNET, SLOW FALL, UMBRELLA,
 ##           GOLDEN DISH.
-## Three small glass orbs float just in front of the giant's spot (deep.gd row_spots). A TV player WALKS UNDER one to
+## Three small glass orbs float just in front of the giant's spot (deep.gd row_spots; with no giant, bigger ones
+## out on the grass in front of the tree). A TV player WALKS UNDER one to
 ## catch it in their basket; the giant REACHES into one on purpose (a VR glove has to move in after they pop up and
 ## stay a moment - a hand already resting there or sweeping past never picks). A player already standing under one
 ## when they pop up must step out and back in. The first one decides for the team (a dot in their colour circles
@@ -59,20 +60,21 @@ func begin(new_stage: String, entries: Array, opts: Array, done: Callable) -> vo
 	done_t = 0.0
 	inside = {}
 	dwell = {}
-	spots = Deep.row_spots(entries.size())
-	show_row(new_stage, entries, spots)
-	main.net.event("orbs", [new_stage, entries, spots])
+	var vr: bool = main.vr_rig != null
+	spots = Deep.row_spots(entries.size(), vr)
+	show_row(new_stage, entries, spots, Deep.orb_scale(vr))
+	main.net.event("orbs", [new_stage, entries, spots, Deep.orb_scale(vr)])
 	print("PICKS %s: %s" % [new_stage, opts])
 
 
 ## Every machine: the row of orbs ("" stage: none).
-func show_row(new_stage: String, entries: Array, at: Array) -> void:
+func show_row(new_stage: String, entries: Array, at: Array, scale: float = Deep.ORB_SCALE) -> void:
 	if new_stage == "" or entries.is_empty() or at.size() < entries.size():
 		orbs.clear()
 		return
-	# (names under the orbs, small: never at the giant's eyes; the orbs an arm's reach away)
-	orbs.show_orbs(new_stage, entries, at[0], 0.7, 0.0, {"at": at, "scale": Deep.ORB_SCALE, "pop": true, "font": 56,
-		"label_y": -1.3, "label_px": 0.005, "two_lines": true, "bob": 0.04})
+	# (names under the orbs: never at the giant's eyes; by the giant the orbs sit an arm's reach away, small)
+	orbs.show_orbs(new_stage, entries, at[0], 0.7, 0.0, {"at": at, "scale": scale, "pop": true, "font": 56,
+		"label_y": -1.3, "label_px": 0.005 if scale < 0.4 else 0.007, "two_lines": true, "bob": 0.04})
 
 
 ## Orb i's middle in the world (bots aim there), INF if none.
@@ -127,7 +129,7 @@ func _pick(delta: float) -> Array:
 		else:
 			for j in spots.size():
 				var sp: Vector3 = spots[j]
-				if Vector2(sp.x - pos.x, sp.z - pos.z).length() < Deep.TV_R:
+				if Vector2(sp.x - pos.x, sp.z - pos.z).length() < Deep.tv_r(main.vr_rig != null):
 					i = j
 		if not inside.has(id):  # where it was when the orbs came up: resting in one is never a pick until it leaves
 			inside[id] = RESTING if i >= 0 else -1

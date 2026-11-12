@@ -53,13 +53,17 @@ func _ready() -> void:
 		kit.at(t0 + 10.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused, "Start again resumes")
 			kit.allow_pause = false)
-	kit.drop_in_out(main.party, t0 + 11.0, 3.0, func(slot: int) -> bool:
-		return main.avatars.has(slot) and main.baskets.has(slot) and main.huds.has(slot) and main.cams.has(slot))
+	if not OS.has_environment("BOT_LATE"):  # (a late joiner's drop-in would still sit there at the host's seat count)
+		kit.drop_in_out(main.party, t0 + 11.0, 3.0, func(slot: int) -> bool:
+			return main.avatars.has(slot) and main.baskets.has(slot) and main.huds.has(slot) and main.cams.has(slot))
 	if host:
 		kit.at(31.0, "host checks (the TV machine is still connected)", _checks)
 		kit.at(41.0, "finish", kit.finish)
 	else:
-		kit.at(35.0 if client else 31.0, "finish", func() -> void:
+		var end := 35.0 if client else 31.0
+		if OS.has_environment("BOT_LATE"):  # a machine joining a game already running leaves before the host does
+			end = maxf(t0 + 14.0, 41.0 - float(OS.get_environment("BOT_LATE")) - 4.0)
+		kit.at(end, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)
