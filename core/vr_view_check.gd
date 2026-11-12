@@ -56,6 +56,10 @@ const VR_PRIO_HILITE := -3  ## UiKit.VR_PRIO_HILITE (tests/core_math_test.gd che
 const MIN_TEXT_GAP := 0.35
 ## Node group: things VR panels must never cover (pick orbs). Any game can add its own must-see things.
 const KEEP_CLEAR := "vr_keep_clear"
+## Meta on world words a VR card may cover (a short score pop, HudKit.popup): world_words() skips them.
+const COVER_OK_META := "vr_cover_ok"
+## A panel over this share of some world words' area (seen from the eyes) hides them ("drawn over the words").
+const WORDS_HIDDEN := 0.3
 ## Picks further than this (real metres) from the VR head are for other players; their sight lines aren't checked.
 const PICK_SEE_D := 6.0
 ## Meta on a pick the VR player can't take at all (PickOrbs opts.for_others: runners' orbs the VR giant only watches,
@@ -163,6 +167,19 @@ static func problems(root: Node) -> Array[String]:
 		for k in keep:
 			for pp in pick_hidden(cam, k):
 				out.append(pp)
+	# A panel over words written in the world for the VR player to read (an easel's word sign, a round / score board,
+	# a button's name): the card hides them just like it would a pick (Paint and Guess 2026-11-12: Smudge's card over
+	# the easel's round text). Only the panel-over-panel check looked before, and world words are never "vr_placed".
+	if not shown.is_empty():
+		for w in world_words(root, cam):
+			var wbox := thing_box(w, cam.cull_mask)
+			for c in shown:
+				if c.is_ancestor_of(w) or w.is_ancestor_of(c):
+					continue
+				# hidden enough to stop it being read (a card's corner over the end of a long banner is fine)
+				var hid := cover_deg2(head, _centre(c), panel_extent(c), wbox)
+				if hid > OVERLAP_MIN_DEG2 and hid > WORDS_HIDDEN * cover_deg2(head, wbox.get_center(), Vector2(50, 50), wbox):
+					out.append("%s: drawn over the words %s (UiKit.vr_dodge keeps VR UI clear of VrViewCheck.KEEP_CLEAR: put them in it)" % [_name(c), _name(w)])
 	# Words right in front of the eyes (a TV player's name tag walking through the VR player): giant letters.
 	var origin := cam.get_parent()
 	for n in root.find_children("*", "Label3D", true, false):
@@ -182,6 +199,60 @@ static func problems(root: Node) -> Array[String]:
 		if l.is_visible_in_tree() and l.text.strip_edges() != "" and l.transparency < 0.65 and not _ignored(l):
 			out.append("%s: text glued to the face (a Label3D under the XR camera)" % _name(l))
 	return out
+
+
+## Words written in the world (not on a VR panel) that the VR player is meant to read: a fixed (not billboard) Label3D
+## the VR camera draws, facing the head, readable size (MIN_TEXT_DEG), within MAX_D, not part of a placed panel or a
+## pick (picks have their own checks) and not on the VR player's own body (wrist, hands).
+static func world_words(root: Node, cam: Camera3D) -> Array[Label3D]:
+	var out: Array[Label3D] = []
+	var head := cam.global_position
+	var ws := maxf(XRServer.world_scale, 0.001)
+	var origin := cam.get_parent()
+	for n in root.find_children("*", "Label3D", true, false):
+		var l := n as Label3D
+		if not l.is_visible_in_tree() or l.text.strip_edges() == "" or l.transparency > 0.65 or l.modulate.a < 0.1:
+			continue
+		if l.billboard != BaseMaterial3D.BILLBOARD_DISABLED or (l.layers & cam.cull_mask) == 0 or _ignored(l) or _placed(l):
+			continue
+		if (origin != null and origin.is_ancestor_of(l)) or _in_keep_clear(l) or l.has_meta(COVER_OK_META):
+			continue
+		var d := head.distance_to(l.global_position)
+		if d / ws > MAX_D or d / ws < MIN_D:
+			continue
+		if l.global_basis.z.normalized().dot((head - l.global_position).normalized()) < 0.3:
+			continue
+		var h := l.font_size * l.pixel_size / 1.35 * l.global_basis.get_scale().y
+		if rad_to_deg(atan2(h, d)) < MIN_TEXT_DEG:
+			continue
+		out.append(l)
+	return out
+
+
+## world_words for this frame (UiKit.vr_dodge asks for every VR card every frame: one tree walk per frame).
+static var _words_frame := -1
+static var _words_root := 0
+static var _words: Array[Label3D] = []
+static func world_words_cached(root: Node, cam: Camera3D) -> Array[Label3D]:
+	var f := Engine.get_process_frames()
+	if f != _words_frame or root.get_instance_id() != _words_root:
+		_words_frame = f
+		_words_root = root.get_instance_id()
+		_words = world_words(root, cam)
+	var out: Array[Label3D] = []
+	for w in _words:
+		if is_instance_valid(w):
+			out.append(w)
+	return out
+
+
+static func _in_keep_clear(n: Node) -> bool:
+	var x := n
+	while x != null:
+		if x.is_in_group(KEEP_CLEAR):
+			return true
+		x = x.get_parent()
+	return false
 
 
 ## A VR UI panel mesh: UiKit.vr_panel_material (panel / highlight priority, no depth test: floats over scenery).

@@ -255,6 +255,7 @@ static func popup(world: Node, pos: Vector3, text: String, opts: Dictionary = {}
 	l.max_frac = float(opts.get("max_frac", l.max_frac))
 	l.max_wide = float(opts.get("max_wide", l.max_wide))
 	l.crit = style == "crit"
+	l.set_meta("vr_cover_ok", true)  # a 1-2 s score pop: a VR card may cover it (VrViewCheck.world_words)
 	var parent: Node = opts.get("parent", null)
 	l.local = parent != null and parent is Node3D
 	(parent if l.local else world).add_child(l)
@@ -488,6 +489,7 @@ static func nameplate(target: Node3D, text: String, color: Variant = "text", hei
 	l.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	l.no_depth_test = false
 	l.position = Vector3(0, height, 0)
+	l.set_meta("vr_cover_ok", true)  # a walking player's name: a VR card may pass over it (VrViewCheck.world_words)
 	target.add_child(l)
 	return l
 

@@ -992,10 +992,14 @@ static func vr_spot(cam: Node3D, target: Vector3, n: Node = null, fresh := false
 ## (metres, + is up) a panel the size of `n` aimed at `target` moves so that, seen from the eyes, it's clear of every
 ## one of them, staying within ~32 degrees of eye level. Keeps the last answer while it still works (no hopping as the
 ## orbs bob); 0 when nothing must be kept clear. The VR followers glide a panel to its new spot (vr_follow, VrText).
+const VR_DODGE_WORDS := 5  # steps a card moves at most to clear world words (VrViewCheck.world_words)
 const VR_DODGE_STEP := 0.08  # (x VrText.COMFORT m at the usual 1.6 x COMFORT m: ~3 degrees a step)
 static func vr_dodge(cam: Node3D, target: Vector3, n: Node3D, k: float = 1.0) -> float:
 	var things: Array[Node3D] = VrViewCheck.keep_clear(n, cam as Camera3D) if cam is Camera3D else ([] as Array[Node3D])
-	if things.is_empty() or n.get_meta("vr_check_ignore", false):
+	# words written in the world for the VR player (a score board, a course banner, an easel's round text) count too,
+	# less than a pick: a card slides off them when it can (VrViewCheck "drawn over the words")
+	var words: Array[Label3D] = VrViewCheck.world_words_cached(n.get_tree().root, cam as Camera3D) if cam is Camera3D and n.is_inside_tree() else ([] as Array[Label3D])
+	if (things.is_empty() and words.is_empty()) or n.get_meta("vr_check_ignore", false):
 		n.set_meta("vr_dodge", 0.0)
 		return 0.0
 	var size := VrViewCheck.panel_extent(n) / maxf(float(n.get_meta("vr_k", 1.0)), 0.05) * k
@@ -1007,6 +1011,10 @@ static func vr_dodge(cam: Node3D, target: Vector3, n: Node3D, k: float = 1.0) ->
 		if t != n and not n.is_ancestor_of(t):
 			boxes.append(VrViewCheck.thing_box(t, (cam as Camera3D).cull_mask))
 	# other VR panels count too (less than a pick): two cards dodging the same row mustn't end up in one spot
+	var word_boxes: Array[AABB] = []
+	for w in words:
+		if w != n and not n.is_ancestor_of(w):
+			word_boxes.append(VrViewCheck.thing_box(w, (cam as Camera3D).cull_mask))
 	var others: Array[AABB] = []
 	for o in VrViewCheck.shown_panels(n.get_tree().root):
 		if o != n and not n.is_ancestor_of(o) and not o.is_ancestor_of(n):
@@ -1015,7 +1023,8 @@ static func vr_dodge(cam: Node3D, target: Vector3, n: Node3D, k: float = 1.0) ->
 	var step := VR_DODGE_STEP * VrText.COMFORT * ws * k
 	var flat := Vector2(target.x - head.x, target.z - head.z).length()
 	var tries: Array[float] = [float(n.get_meta("vr_dodge", 0.0)), 0.0]
-	for i in range(1, 13):
+	# only words to clear (no pick): a card never travels far for them (a huge garden sign sent one under the lawn)
+	for i in range(1, (VR_DODGE_WORDS if boxes.is_empty() else 12) + 1):
 		tries.append(i * step)
 		tries.append(-i * step)
 	var best := 0.0
@@ -1027,6 +1036,8 @@ static func vr_dodge(cam: Node3D, target: Vector3, n: Node3D, k: float = 1.0) ->
 		var a := 0.0
 		for b in boxes:
 			a += VrViewCheck.cover_deg2(head, p, size, b, 1.0) * 1000.0
+		for b in word_boxes:
+			a += VrViewCheck.cover_deg2(head, p, size, b) * 30.0
 		for b in others:
 			a += VrViewCheck.cover_deg2(head, p, size, b)
 		if a <= 0.0:
