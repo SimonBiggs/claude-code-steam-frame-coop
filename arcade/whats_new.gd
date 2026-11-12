@@ -33,6 +33,11 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "hns-rumble", "date": "2026-11-12", "game": "hide_and_seek", "pic": "hoover", "line": "Rumble the robot hoover!"},
+	{"id": "hns-gifts", "date": "2026-11-12", "game": "hide_and_seek", "pic": "shieldbubble", "line": "Pip's gifts!"},
+	{"id": "hns-kennel", "date": "2026-11-12", "game": "hide_and_seek", "pic": "kennel", "line": "Pip's kennel grows!"},
+	{"id": "hns-modes", "date": "2026-11-12", "game": "hide_and_seek", "pic": "puppy", "line": "Gentle, brave or hard!"},
+	{"id": "hns-seasons", "date": "2026-11-12", "game": "hide_and_seek", "pic": "snowflake", "line": "Seasons on Pip's street!", "try": {"ARCADE_SEASON_HIDE_AND_SEEK": "winter"}},
 	{"id": "kart-gifts", "date": "2026-11-12", "game": "kart_race", "pic": "boxmagnet", "line": "Bolt's gifts at the pit!", "try": {"KART_PIT": "1"}},
 	{"id": "kart-surprises", "date": "2026-11-12", "game": "kart_race", "pic": "gumball", "line": "Watch out for the circle!", "try": {"KART_PIT": "1", "KART_SURPRISE": "1"}},
 	{"id": "kart-town", "date": "2026-11-12", "game": "kart_race", "pic": "racetown", "line": "Bolt's race town grows!"},

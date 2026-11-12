@@ -32,6 +32,29 @@ launch, moves on to the next one.
   housegen.gd places the friends, the dark room and the party (own random stream) and `check_street()` proves them
   fair. The host's spec array carries `[seed, level, theme, daily, friends, twist, street, slot]`; the snapshot
   carries `[friend_state, party]` (TV machines rebuild everything from those).
+- **SECOND PASS** (`deep.gd` data + generators, `deep_play.gd` in the game; test `tests/hide_and_seek_deep_test.gd`):
+  - **GENTLE / BRAVE / HARD** before the first round, on pick orbs (`core/pick_orbs.gd`) floating over the counting
+    room: hiders and a flat seeker stand under one, the VR seeker walks up and reaches a hand into one (DWELL 0.5 s);
+    most picked wins, nobody in time = the middle (the family's last mode). GENTLE: +20 s, one surprise, 4.5 s tells,
+    sniff every 10 s. HARD: a 15 s count, -10 s, three surprises, 3 s tells.
+  - **PIP'S GIFTS** before every later round, for the side that LOST the last one (alone: the seeker): BIG TORCH
+    (longer, wider beam), SUPER NOSE (sniff 7 m, every 6 s), BIG HANDS (bigger touch), ZOOMY SHOES (either side),
+    EXTRA BELL (one more jailbreak), BUBBLE (every hider's first tag pops a bubble instead and gives 2.5 s to run),
+    HANKY (no sneezing from sniffs or pepper). Three offered, seeded per round.
+  - **RUMBLE'S SURPRISES** (never in round 1, never alone): RUMBLE the robot hoover rolls along a band through a hider's
+    room (stops at walls and furniture) and bumps hiders in it out of their disguise; the PEPPER POT puffs round a hider
+    and everyone in the ring sneezes ACHOO (heard by the seeker). Each is TOLD first by a steady warn ring on the floor
+    (`core/warn_rings.gd`: deep blue band / berry-pink disc) for the mode's tell time, so a hider can step out. Times come
+    from `Deep.plan()` (house seed + round), never before 18 s into the seek, never in the last 12 s, 14 s apart.
+  - **SEASONS** (`Seeded.season`, `core/season_kit.gd`): props along the garden fence clear of everything in the
+    garden, the castle courtyard's corners, the spaceship's mess hall, with blossom / leaves / snow drifting over the
+    garden and the courtyard.
+  - **PIP'S KENNEL grows**: every finished round counts (save `kennel`); `KENNEL_STEPS` add a flag, a bowl, flowers, a
+    bone sign, a porch, lights, a tower and a gold roof (a story card each time). The Trophy Hall counts the pieces.
+  - Snapshot item 18 = `deep_play.pack()` (mode, gift, side, pick stage, choices, takes, season, kennel, bubbles);
+    events `deep_tell`, `deep_go`, `deep_bump`: all machines must update together. Telemetry adds mode, gift,
+    surprises, bumps, sneezes, pops, kennel, season. The host sets net state `phase` (bots count phases with
+    `BotKit.watch_state`).
 - **Validator** `tests/hide_and_seek_gen_test.gd` (`godot-test --headless --path . -s res://tests/hide_and_seek_gen_test.gd`,
   `SEEDS=300` for more): over many seeds and sizes, every room, doorway, spawn, star spot and the jail bell is
   walkable for a hider and the seeker, every hiding spot is reachable by a hider AND touchable by the seeker (so

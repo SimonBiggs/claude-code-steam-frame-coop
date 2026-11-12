@@ -50,6 +50,7 @@ const JoinInputScript := preload("res://games/hide_and_seek/join_input.gd")
 const CueScript := preload("res://games/hide_and_seek/cue.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
+const DeepPlay := preload("res://games/hide_and_seek/deep_play.gd")  # second pass: modes, Pip's gifts, Rumble's surprises, seasons, the kennel
 
 ## P1 (seeker) + up to six TV hiders P2..P7.
 const MAX_PLAYERS := 7
@@ -104,6 +105,7 @@ var map: Dictionary = {}  # its data(): rooms, doors, spawns, jail, bell, star_s
 var map_spec: Dictionary = {}  # what it was built from ({seed, level, theme, daily} for the house)
 var save: Save  # Story.save_defaults(): Pip's toys, houses explored, today's house (the host's)
 var pip: Node3D
+var deep: Node3D  # deep_play.gd
 var pip_spot := Vector3.ZERO
 var pip_on := false  # Pip is hiding this round (not found yet)
 var pip_finder := -1
@@ -182,6 +184,9 @@ func _ready() -> void:
 		save.mark_dirty()
 	toys = int(save.data.toys)
 	party = (save.data.party as Array).duplicate()
+	deep = DeepPlay.new()
+	deep.setup(self)
+	add_child(deep)
 	pip = PipScript.new()
 	pip.name = "Pip"
 	pip.visible = false
@@ -196,6 +201,7 @@ func _ready() -> void:
 	net.name = "Net"
 	net.main = self
 	add_child(net)
+	net.sticky_event("orbs")  # a machine joining mid-pick hears of the pick orbs too (deep_play.gd; the snapshot carries them)
 	seats = ClassicSeats.new(self, {
 		"no_keys": 2,  # player.gd key_set 2: controller only
 		"free_actions": ["restart", "pause"],
@@ -1094,6 +1100,9 @@ func _check_join(delta: float) -> void:
 ## Host: move a player (TV players are moved on their own machine, so tell it).
 func _place_player(p, pos: Vector3, yaw: float) -> void:
 	p.teleport(pos, yaw)
+	if p.vr:
+		VrText.snap(vr_center)  # the VR words jump to where the player now looks (riding the rig they could end up past a wall)
+		VrText.snap(vr_status)
 	if p.remote:
 		net.event("teleport", [p.index, pos, yaw])
 
@@ -1123,6 +1132,8 @@ func _process(delta: float) -> void:
 			mirror_t = 1.0 / 30.0
 			mirror_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	_update_party(delta)
+	if net.mode != "client":
+		net.state_set("phase", phase)  # (bots count phases as they happen: tests/bot_kit.gd watch_state)
 	_update_hud()
 	_update_vr_text()
 	_update_mood(delta)
@@ -1149,6 +1160,9 @@ func _process(delta: float) -> void:
 			if hider_count() > 0 or solo_wait >= SOLO_WAIT:
 				solo_wait = 0.0
 				_start_round()
+		"pick":
+			if deep.update_pick(delta):
+				_begin_intro(true)
 		"intro":
 			phase_t -= delta
 			if phase_t <= 0.0:
@@ -1206,21 +1220,36 @@ func _start_round() -> void:
 		for k in STAR_COUNT:
 			star_idx.append(all[k])
 			star_taken.append(false)
-	phase = "intro"
-	phase_t = intro_time if round_no == 1 else 5.0
 	print("Round %d (%s) on %s: %d hiders" % [round_no, round_type, map_title(), hider_count()])
 	run = {"round": round_no, "map": map_title(), "type": round_type, "hiders": hider_count(), "spec": _spec_array(map_spec),
 		"gen_ms": last_gen_ms, "spots": (md().hide_spots as Array).size(), "toys": toys, "t0": 0.0,
 		"friends": (md().get("friends", []) as Array).duplicate(), "twist": int(md().get("twist", 0)), "friends_found": 0,
-		"street": int(map_spec.get("street", -1)), "slot": int(map_spec.get("slot", -1))}
-	_round_story()
+		"street": int(map_spec.get("street", -1)), "slot": int(map_spec.get("slot", -1)), "mode": deep.mode_id(), "gift": ""}
+	if deep.begin_round():
+		phase = "pick"  # the mode (first round) or Pip's gift for the side that lost: deep_play.gd, then _begin_intro
+		phase_t = 0.0
+	else:
+		_begin_intro(false)
 	sound("ready", -4.0, 1.0)
 	_show_center("", 0.0)  # no words: each view says HIDE! / SEEK! with a picture of the round
 
 
+## After the pick (if any): everyone back on their spawn, then HIDE! / SEEK!.
+func _begin_intro(replace: bool) -> void:
+	phase = "intro"
+	phase_t = intro_time if round_no == 1 else 5.0
+	if replace:
+		for p in players:
+			if p.active:
+				_place_player(p, spawn_pos(p.index), PI if p.index == 0 else 0.0)
+	if deep.has_gift("bell", "hider"):
+		jail_breaks += 1
+	_round_story()
+
+
 func _begin_count() -> void:
 	phase = "count"
-	phase_t = count_time
+	phase_t = minf(count_time, float(deep.md().count))  # HARD counts faster
 	last_tick = -1
 	print("Round %d: counting (%d s)" % [round_no, int(count_time)])
 
@@ -1232,7 +1261,7 @@ func _seek_time() -> float:
 		return seek_override
 	if hider_count() == 0:
 		return SOLO_SEEK  # alone: just Pip and the street friends to find
-	return clampf(130.0 + 10.0 * hider_count(), 140.0, 190.0)
+	return clampf(130.0 + 10.0 * hider_count(), 140.0, 190.0) + float(deep.md().seek_add)  # GENTLE: more time, HARD: less
 
 
 func _begin_seek() -> void:
@@ -1240,6 +1269,7 @@ func _begin_seek() -> void:
 	seek_len = _seek_time()
 	phase_t = seek_len
 	last_tick = -1
+	deep.seek_start()
 	sound("ready", -2.0, 1.3)
 	_show_center("HERE I COME!", 2.0)
 	print("Round %d: seeking (%d s, %d hiders)" % [round_no, int(seek_len), hiders_left()])
@@ -1260,6 +1290,7 @@ func _update_seek(delta: float) -> void:
 	_check_stars()
 	_check_pip()
 	_check_friends(delta)
+	deep.update_seek(delta)
 	var n := ceili(phase_t)
 	if n <= 10 and n != last_tick and n > 0:
 		last_tick = n
@@ -1336,13 +1367,17 @@ func request_sniff(s) -> void:
 		return
 	if sniff_cd > 0.0:
 		return
-	sniff_cd = SNIFF_COOLDOWN
+	sniff_cd = deep.sniff_cd()  # (SNIFF_COOLDOWN in BRAVE; the mode and SUPER NOSE change it)
 	sound("sniff", 0.0, 1.0)
 	var near: Array = []
 	for h in players:
-		if h.is_hiding() and Vector2(h.global_position.x - s.global_position.x, h.global_position.z - s.global_position.z).length() < SNIFF_RANGE:
+		if h.is_hiding() and Vector2(h.global_position.x - s.global_position.x, h.global_position.z - s.global_position.z).length() < deep.sniff_range(SNIFF_RANGE):
 			near.append(h)
 	print("Round %d: the seeker sniffs (%d hiders close by)" % [round_no, near.size()])
+	if not near.is_empty() and deep.no_sneeze():
+		for h in near:
+			popup(h.center() + Vector3.UP * 0.8, "HANKY!", Color(0.85, 0.7, 1.0), false)
+		near.clear()  # the hiders' HANKY: no sneezing
 	if near.is_empty():
 		var ahead: Vector3 = s.head_transform().origin + -s.head_transform().basis.z * 1.2
 		popup(ahead, "sniff sniff…", Color(0.8, 0.9, 1.0), false)
@@ -1405,9 +1440,9 @@ func _check_touch() -> void:
 			continue
 		var c: Vector3 = h.center()
 		if s.vr:
-			if s.hand_l.global_position.distance_to(c) < HAND_TOUCH or s.hand_r.global_position.distance_to(c) < HAND_TOUCH:
+			if s.hand_l.global_position.distance_to(c) < HAND_TOUCH * deep.touch_k() or s.hand_r.global_position.distance_to(c) < HAND_TOUCH * deep.touch_k():
 				find_hider(h, "touch")
-		elif Vector2(s.global_position.x - c.x, s.global_position.z - c.z).length() < BODY_TOUCH:
+		elif Vector2(s.global_position.x - c.x, s.global_position.z - c.z).length() < BODY_TOUCH * deep.touch_k():
 			find_hider(h, "touch")
 
 
@@ -1431,10 +1466,10 @@ func torch_target(s):
 		var c: Vector3 = h.center()
 		var to := c - origin
 		var d := to.length()
-		if d > TAG_RANGE + 0.3 or d < 0.01:
+		if d > deep.tag_range(TAG_RANGE) + 0.3 or d < 0.01:
 			continue
 		var ang := rad_to_deg(acos(clampf(dir.dot(to / d), -1.0, 1.0)) - atan(0.35 / d))
-		if ang > TAG_ANGLE or ang >= best_ang:
+		if ang > deep.tag_angle(TAG_ANGLE) or ang >= best_ang:
 			continue
 		if ray(origin, c).is_empty() or ray(origin, c + Vector3.UP * 0.35).is_empty():
 			best_ang = ang
@@ -1449,10 +1484,10 @@ func _decoy_target(s) -> int:
 		var c: Vector3 = decoys[i].pos + Vector3.UP * 0.55
 		var to := c - xf.origin
 		var d := to.length()
-		if d > TAG_RANGE + 0.3 or d < 0.01:
+		if d > deep.tag_range(TAG_RANGE) + 0.3 or d < 0.01:
 			continue
 		var ang := rad_to_deg(acos(clampf(dir.dot(to / d), -1.0, 1.0)) - atan(0.35 / d))
-		if ang < TAG_ANGLE:
+		if ang < deep.tag_angle(TAG_ANGLE):
 			return i
 	return -1
 
@@ -1485,6 +1520,8 @@ func torch_click(s) -> void:
 func find_hider(h, how: String) -> void:
 	if not h.is_hiding() or phase != "seek":
 		return
+	if not deep.can_tag(h):
+		return  # BUBBLE: it pops instead (and a moment to run)
 	var was: int = h.prop_kind
 	h.set_found(true)
 	finds += 1
@@ -1596,6 +1633,8 @@ func _end_round(seeker_won: bool) -> void:
 	results_text = "\n".join(lines)
 	_show_center(results_text, 0.0)
 	_save_best()
+	if net.mode != "client":
+		deep.round_over(seeker_won)
 	_round_done(seeker_won)
 	if net.mode != "client" and posmod(map_idx + 1, MAPS.size()) == 0:
 		_prefetch_house(_spec_for(0))  # the next round is in the house: make it while the results show
@@ -1805,7 +1844,7 @@ func make_snapshot() -> Array:
 	for p in players:
 		ps.append(p.net_state())
 	return [phase, phase_t, round_no, seek_len, ps, round_scores, totals, count_time, round_type, jail_breaks, star_idx, star_taken, snappedf(sniff_cd, 0.1), maxi(map_idx, 0),
-		_spec_array(map_spec), [pip_spot, pip_on, pip_finder], toys, [friend_state, party]]
+		_spec_array(map_spec), [pip_spot, pip_on, pip_finder], toys, [friend_state, party], deep.pack()]
 
 
 func apply_snapshot(s: Array) -> void:
@@ -1845,6 +1884,8 @@ func apply_snapshot(s: Array) -> void:
 			_update_toys()
 		if s.size() >= 18:
 			_apply_friends(s[17][0], s[17][1])
+		if s.size() >= 19:
+			deep.unpack(s[18])
 	elif s.size() >= 14 and int(s[13]) != map_idx:
 		_build_map(int(s[13]))
 	var ps: Array = s[4]
@@ -1856,6 +1897,8 @@ func apply_event(kind: String, args: Array) -> void:
 	if seats.handle_event(kind, args):
 		return
 	if not ready_to_play:
+		return
+	if deep.apply_event(kind, args):
 		return
 	match kind:
 		"prefetch":
@@ -2355,6 +2398,14 @@ func _telemetry(end: String, seeker_won: bool) -> void:
 	info["houses"] = int(save.data.houses)
 	info["party"] = party.size()
 	info["friends_found"] = int(run.get("friends_found", 0))
+	info["mode"] = deep.mode_id()
+	info["gift"] = deep.gift
+	info["surprises"] = int(run.get("surprises", 0))
+	info["bumps"] = int(deep.stats.bumped)
+	info["sneezes"] = int(deep.stats.sneezed)
+	info["pops"] = int(deep.stats.pops)
+	info["kennel"] = int(deep.kennel_rounds)
+	info["season"] = deep.season
 	info["vr"] = not players.is_empty() and players[0].vr
 	info["net"] = net.mode
 	Telemetry.run(Story.GAME_ID, info)

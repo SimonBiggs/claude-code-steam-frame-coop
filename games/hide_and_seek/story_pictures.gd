@@ -5,8 +5,10 @@ extends RefCounted
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 ## PIP'S STREET (street.gd): the new neighbours (kitten, hedgehog, owl, tortoise, hamster; bunny, frog and squirrel
 ## come from other games), the street, the garden party, the dark room and a sneaky friend's paw prints.
+## Second pass (deep.gd): Rumble the robot hoover, the pepper pot, SUPER NOSE, the HANKY gift, Pip's kennel.
 
-const NAMES: Array[String] = ["puppy", "kitten", "hedgehog", "owl", "tortoise", "hamster", "street", "gardenparty", "darkroom", "pawprints"]
+const NAMES: Array[String] = ["puppy", "kitten", "hedgehog", "owl", "tortoise", "hamster", "street", "gardenparty", "darkroom", "pawprints",
+	"hoover", "pepper", "nose", "hanky", "kennel"]
 
 
 static func _house(pic, x: float, w: float, h: float, wall: Color, roof: Color, lit: bool) -> void:
@@ -136,3 +138,49 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 				pic._circle(x, y + bob, 0.05, color)
 				for d in [-1.0, 0.0, 1.0]:
 					pic._circle(x + d * 0.04, y - 0.06 + absf(d) * 0.015 + bob, 0.02, color)
+		"hoover":  # Rumble the robot hoover: a round blue robot with big friendly eyes and a brush skirt
+			var roll := sin(t * 3.0) * 0.03
+			pic._poly([[0.12, 0.8], [0.88, 0.8], [0.84, 0.86], [0.16, 0.86]], Color(0.3, 0.3, 0.35))
+			pic._circle(0.5 + roll, 0.6 + bob, 0.3, Color(0.25, 0.75, 0.95))
+			pic._poly([[0.22 + roll, 0.68 + bob], [0.78 + roll, 0.68 + bob], [0.74 + roll, 0.76 + bob], [0.26 + roll, 0.76 + bob]], Color(0.15, 0.35, 0.55))
+			pic._eye(0.4 + roll, 0.52 + bob, 0.07)
+			pic._eye(0.6 + roll, 0.52 + bob, 0.07)
+			pic._circle(0.5 + roll, 0.3 + bob, 0.04, Color(1.0, 0.35, 0.3) if fmod(t, 1.0) < 0.5 else Color(1.0, 0.85, 0.3))
+			pic._poly([[0.49 + roll, 0.3 + bob], [0.51 + roll, 0.3 + bob], [0.51 + roll, 0.36 + bob], [0.49 + roll, 0.36 + bob]], Color(0.3, 0.3, 0.35))
+			for k in 5:
+				var x := 0.12 + k * 0.19 + fmod(t * 0.3, 0.19)
+				pic._circle(x, 0.9, 0.025, Color(0.85, 0.85, 0.9, 0.7))
+		"pepper":  # the pepper pot tipping a sneezy cloud
+			pic._poly([[0.3, 0.85], [0.56, 0.85], [0.6, 0.45], [0.26, 0.45]], Color(0.92, 0.9, 0.86))
+			pic._poly([[0.26, 0.45], [0.6, 0.45], [0.55, 0.32], [0.31, 0.32]], Color(0.75, 0.75, 0.8))
+			pic._circle(0.37, 0.4, 0.02, Color(0.2, 0.2, 0.2))
+			pic._circle(0.49, 0.4, 0.02, Color(0.2, 0.2, 0.2))
+			pic._poly([[0.36, 0.62], [0.5, 0.62], [0.5, 0.7], [0.36, 0.7]], Color(1.0, 0.45, 0.2))
+			for k in 6:
+				var a := t * 1.5 + k * 1.05
+				pic._circle(0.68 + cos(a) * 0.12, 0.25 + sin(a) * 0.08 + bob, 0.04 + 0.015 * (k % 3), Color(0.55, 0.4, 0.3, 0.75))
+		"nose":  # SUPER NOSE: a big pink sniffing nose with sniff lines
+			pic._circle(0.5, 0.55 + bob, 0.24, Color(1.0, 0.55, 0.7))
+			pic._circle(0.42, 0.62 + bob, 0.06, Color(0.55, 0.2, 0.3))
+			pic._circle(0.58, 0.62 + bob, 0.06, Color(0.55, 0.2, 0.3))
+			pic._circle(0.44, 0.45 + bob, 0.05, Color(1.0, 0.8, 0.85))
+			var s := fmod(t * 1.2, 1.0)
+			for k in 3:
+				var y := 0.22 + k * 0.1
+				pic._poly([[0.08 + s * 0.1, y], [0.22 + s * 0.1, y - 0.02], [0.22 + s * 0.1, y + 0.02]], Color(1, 1, 1, 0.8 - s * 0.5))
+				pic._poly([[0.92 - s * 0.1, y], [0.78 - s * 0.1, y - 0.02], [0.78 - s * 0.1, y + 0.02]], Color(1, 1, 1, 0.8 - s * 0.5))
+		"hanky":  # HANKY: a spotty hanky waving (no sneezing!)
+			var wv := sin(t * 3.0) * 0.04
+			pic._poly([[0.2, 0.25 + wv], [0.8, 0.2 - wv], [0.84, 0.8 + wv], [0.18, 0.78 - wv]], color)
+			for k in 4:
+				pic._circle(0.32 + (k % 2) * 0.34, 0.38 + (k / 2) * 0.3 + bob, 0.05, Color(1, 1, 1, 0.85))
+			pic._poly([[0.2, 0.25 + wv], [0.8, 0.2 - wv], [0.8, 0.24 - wv], [0.2, 0.29 + wv]], Color(1, 1, 1, 0.6))
+		"kennel":  # Pip's kennel: a red roof, a round door and a flag that waves
+			pic._poly([[0.0, 0.85], [1.0, 0.85], [1.0, 1.0], [0.0, 1.0]], Color(0.45, 0.75, 0.38))
+			pic._poly([[0.2, 0.85], [0.8, 0.85], [0.8, 0.5], [0.2, 0.5]], Color(0.75, 0.5, 0.3))
+			pic._poly([[0.12, 0.52], [0.88, 0.52], [0.5, 0.22]], Color(0.85, 0.25, 0.25))
+			pic._circle(0.5, 0.72, 0.12, Color(0.2, 0.12, 0.08))
+			pic._poly([[0.38, 0.85], [0.62, 0.85], [0.62, 0.72], [0.38, 0.72]], Color(0.2, 0.12, 0.08))
+			pic._poly([[0.49, 0.22], [0.51, 0.22], [0.51, 0.06], [0.49, 0.06]], Color(0.4, 0.3, 0.2))
+			pic._poly([[0.51, 0.06], [0.66, 0.1 + sin(t * 4.0) * 0.02], [0.51, 0.14]], Color(1.0, 0.85, 0.3))
+			pic._circle(0.5, 0.74 + bob, 0.05, Color(0.95, 0.72, 0.42))
