@@ -12,11 +12,14 @@ extends Node3D
 
 const WarnRings := preload("res://core/warn_rings.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
+const StoryCard := preload("res://core/story_card.gd")
 const Deep := preload("res://games/party_board/deep.gd")
 
 const STAY := 600.0  # (the tell stays until the host clears it)
 const DROP_H := 7.0  # a rock starts this high over its space
 const DROP_T := 0.55
+const PIC_SIZE := 1.8  # the surprise's picture bobbing over its first space (board units)
+const PIC_Y := 3.2
 
 var main
 var rings: WarnRings
@@ -24,6 +27,7 @@ var key := ""
 var now: Array = []
 var seen := {}  # kind -> tells drawn here (bots)
 var fell := 0  # surprises that went off here (bots)
+var pics: Array = []  # [Sprite3D, base position]
 
 
 func _ready() -> void:
@@ -39,6 +43,10 @@ func show_now(hz: Variant) -> void:
 		return
 	key = nk
 	rings.clear()
+	for pp in pics:
+		if is_instance_valid(pp[0]):
+			(pp[0] as Node).queue_free()
+	pics.clear()
 	now = zs.duplicate(true)
 	for z in zs:
 		var kind := String((z as Dictionary).get("kind", ""))
@@ -52,8 +60,36 @@ func show_now(hz: Variant) -> void:
 			var y := p.y + Deep.RING_Y
 			rings.shape("circle", Vector3(p.x, y, p.z), Vector3.FORWARD, Vector2(Deep.RING_R, 0.0), col, 0.3,
 				{"style": "disc", "stay": STAY, "alpha": 0.42, "y": y, "hot": col})
+		var sp: Array = (z as Dictionary).get("spaces", [])
+		if not sp.is_empty() and int(sp[0]) >= 0 and int(sp[0]) < main.data.count():  # a picture says what is coming
+			var s := StoryCard.sprite(String(Deep.KIND_PICS.get(kind, "boulder")), 128, col)
+			s.name = "SurprisePic"
+			s.pixel_size = PIC_SIZE / 128.0
+			add_child(s)
+			var at: Vector3 = main.data.pos(int(sp[sp.size() / 2])) + Vector3(0, PIC_Y, 0)
+			s.position = at
+			pics.append([s, at])
 	if not zs.is_empty():
 		main.sfx.play("whoosh", -10.0, 0.7)
+
+
+func _process(_delta: float) -> void:
+	var t := Time.get_ticks_msec() / 1000.0
+	for pp in pics:
+		if is_instance_valid(pp[0]):
+			(pp[0] as Node3D).position = (pp[1] as Vector3) + Vector3(0, 0.25 * sin(t * 2.5), 0)
+
+
+## Where the camera looks while the surprises are told / go off (the middle of their spaces; INF none).
+func focus() -> Vector3:
+	var sum := Vector3.ZERO
+	var n := 0
+	for z in now:
+		for s in (z as Dictionary).get("spaces", []):
+			if int(s) >= 0 and int(s) < main.data.count():
+				sum += main.data.pos(int(s))
+				n += 1
+	return sum / float(n) if n > 0 else Vector3.INF
 
 
 ## Bots: the surprises told now.

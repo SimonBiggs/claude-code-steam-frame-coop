@@ -42,19 +42,9 @@ func sync(roster: Array) -> void:
 
 func _tag(id: String) -> Sprite3D:
 	var gd := Deep.gift(id)
-	var vp := SubViewport.new()
-	vp.size = Vector2i(PX, PX)
-	vp.transparent_bg = true
-	vp.disable_3d = true
-	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	vp.add_child(StoryCard.picture(String(gd.pic), PX, gd.color))
-	var s := Sprite3D.new()
+	var s := StoryCard.sprite(String(gd.pic), PX, gd.color)
 	s.name = "Gift_" + id
-	s.add_child(vp)
-	s.texture = vp.get_texture()
 	s.pixel_size = SIZE / PX
-	s.billboard = BaseMaterial3D.BILLBOARD_ENABLED
-	s.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(s)
 	return s
 

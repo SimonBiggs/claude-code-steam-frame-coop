@@ -25,7 +25,7 @@ extends RefCounted
 ##             a gold star, and a present for every party stacked beside it (hall.gd; saved hall_n).
 ##   PICK ROWS the VR giant: three small orbs an arm's reach in front of the eyes, just under eye level ("vr"; placed
 ##             from the head after the VR height fit, so the island never hides them standing or seated; the hand
-##             moves into one and stays DWELL s). No VR: three big orbs over the south of the island ("board").
+##             moves into one and stays DWELL s). No VR: three big orbs high over the middle of the island ("board").
 ##             TV / Deck players: the stick moves a dot in their colour between the orbs, A takes that one.
 
 const Seeded := preload("res://core/seeded.gd")
@@ -80,11 +80,12 @@ const VR_BELOW := 0.14
 const VR_SCALE := 0.11
 const HAND_R := 0.05  # a hand this near an orb's ball touches it ...
 const DWELL := 0.35  # ... for this long (deliberate: a hand sweeping past never picks)
-## Board row (board units, no VR): over the south of the island, GENTLE on the TV's left (+X: the TV looks south).
-const BOARD_X: Array[float] = [5.0, 0.0, -5.0]
-const BOARD_Y := 5.0
-const BOARD_Z := 6.5
-const BOARD_SCALE := 1.7
+## Board row (board units, no VR): high over the middle of the island (above the volcano's top and every token's name),
+## GENTLE on the TV's left (+X: the TV looks south).
+const BOARD_X: Array[float] = [5.2, 0.0, -5.2]
+const BOARD_Y := 7.5
+const BOARD_Z := 0.5
+const BOARD_SCALE := 2.2
 const ROW_WAIT := {"mode": 15.0, "gift": 10.0}  # nobody took one: the middle
 const EMPTY_WAIT := 6.0  # nobody here who could pick at all
 const CPU_PICK := 1.2  # a CPU takes its gift this long after the orbs open

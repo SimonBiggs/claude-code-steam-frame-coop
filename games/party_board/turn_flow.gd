@@ -511,6 +511,7 @@ func _tell_surprises() -> void:
 		return
 	hz_now = zs
 	main.net.state_set("hz", zs.duplicate(true))
+	main.net.state_set("cur", -1)
 	main.net.state_set("step", "surprise")
 	var kind := String((zs[0] as Dictionary).kind)
 	main.fx("story", ["MANGO", String(Deep.KIND_NAMES[kind]), String(Deep.KIND_PICS[kind]), Deep.color_of(kind).to_html()])

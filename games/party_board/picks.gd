@@ -6,7 +6,7 @@ extends Node
 ##           furthest behind (only they may take one; a CPU takes its own after deep.gd CPU_PICK s).
 ## Rows (deep.gd): the VR giant's three small orbs an arm's reach in front of the eyes ("vr", from the head after the
 ## VR height fit; they follow the giant when it walks or turns a lot), the hand moves into one and stays deep.gd DWELL s
-## (a hand already in one when they pop up must leave and come back). No VR: three big orbs over the south of the
+## (a hand already in one when they pop up must leave and come back). No VR: three big orbs high over the middle of the
 ## island ("board"). TV / Deck players (and a flat host): the stick moves a dot in their colour from orb to orb (it
 ## starts on the middle one), A takes it. Nobody in time? The middle orb (it glows brightest).
 ## The host sends the sticky "orbs" event [{stage, entries, spots (board units), row, hover: {slot: orb}, allowed}] (a

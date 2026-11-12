@@ -395,8 +395,17 @@ func publish_deep() -> void:
 
 
 ## Every machine, when the pick orbs pop up (picks.gd): one clear banner (the orbs say the rest in pictures).
+## Banners still up are cleared first (none may sit over the orbs); this one sits high, above them.
 func pick_banner(stage_id: String) -> void:
-	hud.banner("HOW HARD?" if stage_id == "mode" else "GIFT!", "", "victory", 2.0)
+	var word := "HOW HARD?" if stage_id == "mode" else "GIFT!"
+	if tv_ui != null:
+		for c in tv_ui.get_children():
+			if c is HudKit.BannerFx:
+				c.queue_free()
+		HudKit.banner(tv_ui, word, "", {"style": "victory", "duration": 1.8, "y": 0.1})
+	if vr_rig != null:
+		HudKit.vr_banner(self, vr_rig.camera, word, "", vr_ui_opts(0.4, {"style": "victory", "duration": 1.8,
+			"sound": "" if tv_ui != null else HudKit.BANNER_STYLES["victory"][2]}, 0.15))
 
 
 ## Every machine: lay out the seeded party desc {seed, level, rounds} (partygen.gd) on the board.
@@ -759,7 +768,10 @@ func _update_camera(delta: float) -> void:
 		cam_look(Vector3(sin(_cam_orbit) * r, 17.0, -cos(_cam_orbit) * r), Vector3(0, 1.0, 0), 1.0)
 	elif phase == "board" or phase == "intro" or phase == "ceremony":
 		var cur := int(net.state_get("cur", -1))
-		if cur >= 0 and tokens.has(cur):
+		var hz_at := hazards.focus() if hazards != null and String(net.state_get("step", "")) == "surprise" else Vector3.INF
+		if hz_at != Vector3.INF:  # the warned surprises: told, and going off
+			cam_focus(hz_at + Vector3(0, 1.0, 0), 15.0, 3.0)
+		elif cur >= 0 and tokens.has(cur):
 			var t: TokenScript = tokens[cur]
 			var d := 12.5 if String(net.state_get("step", "")) != "overview" else 30.0
 			cam_focus(t.position + Vector3(0, 1.0, 0), d, 3.0)
@@ -770,7 +782,7 @@ func _update_camera(delta: float) -> void:
 		for p in picks.spots:
 			c += p
 		c /= float(picks.spots.size())
-		cam_look(c + Vector3(0, 9.0, -15.0), c, 2.5)
+		cam_look(c + Vector3(0, 3.0, -13.0), c + Vector3(0, -0.5, 0), 2.5)
 	elif phase == "trophy":  # Mango's trophy wall grows: look at it from the island
 		var w := Festival.wall_spot()
 		var inward := Vector3(-w.x, 0, -w.z).normalized()
