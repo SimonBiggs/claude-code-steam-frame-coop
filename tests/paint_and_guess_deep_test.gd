@@ -152,7 +152,8 @@ func _painting(seed_value: int, cover: float) -> Array:
 		var steps := r.randi_range(4, 70)
 		for i in steps:
 			dir = dir.rotated(r.randf_range(-0.5, 0.5))
-			c = Vector2(clampf(c.x + dir.x * 0.012, -0.64, 0.64), clampf(c.y + dir.y * 0.012, -0.44, 0.44))
+			var step := r.randf_range(0.004, 0.03)  # (a slow kid, a quick sweep: uneven gaps between brush points)
+			c = Vector2(clampf(c.x + dir.x * step, -0.64, 0.64), clampf(c.y + dir.y * step, -0.44, 0.44))
 			pts.append(c)
 		var col := r.randi_range(0, Canvas.COLORS.size() - 1)
 		var w := (Artist.SPARKLE_W if col == Canvas.SPARKLE else Artist.BRUSH_W) * (Deep.BIG if k % 3 == 0 else 1.0)

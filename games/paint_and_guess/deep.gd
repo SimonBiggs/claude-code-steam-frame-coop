@@ -57,6 +57,8 @@ const WIND_H := 0.06  # half a wind band's height
 const GRID := 0.04  # the painting is looked at in squares this big when finding bare canvas
 const DRIP_COLOR := Color(1.0, 0.5, 0.08)  # drip orange
 const WIND_COLOR := Color(0.25, 0.55, 1.0)  # wind blue
+const TELL_DIM := 0.5  # a tell's inside glows this much darker than its edge (so it never looks like paint)
+const TELL_EDGE := 0.012  # a wind band's bright edges (canvas metres)
 const KINDS: Array[String] = ["drip", "wind"]
 const KIND_PICS := {"drip": "paintdrip", "wind": "gust"}
 const KIND_NAMES := {"drip": "DRIP!", "wind": "WIND!"}
@@ -245,11 +247,11 @@ static func paint_grid(strokes: Array) -> Dictionary:
 	g.fill(0)
 	for s in strokes:
 		var pts: PackedVector2Array = s[3]
-		var r := float(s[2]) * 0.5
+		var r := float(s[2]) * 0.5 + 0.004  # (+ a little: the paint between two samples)
 		for i in pts.size():
 			var a: Vector2 = pts[i]
 			var b: Vector2 = pts[i - 1] if i > 0 else a
-			var n := maxi(1, ceili(a.distance_to(b) / (GRID * 0.5)))
+			var n := maxi(1, ceili(a.distance_to(b) / 0.006))  # (samples close enough that their squares cover the line)
 			for k in n + 1:
 				var q := a.lerp(b, float(k) / float(n))
 				for cx in range(floori((q.x - r + Canvas.W * 0.5) / GRID), floori((q.x + r + Canvas.W * 0.5) / GRID) + 1):

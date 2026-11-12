@@ -253,6 +253,13 @@ func _check_surprise() -> void:
 	if not hz_last.is_empty():
 		var bare := Deep.bare(hz_last, main.canvas.export_strokes())
 		hz_checked += 1
+		if not bare:
+			for s in main.canvas.export_strokes():
+				var pts: PackedVector2Array = s[3]
+				for i in pts.size():
+					if Deep.inside(hz_last, pts[i], Deep.PAD + float(s[2]) * 0.5) or (i > 0 and Deep.blocks(hz_last, pts[i - 1], pts[i], float(s[2]) * 0.5)):
+						print("BOT: paint in the surprise: stroke %d (owner %d, colour %d, width %.3f, %d points) point %d %s" % [s[0], s[4], s[1], s[2], pts.size(), i, pts[i]])
+						break
 		BotEnd.check(bare, "the %s surprise stayed bare canvas (stopped the brush %d times)" % [hz_last.kind, main.hazards.stopped])
 		print("BOT: %s surprise over: bare=%s, brush stopped %d times" % [hz_last.kind, bare, main.hazards.stopped])
 	hz_last = now.duplicate()
@@ -338,7 +345,11 @@ func _drive_vr(a, delta: float) -> void:
 	vr_t += delta
 	if t > 30.0 and not has_meta("vr_sat_down"):
 		set_meta("vr_sat_down", true)
-		a.head.position.y -= 0.4  # the headset goes to a smaller kid / they sit down: the easel should follow
+		# The headset goes to a smaller kid / they sit down: the easel should follow. Never below a seated player's eyes
+		# (core/vr_rig.gd FAKE_EYE_SEATED; a seated run - BOT_VR_SEATED - already sits there, it stays put).
+		var seated: float = preload("res://core/vr_rig.gd").FAKE_EYE_SEATED
+		if a.head.position.y > seated + 0.2:
+			a.head.position.y = seated
 		print("BOT VR: head drops to %.2f m" % a.head.global_position.y)
 	a.bot_lstick = Vector2.ZERO
 	a.bot_a = false

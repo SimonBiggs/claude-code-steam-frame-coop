@@ -33,6 +33,8 @@ var on_done: Callable  # host: (stage, option, slot)
 var history: Array = []  # [stage, option, by] (telemetry, bots)
 var inside := {}  # hand / ring id -> orb index it is at now (-1 none)
 var dwell := {}  # id -> seconds at that orb
+var row_head := Transform3D()  # host, VR row: the head the row was put in front of
+var rests: Array = []  # canvas row: a ring on the canvas under each orb (where to rest your brush ring)
 
 
 func _ready() -> void:
@@ -64,7 +66,8 @@ func begin(new_stage: String, entries: Array, opts: Array, new_row: String, done
 	var at: Array = []
 	var cs: Array = []
 	if new_row == "vr":
-		at = Deep.vr_spots(main.players[0].head.global_transform, entries.size())
+		row_head = main.players[0].head.global_transform
+		at = Deep.vr_spots(row_head, entries.size())
 	else:
 		cs = Deep.canvas_spots(entries.size())
 		for c in cs:
@@ -77,6 +80,7 @@ func begin(new_stage: String, entries: Array, opts: Array, new_row: String, done
 
 ## Every machine: the row of orbs ("" stage: none).
 func show_row(new_stage: String, entries: Array, at: Array, new_row: String, cs: Array = []) -> void:
+	_clear_rests()
 	if new_stage == "" or entries.is_empty() or at.size() < entries.size():
 		orbs.clear()
 		spots = []
@@ -92,7 +96,36 @@ func show_row(new_stage: String, entries: Array, at: Array, new_row: String, cs:
 	else:  # in front of the canvas, the names over the balls (the spot to rest a ring on is under each one)
 		orbs.show_orbs(new_stage, entries, at[0], 0.0, 0.0, {"at": at, "scale": Deep.CANVAS_SCALE, "pop": true, "font": 56,
 			"label_y": 1.25, "label_px": 0.0067, "two_lines": true, "bob": 0.006})
+		for i in mini(entries.size(), cs.size()):
+			_rest_ring((cs[i] as Vector3).x, (entries[i] as Dictionary).get("color", Color.WHITE))
 	main.pick_banner()
+
+
+## A ring on the canvas under an orb in its colour: rest your brush ring in it.
+func _rest_ring(x: float, col: Color) -> void:
+	var mi := MeshInstance3D.new()
+	mi.name = "RestRing"
+	var tm := TorusMesh.new()
+	tm.inner_radius = Deep.TV_R * 0.62
+	tm.outer_radius = Deep.TV_R * 0.72
+	tm.rings = 24
+	tm.ring_segments = 4
+	mi.mesh = tm
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = col
+	mi.material_override = m
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	main.canvas.board_root.add_child(mi)
+	mi.transform = Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(x, Deep.UNDER_Y, 0.01))
+	rests.append(mi)
+
+
+func _clear_rests() -> void:
+	for r in rests:
+		if is_instance_valid(r):
+			(r as Node).queue_free()
+	rests.clear()
 
 
 ## Orb i's middle in the world (bots aim there), INF if none.
@@ -125,12 +158,34 @@ func tick(delta: float) -> void:
 			_finish()
 		return
 	t += minf(delta, 0.1)  # (a loading hitch never eats the wait)
+	_follow_head()
 	var got := _pick(delta)
 	if got.size() == 2:
 		take(int(got[0]), int(got[1]))
 		return
 	if t > Deep.wait_for(stage, main.pick_nobody()):
 		take(options.size() / 2, -1)  # nobody took one: the middle one (it glows brightest)
+
+
+## Host, VR row: the artist moved a lot since the orbs popped up (the easel fit moves them at the start, a walk, a
+## turn): the row moves to stay an arm's reach in front of them (every machine gets the new places).
+func _follow_head() -> void:
+	if row != "vr" or main.players[0].head == null:
+		return
+	var h: Transform3D = main.players[0].head.global_transform
+	var f_now := (-h.basis.z).slide(Vector3.UP)
+	var f_was := (-row_head.basis.z).slide(Vector3.UP)
+	var turned := f_now.length() > 0.2 and f_was.length() > 0.2 and f_now.normalized().dot(f_was.normalized()) < 0.9
+	if h.origin.distance_to(row_head.origin) < 0.3 and not turned:
+		return
+	row_head = h
+	spots = Deep.vr_spots(h, spots.size())
+	for i in mini(spots.size(), orbs.orbs.size()):
+		if is_instance_valid(orbs.orbs[i]):
+			(orbs.orbs[i] as Node3D).global_position = spots[i]
+	inside = {}
+	dwell = {}
+	main.net.event("orbs", [stage, orbs.entries, spots, row, flat_spots])
 
 
 ## This frame's pick ([orb, slot] or []).
@@ -195,6 +250,7 @@ func _finish() -> void:
 	stage = ""
 	options = []
 	orbs.clear()
+	_clear_rests()
 	spots = []
 	flat_spots = []
 	row = ""

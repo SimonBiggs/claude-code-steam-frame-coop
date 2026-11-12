@@ -656,7 +656,7 @@ func _frame_views() -> void:
 		var sz := c.size
 		var aspect := sz.x / maxf(sz.y, 1.0)
 		_frame_camera(p.camera, aspect, p.index > 0)
-		var narrow := aspect < 1.2
+		var narrow := aspect < (1.75 if p.index == 0 else 1.2)  # (the artist's view also keeps the easel's bubbles: a Deck cut the board's scores off)
 		p.set_meta("narrow", narrow)
 		p.camera.cull_mask = (p.camera.cull_mask & ~BOARD_SCORE_LAYER) if narrow else (p.camera.cull_mask | BOARD_SCORE_LAYER)
 

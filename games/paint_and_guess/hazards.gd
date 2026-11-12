@@ -71,19 +71,24 @@ func show_now(hz: Dictionary) -> void:
 		return
 	seen[String(hz.kind)] = int(seen.get(String(hz.kind), 0)) + 1
 	var col := Deep.color_of(String(hz.kind))
+	var dim := col.darkened(Deep.TELL_DIM)  # the inside: a dim glow (never mistaken for paint) ...
 	var c := Vector2(float(hz.x), float(hz.y))
-	var n: Node3D
 	if String(hz.kind) == "wind":
 		var from := c - Vector2(float(hz.w), 0.0)
-		n = rings.shape("line", to_plane(from), Vector3.RIGHT, Vector2(float(hz.w) * 2.0, float(hz.h) * 2.0), col, 0.3,
-			{"style": "disc", "stay": STAY, "alpha": 0.42, "y": LIFT, "hot": col})
-		n.position = to_plane(from)
+		_flat("line", from, Vector3.RIGHT, Vector2(float(hz.w) * 2.0, float(hz.h) * 2.0), dim)
+		for s in [-1.0, 1.0]:  # ... with bright edges in the tell's own colour
+			_flat("line", from + Vector2(0.0, s * float(hz.h)), Vector3.RIGHT, Vector2(float(hz.w) * 2.0, Deep.TELL_EDGE), col)
 		main.sound("whoosh", -8.0, 0.6)
 	else:
-		n = rings.shape("circle", to_plane(c), Vector3.FORWARD, Vector2(float(hz.w), 0.0), col, 0.3,
-			{"style": "disc", "stay": STAY, "alpha": 0.42, "y": LIFT, "hot": col})
-		n.position = to_plane(c)
+		_flat("circle", c, Vector3.FORWARD, Vector2(float(hz.w), 0.0), dim, col)
 		main.sound("pop", -10.0, 0.5)
+
+
+## One steady tell shape flat on the canvas (core/warn_rings.gd; edge: the circle's ring colour).
+func _flat(kind: String, at: Vector2, dir: Vector3, size: Vector2, col: Color, edge: Color = Color(0, 0, 0, 0)) -> void:
+	var n := rings.shape(kind, to_plane(at), dir, size, edge if edge.a > 0.0 else col, 0.3,
+		{"style": "disc", "stay": STAY, "alpha": 0.42, "y": LIFT, "hot": col})
+	n.position = to_plane(at)
 
 
 func clear() -> void:
