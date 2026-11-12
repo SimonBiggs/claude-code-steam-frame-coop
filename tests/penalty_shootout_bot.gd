@@ -559,7 +559,15 @@ func _exit_tree() -> void:
 	# A whole round needs ~60 s after the practice (which repeats a missed ring); a shorter run (dev.bots.run's 60 s
 	# local, the solo VR host's BOT_END=62) must at least get a real penalty taken and decided (2026-11-12).
 	if BotEnd.short_run(90.0) and rounds_done == 0:
-		BotEnd.check(match_results >= 1, "a match penalty was taken and decided (short run: mode %s, t=%.0f, shots %d, results %s)" % [main.net.mode, t, shots_fired, str(results)])
+		# Kicks keep getting decided (no stall: about one every 8 s, practice included) and, when the run is long enough
+		# for the practice (the keeper's balls, then one ring kick per striker: ~35 s + 7 s a striker), a match penalty.
+		var decided := 0
+		for r in results:
+			decided += int(results[r]) if String(r) != "" else 0
+		BotEnd.check(decided >= 1 + int(t / 8.0), "kicks kept being decided (short run: mode %s, t=%.0f, results %s)" % [main.net.mode, t, str(results)])
+		var strikers: int = 1 if main.cpu else maxi(1, main.active_strikers().size())
+		if not BotEnd.short_run(35.0 + 7.0 * strikers + 8.0):
+			BotEnd.check(match_results >= 1, "a match penalty was taken and decided (short run: mode %s, t=%.0f, %d strikers, shots %d, results %s)" % [main.net.mode, t, strikers, shots_fired, str(results)])
 	else:
 		BotEnd.check(rounds_done >= 1, "a round of penalties was played (mode %s, t=%.0f, shots %d)" % [main.net.mode, t, shots_fired])
 	if not main.simple:
