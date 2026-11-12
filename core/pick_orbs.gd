@@ -39,6 +39,7 @@ const ALIASES := {"mega": "hard", "heroic": "hard", "zoom": "brave", "normal": "
 const MODE_LINES := {"gentle": "Gentle! Nice and easy!", "brave": "Brave! Let's go!", "hard": "HARD! Wow!"}
 const BALL_R := 0.6
 const HIT_R := 0.75
+const LABEL_OUTLINE := Color(0.05, 0.05, 0.1)  # every orb's name has this dark outline (palette.gd rims can say so)
 const TOUCH := 1.3
 const PIC_PX := 192
 
@@ -163,7 +164,7 @@ func show_orbs(new_stage: String, list: Array, origin: Vector3, gap: float = 2.6
 		l.outline_size = 14
 		l.pixel_size = float(_o("label_px", 0.005)) * sc
 		l.modulate = col.lightened(0.4)
-		l.outline_modulate = Color(0.05, 0.05, 0.1)
+		l.outline_modulate = LABEL_OUTLINE
 		l.billboard = BaseMaterial3D.BILLBOARD_ENABLED
 		l.position = Vector3(0, float(_o("label_y", -0.95)) * sc, 0)
 		o2.add_child(l)

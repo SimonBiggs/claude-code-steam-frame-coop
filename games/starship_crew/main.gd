@@ -19,6 +19,12 @@ extends Node3D
 ##   stick towards it (ghost_hand.gd); the gunners get one glowing rock that waits to be zapped.
 ## - Text: VR gets one short headline far out in front; the TV shows one short line at most.
 ## - Solo VR: a CPU gunner zaps now and then. Local play without a headset: a robot autopilot flies.
+## - SECOND PASS (deep.gd): GENTLE / BRAVE / HARD once a session and CAPTAIN WHISKERS' SHIP MODULES before every
+##   mission from the second of a seeded trip, both on big pick orbs in space ahead of the ship (picks.gd: the pilot
+##   steers onto one and holds it, a gunner zaps one); warned ROCK STREAMS and SOLAR FLARES told by steady shapes
+##   standing up in space (hazards.gd); seasonal STAR SECTORS (season.gd); CREW FRIENDS join and fly beside the ship
+##   (crew.gd). State: "deep" [mode, gift, season, crew], "hz" (the surprise showing); events "orbs" (sticky), "take",
+##   "banner", "zonehit".
 ## Modes as in games/engine_template: local (one shared TV view), host (VR on the Steam Frame,
 ## simulates everything), client (the TV machine: mirrors the host, sends its zaps to the host).
 
@@ -44,6 +50,12 @@ const Story := preload("res://games/starship_crew/story.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const Deep := preload("res://games/starship_crew/deep.gd")
+const PicksScript := preload("res://games/starship_crew/picks.gd")
+const HazardsScript := preload("res://games/starship_crew/hazards.gd")
+const SeasonScript := preload("res://games/starship_crew/season.gd")
+const CrewScript := preload("res://games/starship_crew/crew.gd")
 
 const GAME_ID := "starship_crew"
 const NEED := MissionGen.NEED  ## stars per mission
@@ -126,6 +138,27 @@ var stories_shown := 0  ## bots: story cards shown here
 var runs_logged := 0  ## bots: RUN lines written
 var demo_tilt := Vector2.ZERO
 
+# Second pass (deep.gd)
+var picks: Node  # picks.gd (host decides; every machine shows the orbs)
+var hazards: Node3D  # hazards.gd (every machine draws the "hz" state)
+var season_node: Node3D  # season.gd
+var crew_node: Node3D  # crew.gd
+var module: Node3D  # this mission's ship module, drawn on the ship
+var mode := "brave"  # every machine (from the "deep" state)
+var gift := ""  # every machine: this mission's module ("" none)
+var season := ""
+var mode_picked := false  # host: the mode was picked this session
+var gift_mission := -1  # host: the mission the module was picked for
+var hz_list: Array = []  # host: this lap's surprises (deep.gd hazards())
+var hz_i := 0
+var hz_now := {}
+var hz_hit := false
+var hz_count := 0  # this mission (RUN line)
+var hz_hits := 0
+var dizzy_t := 0.0  # host: seconds the ship steers slowly after a hit
+var zone_hits := 0  # bots: surprises that hit the ship (whole session)
+var surprises_seen := 0  # bots: surprises told (whole session)
+
 
 ## A gunner's crosshair: a ring in the player's colour.
 class Crosshair extends Control:
@@ -161,6 +194,7 @@ func _ready() -> void:
 	add_child(party)
 	party.player_joined.connect(_on_player_joined)
 	party.player_left.connect(_on_player_left)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
 	save = Save.new()
 	save.game_id = GAME_ID
 	save.defaults = Story.save_defaults()
@@ -210,6 +244,20 @@ func _setup(mode: String) -> void:
 	add_child(cockpit)
 	cockpit.setup(self, vr_rig)
 	_build_shield()
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
+	hazards = HazardsScript.new()
+	hazards.main = self
+	add_child(hazards)
+	season_node = SeasonScript.new()
+	season_node.name = "Season"
+	season_node.main = self
+	add_child(season_node)
+	crew_node = CrewScript.new()
+	crew_node.name = "Crew"
+	crew_node.main = self
+	add_child(crew_node)
 	if vr_rig != null:
 		ghost = GhostHand.new()
 		add_child(ghost)
@@ -239,6 +287,11 @@ func _setup(mode: String) -> void:
 		space.set_planet(Story.planet_look(int(net.state_get("planet", -1))))
 		space.station_parts = int(net.state_get("parts", 0))
 		cockpit.set_station(space.station_parts)
+		_on_state_changed("deep", net.state_get("deep", []))
+		_on_state_changed("hz", net.state_get("hz", []))
+		var orb_args: Variant = net.sticky_last("orbs")
+		if orb_args is Array and (orb_args as Array).size() >= 3:
+			apply_event("orbs", orb_args)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	ready_to_play = true
 	print("Starship Crew: %s mode%s" % [mode, " with a VR pilot" if vr_rig != null else ""])
@@ -292,6 +345,19 @@ func _start_show() -> void:
 	if OS.has_environment("SC_TRIPS"):
 		trip_no = int(OS.get_environment("SC_TRIPS")) + (int(get_meta("again", 0)) if has_meta("started") else 0)
 	daily_trip = trip_no > 0 and not (save.data.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
+	season = Seeded.season()
+	if OS.has_environment("SC_SEASON") and Deep.SEASONS.has(OS.get_environment("SC_SEASON")):
+		season = OS.get_environment("SC_SEASON")
+	if OS.has_environment("SC_MODE"):
+		mode = Deep.mode_of(OS.get_environment("SC_MODE"))
+		mode_picked = true
+	elif String(save.data.mode) != "":
+		mode = Deep.mode_of(String(save.data.mode))
+	gift = ""
+	gift_mission = -1
+	hz_now = {}
+	net.state_set("hz", [])
+	_send_deep()
 	trip_plan = Story.trip(trip_no, int(save.data.world), daily_trip)
 	var parts := Story.parts_for(trip_no)
 	net.state_set("parts", parts)
@@ -306,14 +372,26 @@ func _start_show() -> void:
 		_story(_captain(String(Story.LINES.daily), "star"))
 	else:
 		_story(_captain(Story.pick(story_rng, "new_trip")))
-	_go_mission(first)
+	if not has_meta("sector_told"):  # the season's star sector, once a session
+		set_meta("sector_told", true)
+		var sd := Deep.season_data(season)
+		get_tree().create_timer(4.0).timeout.connect(func() -> void:
+			if is_inside_tree():
+				_story(_captain(String(sd.line), String(sd.pic))))
+	_next_mission(first)
 
 
 func _go_mission(i: int) -> void:
 	mission_t = 0.0
 	var m: Dictionary = trip_plan[i]
 	lap = 0
-	plan = MissionGen.generate(int(m.s), String(m.k), int(m.tier), lap)
+	if trip_no < 1 or i != gift_mission:
+		gift = "" if not OS.has_environment("SC_GIFT") or trip_no < 1 else String(OS.get_environment("SC_GIFT"))
+	_send_deep()
+	plan = MissionGen.generate(int(m.s), String(m.k), Deep.tier(int(m.tier), mode, bool(m.get("daily", false)) or trip_no < 1), lap)
+	_plan_surprises()
+	hz_count = 0
+	hz_hits = 0
 	plan_t = 0.0
 	plan_i = 0
 	space.speed = float(plan.speed)
@@ -354,6 +432,16 @@ func _mission_done() -> void:
 		_story({"who": Story.CAPTAIN, "line": String(Story.LINES.planet) % pname, "pic": "planet", "color": look[0], "duration": 3.5})
 	if bool((trip_plan[m] as Dictionary).get("daily", false)):
 		(save.data.daily as Dictionary)[Seeded.today()] = true
+	var crew_before := Deep.crew(int(save.data.crew_xp))
+	save.data.crew_xp = int(save.data.crew_xp) + 1
+	if Deep.crew(int(save.data.crew_xp)) > crew_before:  # a new crew friend joins and flies beside the ship
+		var friend: Dictionary = Deep.CREW[crew_before]
+		get_tree().create_timer(3.8).timeout.connect(func() -> void:
+			if is_inside_tree():
+				_story({"who": Story.CAPTAIN, "line": "%s joins the crew!" % String(friend.name), "pic": String(friend.pic), "color": friend.color, "duration": 3.5}))  # who-ok: a story crew friend, not a player
+	_clear_surprise()
+	gift = ""
+	_send_deep()
 	save.mark_dirty()
 	net.state_set("missions", m + 1)
 	if m + 1 >= MISSIONS:
@@ -416,15 +504,20 @@ func _host_step(delta: float) -> void:
 		cockpit.steer = cockpit.steer.lerp(want, 1.0 - exp(-6.0 * delta))
 	if phase == "dock" or phase == "results":
 		want = Vector2.ZERO
-	vel = vel.move_toward(want * STEER_SPEED, 9.0 * delta)
+	dizzy_t = maxf(0.0, dizzy_t - delta)
+	var steer_speed := Deep.steer_speed(gift) * (0.5 if dizzy_t > 0.0 else 1.0)  # (TURBO: faster; a hit: dizzy)
+	vel = vel.move_toward(want * steer_speed, Deep.accel(gift) * delta)
 	space.off += vel * delta
+	if phase == "pick":  # a lined-up orb gently holds the ship (picks.gd)
+		space.off += picks.hold_pull() * minf(1.0, Deep.ORB_PULL * delta)
 	# Rings gently pull the ship in when it's close (kids get them more often).
 	var rid := space.next_ring()
 	if rid >= 0:
 		var rp: Vector3 = space.objs[rid]["p"]
 		var to := Vector2(rp.x, rp.y) - space.off
-		if rp.z > -25.0 and to.length() < 4.5 and not bool(space.objs[rid]["held"]):  # not the practice ring
-			space.off += to * minf(1.0, 0.9 * delta)
+		if rp.z > Deep.pull_z(gift) and to.length() < Deep.pull_r(gift) and not bool(space.objs[rid]["held"]) \
+				and (hz_now.is_empty() or not Deep.inside(hz_now, Vector2(rp.x, rp.y))):  # not the practice ring, never into a surprise
+			space.off += to * minf(1.0, Deep.pull(gift) * delta)
 	if station >= 0 and space.objs.has(station):
 		var sp: Vector3 = space.objs[station]["p"]
 		space.off = space.off.lerp(Vector2(sp.x, sp.y), minf(1.0, 0.7 * delta))
@@ -438,13 +531,16 @@ func _host_step(delta: float) -> void:
 	mission_t += delta
 	if phase == "play":
 		_spawn(mission, delta)
+		_tick_surprises()
 		_cpu_crew(delta)
 		if int(net.state_get("stars", 0)) >= NEED:
 			_mission_done()
 	elif phase == "cheer":
 		phase_t += delta
 		if phase_t > 4.0:
-			_go_mission(mission + 1)
+			_next_mission(mission + 1)
+	elif phase == "pick":
+		picks.tick(delta)
 	elif phase == "dock":
 		_cpu_crew(delta)
 	elif phase == "results":
@@ -454,6 +550,10 @@ func _host_step(delta: float) -> void:
 
 
 func _autopilot() -> Vector2:
+	if not hz_now.is_empty():  # a surprise is told: slide out of it first
+		var safe := Deep.escape(hz_now, space.off)
+		if safe != Vector2.INF and safe != space.off:
+			return ((safe - space.off) / 0.8).limit_length(1.0)
 	var rid := prac_ring if space.objs.has(prac_ring) else space.next_ring()
 	if rid >= 0:
 		var rp: Vector3 = space.objs[rid]["p"]
@@ -475,6 +575,7 @@ func _spawn(mission: int, delta: float) -> void:
 		plan = MissionGen.generate(int(plan.seed), String(plan.kind), int(plan.tier), lap)
 		plan_t -= float(plan.len)
 		plan_i = 0
+		_plan_surprises()
 
 
 ## One thing from the mission's timeline: rings at their place on the path; rocks and aliens near the ship.
@@ -522,7 +623,7 @@ func _space_event(e: Array) -> void:
 					prac_ring = -1
 					net.state_set("practice", int(net.state_get("practice", 0)) | 1)
 					show_headline("YES!")
-				_add_stars(2, p + Vector3(0, 0, -3), 0)
+				_add_stars(2 + Deep.extra_star(gift), p + Vector3(0, 0, -3), 0)
 			else:
 				sound_at("whoosh", p, -12.0, 0.8)
 				tel.missed = int(tel.get("missed", 0)) + 1
@@ -572,6 +673,14 @@ static func screen_ray(uv: Vector2) -> Vector3:
 
 ## Host: a gunner (slot, or -1 = the CPU gunner) zaps at a point on the TV screen. Generous aim.
 func zap(slot: int, uv: Vector2) -> void:
+	if picks != null and picks.active():  # the orbs are up: a zap only picks (never a stray rock)
+		if picks.zap_at(slot, uv):
+			var c0: Color = CPU_COLOR if slot < 0 else party.color_of(slot)
+			var f0: Vector3 = Art.TURRETS[0 if uv.x < 0.0 else 1]
+			var t0 := CAM_POS + screen_ray(uv) * 25.0
+			laser(f0, t0, c0)
+			net.event("laser", [f0, t0, c0])
+		return
 	var best := -1
 	var best_s := INF
 	var t := tan(deg_to_rad(CAM_FOV) * 0.5)
@@ -582,7 +691,7 @@ func zap(slot: int, uv: Vector2) -> void:
 			continue
 		var s := project(w)
 		var d := Vector2((s.x - uv.x) * ASPECT, s.y - uv.y).length()
-		var tol := 0.14 + float(space.objs[id]["r"]) / (-q.z * t)
+		var tol := Deep.zap_tol(gift) + float(space.objs[id]["r"]) / (-q.z * t)  # (MEGA LASER: much easier)
 		if d < tol and d - tol < best_s:
 			best_s = d - tol
 			best = id
@@ -621,7 +730,7 @@ func _pop(id: int, slot: int, col: Color) -> void:
 	if id == prac_rock:
 		prac_rock = -1
 		net.state_set("practice", int(net.state_get("practice", 0)) | 2)
-	_add_stars(2 if kind == Space.UFO else 1, w, slot)
+	_add_stars((2 if kind == Space.UFO else 1) + Deep.extra_star(gift), w, slot)
 
 
 func _add_stars(n: int, from: Vector3, slot: int) -> void:
@@ -666,7 +775,7 @@ func _pulse_both(a: float, d: float) -> void:
 func on_request(slot: int, action: String, args: Array) -> void:
 	match action:
 		"zap":
-			if args.size() >= 2 and String(net.state_get("phase", "")) in ["play", "dock", "cheer"]:
+			if args.size() >= 2 and String(net.state_get("phase", "")) in ["play", "dock", "cheer", "pick"]:
 				zap(slot, Vector2(float(args[0]), float(args[1])))
 		"again":
 			if String(net.state_get("phase", "")) == "results":
@@ -686,13 +795,16 @@ func _process(delta: float) -> void:
 		cockpit.steer = demo_tilt
 	cockpit.animate(delta)
 	space.animate(delta)
+	if picks != null:
+		picks.follow()
 	cockpit.set_progress(int(net.state_get("stars", 0)), int(net.state_get("missions", 0)))
 	if String(net.state_get("phase", "")) == "play":
 		space.planet_near = float(net.state_get("stars", 0)) / float(NEED)
 	_headline(delta)
-	if shield.visible:
+	if shield.visible or gift == "shield":
 		var c: Color = shield_mat.get_shader_parameter("col")
-		c.a = maxf(0.0, c.a - delta * 1.5)
+		var floor_a := 0.22 if gift == "shield" else 0.0  # (BUBBLE SHIELD: a steady faint bubble all mission)
+		c.a = maxf(floor_a, c.a - delta * 1.5)
 		shield_mat.set_shader_parameter("col", c)
 		shield.visible = c.a > 0.0
 	if split != null:
@@ -728,7 +840,7 @@ func _ghost(delta: float) -> void:
 
 ## TV: each local gunner moves a crosshair with the left stick and zaps with A.
 func _gunners(delta: float) -> void:
-	var playing := String(net.state_get("phase", "")) in ["play", "dock", "cheer"]
+	var playing := String(net.state_get("phase", "")) in ["play", "dock", "cheer", "pick"]
 	for slot in party.local_slots():
 		if not cross.has(slot):
 			_add_cross(slot)
@@ -830,7 +942,8 @@ func laser(from: Vector3, to: Vector3, col: Color) -> void:
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
 	var ln := from.distance_to(to)
-	mi.global_transform = Transform3D(UiKit.face(to - from).scaled(Vector3(1.0, 1.0, ln)), from)
+	var thick := 2.2 if gift == "mega" else 1.0  # (MEGA LASER: a fat beam)
+	mi.global_transform = Transform3D(UiKit.face(to - from).scaled(Vector3(thick, thick, ln)), from)
 	var tw := mi.create_tween()
 	tw.tween_property(mi, "scale", Vector3(0.05, 0.05, ln), 0.2)
 	tw.tween_callback(mi.queue_free)
@@ -1040,6 +1153,29 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			_refresh_hud()
 		"planet":
 			space.set_planet(Story.planet_look(int(value)))
+		"deep":
+			var dv: Array = value if value is Array else []
+			if dv.size() >= 4:
+				mode = Deep.mode_of(String(dv[0]))
+				var new_gift := String(dv[1])
+				season = String(dv[2])
+				if season_node != null and season != "":
+					season_node.set_season(season)
+				if crew_node != null:
+					crew_node.set_count(int(dv[3]), true)
+				if new_gift != gift:
+					gift = new_gift
+					_set_module(gift)
+					if gift != "":
+						var gd := Deep.gift(gift)
+						_banner(String(gd.name), "victory")
+		"hz":
+			var hz := Deep.unpack(value if value is Array else [])
+			if hazards != null:
+				hazards.show_now(hz)
+			if not hz.is_empty():
+				surprises_seen += 1
+				_banner(String(Deep.KIND_NAMES[String(hz.kind)]), "warning")
 		"parts":
 			space.station_parts = int(value)
 			cockpit.set_station(int(value))
@@ -1064,6 +1200,9 @@ func _on_state_changed(key: String, value: Variant) -> void:
 				"cheer":
 					music.play_mood("victory")
 					show_headline("HOORAY!")
+				"pick":
+					if headline != null:
+						headline.visible = false  # (the pick banner and the orbs say it)
 				"dock":
 					music.play_mood("victory")
 					show_headline("HOME!")
@@ -1173,6 +1312,19 @@ func apply_event(kind: String, args: Array) -> void:
 			toy_fx(String(args[0]))
 		"bump":
 			_bump_fx()
+		"zonehit":
+			_zone_fx(String(args[0]))
+		"orbs":
+			if picks != null:
+				var sp: Array = []
+				for v in (args[2] if args.size() > 2 else []):
+					sp.append(v)
+				picks.show_row(String(args[0]), args[1] if args.size() > 1 else [], sp)
+		"take":
+			if picks != null:
+				picks.take_fx(int(args[0]), int(args[1]))
+		"banner":
+			_banner(String(args[0]), String(args[1]))
 		"story":
 			show_story({"who": String(args[0]), "line": String(args[1]), "pic": String(args[2]),
 				"color": Color.from_string(String(args[3]), Story.CAPTAIN_COLOR), "duration": 3.5})
@@ -1210,7 +1362,9 @@ func _telemetry(end: String) -> void:
 	var info := tel.duplicate()
 	info.merge({"end": end, "trip": trip_no, "mission": mi, "kind": String(m.k), "tier": int(m.tier), "seed": int(m.s),
 		"daily": bool(m.get("daily", false)), "secs": snappedf(mission_t, 0.1), "laps": lap, "stars": int(net.state_get("stars", 0)),
-		"crew": _crew_slots().size(), "vr": vr_rig != null, "mode": String(net.mode), "planets": (save.data.planets as Array).size()})
+		"crew": _crew_slots().size(), "vr": vr_rig != null,
+		"difficulty": mode, "gift": gift, "season": season, "surprises": hz_count, "hits": hz_hits,
+		"friends": Deep.crew(int(save.data.crew_xp)), "picks": picks.history.size() if picks != null else 0, "mode": String(net.mode), "planets": (save.data.planets as Array).size()})
 	Telemetry.run(GAME_ID, info)
 	runs_logged += 1
 	tel = {}
@@ -1219,3 +1373,219 @@ func _telemetry(end: String) -> void:
 func _exit_tree() -> void:
 	if net != null and net.mode != "client" and String(net.state_get("phase", "")) == "play":
 		_telemetry("quit")
+
+
+# --- Second pass: picks, surprises, modules, crew (deep.gd, picks.gd, hazards.gd, crew.gd) ---------------------
+
+## Host: the mode, the module, the season and the crew for every machine.
+func _send_deep() -> void:
+	var friends := Deep.crew(int(save.data.crew_xp))
+	if OS.has_environment("SC_CREW"):  # (tests / screenshots: show this many friends, never saved)
+		friends = clampi(int(OS.get_environment("SC_CREW")), 0, Deep.CREW.size())
+	net.state_set("deep", [mode, gift, season, friends])
+
+
+## Nobody here could take a pick (no pilot, no gunner): the middle comes sooner.
+func pick_nobody() -> bool:
+	return vr_rig == null and _crew_slots().is_empty()
+
+
+## Host: the next mission, after the mode pick (once a session, from the first seeded trip) or a module pick (every
+## mission from the second of a seeded trip).
+func _next_mission(i: int) -> void:
+	if trip_no >= 1 and not mode_picked:
+		_start_pick("mode", i)
+	elif trip_no >= 1 and i >= 1 and gift_mission != i and not OS.has_environment("SC_GIFT"):
+		_start_pick("gift", i)
+	else:
+		_go_mission(i)
+
+
+func _start_pick(stage: String, mission: int) -> void:
+	var entries: Array = []
+	var opts: Array = []
+	if stage == "mode":
+		opts = PickOrbs.mode_ids(Deep.mode_of(String(save.data.mode)) if String(save.data.mode) != "" else "brave")
+		for id in opts:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
+		_story(_captain("Easy or tricky?"))
+	else:
+		opts = Deep.gift_choices(Story.parts_for(trip_no), String(save.data.last_gift),
+			Seeded.derive(int(save.data.world), "gift%d/%d" % [trip_no, mission]))
+		for id in opts:
+			var gd := Deep.gift(String(id))
+			entries.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
+		_story(_captain("A new ship part!", "gift"))
+	_clear_surprise()
+	net.state_set("mission", mission)
+	net.state_set("phase", "pick")
+	net.state_set("stars", 0)
+	_banner_all("PICK ONE!", "default")
+	picks.begin(stage, entries, opts, func(st: String, opt: Variant, slot: int) -> void: _on_picked(st, opt, slot, mission))
+	sound_at("power_up", Vector3(0, 1.2, -4), -8.0, 1.3)
+
+
+## Host: the crew picked (or the middle one was taken for them).
+func _on_picked(stage: String, opt: Variant, _slot: int, mission: int) -> void:
+	if stage == "mode":
+		mode_picked = true
+		mode = Deep.mode_of(String(opt))
+		save.data.mode = mode
+		_story({"who": Story.CAPTAIN, "line": String(PickOrbs.MODE_LINES.get(mode, "Let's go!")), "pic": String(PickOrbs.mode(mode).pic),
+			"color": PickOrbs.mode_color(mode), "duration": 3.0})
+		_banner_all(PickOrbs.mode_name(mode), "victory")
+		_send_deep()
+	else:
+		gift = String(opt)
+		gift_mission = mission
+		save.data.last_gift = gift
+	save.mark_dirty()
+	print("Picked %s: %s" % [stage, str(opt)])
+	_next_mission(mission)
+
+
+## Host: this lap's surprises.
+func _plan_surprises() -> void:
+	var spec := {"mode": mode, "season": season, "trip": trip_no}
+	if OS.has_environment("SC_SURPRISES_NOW"):
+		spec["trip"] = maxi(1, trip_no)
+		if lap == 0:
+			spec["first"] = Deep.SHORT_FIRST
+	hz_list = Deep.hazards(plan, spec)
+	hz_i = 0
+	_clear_surprise()
+	if not hz_list.is_empty():
+		print("Starship Crew surprises: %s mode, %s, module %s, lap %d: %s" % [mode, season, gift if gift != "" else "none", lap,
+			str(hz_list.map(func(e: Dictionary) -> String: return "%s@%.0f" % [e.kind, float(e.t)]))])
+
+
+## Host, every frame of a mission: tell the next surprise, set it off (did it catch the ship?), clear it.
+func _tick_surprises() -> void:
+	if hz_now.is_empty():
+		if hz_i < hz_list.size() and plan_t >= float((hz_list[hz_i] as Dictionary).t):
+			hz_now = hz_list[hz_i]
+			hz_i += 1
+			hz_hit = false
+			hz_count += 1
+			net.state_set("hz", Deep.pack(hz_now))
+		return
+	var since := plan_t - float(hz_now.t)
+	if since >= float(hz_now.warn) and not hz_hit and Deep.inside(hz_now, space.off):
+		hz_hit = true
+		hz_hits += 1
+		zone_hits += 1
+		_zone_hit(String(hz_now.kind))
+	if since >= Deep.span(hz_now):
+		_clear_surprise()
+
+
+func _clear_surprise() -> void:
+	hz_now = {}
+	hz_hit = false
+	if net != null and not (net.state_get("hz", []) as Array).is_empty():
+		net.state_set("hz", [])
+
+
+## Host: a surprise caught the ship: a wobble, maybe a star off (BRAVE / HARD) and a dizzy ship (never with the shield).
+func _zone_hit(kind: String) -> void:
+	var lose := Deep.lose(mode, gift)
+	if lose > 0 and String(net.state_get("phase", "")) == "play":
+		net.state_set("stars", maxi(0, int(net.state_get("stars", 0)) - lose))
+	dizzy_t = Deep.dizzy(mode, gift)
+	sound_at("bounce" if kind == "stream" else "whoosh", Vector3(0, Space.SHIP_Y, -1.0), -2.0, 0.7)
+	_pulse_both(0.7, 0.2)
+	_zone_fx(kind)
+	net.event("zonehit", [kind])
+
+
+## Every machine: the shield flashes in the surprise's colour and the view shakes.
+func _zone_fx(kind: String) -> void:
+	shield.visible = true
+	var c := HazardsScript.color_of(kind)
+	shield_mat.set_shader_parameter("col", Color(c.r, c.g, c.b, 0.7))
+	shake = 1.2
+
+
+## Every machine: this mission's ship module, drawn on the ship (the shield is the bubble itself).
+func _set_module(g: String) -> void:
+	if module != null and is_instance_valid(module):
+		module.queue_free()
+	module = null
+	if g == "":
+		return
+	module = Node3D.new()
+	module.name = "Module"
+	var col: Color = Deep.gift(g).get("color", Color.WHITE)
+	match g:
+		"turbo":  # two big orange flames from the engines
+			for s in [-1.0, 1.0]:
+				var f := MeshInstance3D.new()
+				var cm := CylinderMesh.new()
+				cm.top_radius = 0.0
+				cm.bottom_radius = 0.36
+				cm.height = 1.8
+				cm.radial_segments = 12
+				f.mesh = cm
+				f.material_override = _glow_mat(col, 0.8)
+				f.rotation = Vector3(-PI * 0.5, 0, 0)
+				f.position = Vector3(s * 1.0, -0.4, 5.95)
+				f.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				module.add_child(f)
+		"tractor":  # a soft green beam out of the nose
+			var bm := MeshInstance3D.new()
+			var cm2 := CylinderMesh.new()
+			cm2.top_radius = 0.3
+			cm2.bottom_radius = 2.4
+			cm2.height = 10.0
+			cm2.radial_segments = 16
+			cm2.cap_top = false
+			cm2.cap_bottom = false
+			bm.mesh = cm2
+			bm.material_override = _glow_mat(col, 0.16)
+			bm.rotation = Vector3(-PI * 0.5, 0, 0)
+			bm.position = Vector3(0, -0.15, -10.2)
+			bm.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			module.add_child(bm)
+		"mega", "boost":  # glowing tips on the wing turrets
+			for tp in Art.TURRETS:
+				var ball := MeshInstance3D.new()
+				var sm := SphereMesh.new()
+				sm.radius = 0.32
+				sm.height = 0.64
+				sm.radial_segments = 12
+				sm.rings = 6
+				ball.mesh = sm
+				ball.material_override = _glow_mat(col, 0.9)
+				ball.position = (tp as Vector3) + Vector3(0, 0, -0.6)
+				ball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+				module.add_child(ball)
+	add_child(module)
+
+
+func _glow_mat(col: Color, alpha: float) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	m.albedo_color = Color(col.r, col.g, col.b, alpha)
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	if alpha < 1.0:
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards
+	return m
+
+
+## A banner on this machine: the TV / Deck HUD and the VR card (it moves clear of the pick orbs).
+func _banner(title: String, style: String = "default") -> void:
+	if hud != null:
+		HudKit.banner([hud], title, "", {"duration": 2.2, "style": style})
+	if vr_rig != null:
+		if headline != null:
+			headline.visible = false
+		HudKit.vr_banner(self, vr_rig.camera, title, "", {"duration": 2.2, "sound": "", "distance": 2.4, "style": style})
+
+
+## Host: a banner on every machine (one that doesn't come from a state change).
+func _banner_all(title: String, style: String) -> void:
+	_banner(title, style)
+	if net.mode == "host":
+		net.event("banner", [title, style])
