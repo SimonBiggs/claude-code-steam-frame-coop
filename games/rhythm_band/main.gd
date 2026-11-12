@@ -2128,8 +2128,8 @@ func _start_fan_club() -> void:
 	_send_fans()
 	season = SeasonKit.override("rhythm_band", Seeded.season(Seeded.today()), Deep.SEASONS)
 	season_node.set_season(season)
-	if OS.has_environment("RB_MODE"):  # tests / What's New "try": this mode (the pick's middle orb too)
-		save.data.mode = Deep.mode_of(OS.get_environment("RB_MODE"))
+	if net.forced_mode("RB_MODE") != "":  # tests / What's New "try": this mode (the pick's middle orb too)
+		save.data.mode = Deep.mode_of(net.forced_mode("RB_MODE"))
 	if String(save.data.mode) != "":
 		mode = Deep.mode_of(String(save.data.mode))
 	net.state_set("mode", mode)  # (the TV machines play at it even before the pick)

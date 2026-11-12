@@ -2336,8 +2336,8 @@ func _update_perk_labels() -> void:
 ## Host / local: the mode stones closed: the team's mode (most picked; a tie stays gentler), then the masters.
 func _mode_chosen() -> void:
 	team_mode = Deep.team_mode(mode_picks, String(save.data.get("mode", "brave")))
-	if OS.has_environment("EB_MODE"):
-		team_mode = Deep.mode_id(OS.get_environment("EB_MODE"))
+	if net.forced_mode("EB_MODE") != "":
+		team_mode = Deep.mode_id(net.forced_mode("EB_MODE"))
 	log_mode = team_mode
 	save.data["mode"] = team_mode
 	save.mark_dirty()

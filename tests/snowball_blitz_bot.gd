@@ -1,4 +1,5 @@
 extends Node
+const BotKit := preload("res://tests/bot_kit.gd")
 ## Headless bot for Snowball Blitz. The first local player snipes the nearest snowman with charged
 ## lobs; the second local player packs the most damaged fort wall (and throws when the fort is fine).
 ## On the client it also wakes player 3 by "pressing" throw.
@@ -566,7 +567,7 @@ func _check_siege() -> void:
 		_bot_check(saw.has("gifts") or main.wave < 3, "the TV machine got everyone's gifts")
 		return
 	_bot_check(main.game_mode in ["gentle", "brave", "hard"], "a mode (%s)" % main.game_mode)
-	_bot_check(Engine.has_meta("sb_mode_set") or OS.has_environment("SB_MODE"), "the MODE pick happened")
+	_bot_check(Engine.has_meta("sb_mode_set") or BotKit.mode_forced(main.net, "SB_MODE"), "the MODE pick happened")
 	var no_gift_wave: bool = not saw.has("gift_pick") and (main.wave < 3 or OS.has_environment("BOT_WAVE"))  # (a skip to the finale: victory, no gifts)
 	_bot_check(not main.gifts_taken.is_empty() or no_gift_wave, "Bobo's gifts were picked (%s)" % main.gifts_taken)
 	var boss_wave: bool = OS.has_environment("BOT_WAVE") and int(OS.get_environment("BOT_WAVE")) in [7, 10]

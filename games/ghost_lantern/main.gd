@@ -297,8 +297,8 @@ func _ready() -> void:
 	game_mode = String(PickOrbs.ALIASES.get(String(save.data.mode), String(save.data.mode)))
 	if not game_mode in PickOrbs.MODE_IDS:
 		game_mode = "gentle"
-	if OS.has_environment("GL_MODE") and String(OS.get_environment("GL_MODE")) in PickOrbs.MODE_IDS:
-		game_mode = OS.get_environment("GL_MODE")  # (What's New "try" / bots: no mode pick)
+	if net.forced_mode("GL_MODE") != "" and String(net.forced_mode("GL_MODE")) in PickOrbs.MODE_IDS:
+		game_mode = net.forced_mode("GL_MODE")  # (What's New "try" / bots: no mode pick)
 		mode_picked = true
 	seats = ClassicSeats.new(self, {
 		"no_keys": 2,  # player.gd key_set 2: controller only

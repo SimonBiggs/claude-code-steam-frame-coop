@@ -335,7 +335,7 @@ func _deep_checks(mode: String) -> void:
 	if mode == "client":
 		return
 	var stages: Array = main.picks.history.map(func(h: Array) -> String: return String(h[0]))
-	var forced := OS.has_environment("OR_MODE")  # (OR_MODE skips the mode pick: a networked run at the host's HARD)
+	var forced := BotKit.mode_forced(main.net, "OR_MODE")  # (OR_MODE skips the mode pick: a networked run at the host's HARD)
 	kit.assert_true(forced or stages.has("mode"), "%s: the mode was picked %s" % [mode, str(main.picks.history)])
 	if not short:
 		kit.assert_true(stages.has("gift"), "%s: a gift was picked before a later course %s" % [mode, str(main.picks.history)])

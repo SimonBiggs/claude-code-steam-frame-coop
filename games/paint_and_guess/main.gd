@@ -2735,8 +2735,8 @@ func _setup_deep() -> void:
 func _begin_deep() -> void:
 	season = SeasonKit.override("paint_and_guess", Seeded.season(), Deep.SEASONS)
 	play_mode = Deep.mode_of(str(save.data.get("mode", "brave")))
-	if OS.has_environment("PG_MODE"):  # (What's New "try" / bots: straight in)
-		play_mode = Deep.mode_of(OS.get_environment("PG_MODE"))
+	if net.forced_mode("PG_MODE") != "":  # (What's New "try" / bots: straight in)
+		play_mode = Deep.mode_of(net.forced_mode("PG_MODE"))
 		mode_picked = true
 	bot_tricks = OS.has_environment("PG_TRICKS_NOW")
 	if OS.has_environment("PG_GIFT") and not Deep.gift(OS.get_environment("PG_GIFT")).is_empty():

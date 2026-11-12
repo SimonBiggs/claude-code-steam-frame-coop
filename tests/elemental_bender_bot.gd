@@ -441,8 +441,8 @@ func _checks() -> void:
 				kit.assert_true(main.log_tells >= 1, "%s: the island boss told its attacks (%d)" % [mode, main.log_tells])
 		if max_wave >= 1:
 			kit.assert_true(main.log_mode != "", "%s: the team picked a mode on the altar (%s)" % [mode, main.log_mode])
-			if OS.has_environment("EB_MODE"):
-				kit.assert_eq(main.team_mode, main.Deep.mode_id(OS.get_environment("EB_MODE")), "%s: the mode is %s" % [mode, OS.get_environment("EB_MODE")])
+			if BotKit.mode_forced(main.net, "EB_MODE"):
+				kit.assert_eq(main.team_mode, main.Deep.mode_id(BotKit.forced_mode(main.net, "EB_MODE")), "%s: the mode is %s" % [mode, BotKit.forced_mode(main.net, "EB_MODE")])
 		if main.log_runs >= 1:
 			# Only this run's RUN lines (its temple seed, written since the bot started): never an older run's.
 			var mine := Telemetry.read("elemental_bender").filter(func(r: Dictionary) -> bool:

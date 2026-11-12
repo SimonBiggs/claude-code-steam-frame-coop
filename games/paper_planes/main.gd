@@ -1627,8 +1627,8 @@ func _next_pick() -> void:
 func _on_picked(stage: String, opt: Variant, slot: int) -> void:
 	if stage == "mode":
 		play_mode = Deep.mode_of(String(opt))
-		if OS.has_environment("PP_MODE"):  # tests: this mode
-			play_mode = Deep.mode_of(OS.get_environment("PP_MODE"))
+		if net.forced_mode("PP_MODE") != "":  # tests: this mode
+			play_mode = Deep.mode_of(net.forced_mode("PP_MODE"))
 		mode_picked = true
 		save.data["mode"] = play_mode
 		save.mark_dirty()

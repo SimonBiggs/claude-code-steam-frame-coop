@@ -2725,8 +2725,8 @@ func _log_run(end: String) -> void:
 func _begin_deep() -> void:
 	season = SeasonKit.override("giants_table", Seeded.season(), Deep.SEASONS)
 	mode = Deep.mode_of(String(Engine.get_meta("gt_mode", save.data.mode if String(save.data.mode) != "" else "brave")))
-	if OS.has_environment("GT_MODE"):
-		mode = Deep.mode_of(OS.get_environment("GT_MODE"))
+	if net.forced_mode("GT_MODE") != "":
+		mode = Deep.mode_of(net.forced_mode("GT_MODE"))
 		Engine.set_meta("gt_mode_picked", true)  # (What's New "try" / bots: straight in)
 	if OS.has_environment("GT_GIFT") and not Deep.gift(OS.get_environment("GT_GIFT")).is_empty():
 		gift = OS.get_environment("GT_GIFT")  # (What's New "try": the first wave with that gift)

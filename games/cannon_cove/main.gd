@@ -3664,8 +3664,8 @@ func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
 	match stage:
 		"mode":
 			play_mode = Deep.mode_of(String(opt))
-			if OS.has_environment("CC_MODE"):  # tests: this mode
-				play_mode = Deep.mode_of(OS.get_environment("CC_MODE"))
+			if net.forced_mode("CC_MODE") != "":  # tests: this mode
+				play_mode = Deep.mode_of(net.forced_mode("CC_MODE"))
 			if save != null:
 				save.data.mode = play_mode
 				save.mark_dirty()

@@ -47,7 +47,10 @@ var thrown := false
 var outside := 0
 var brain: DeepBot
 var pad := OS.get_environment("BOT_PAD") if OS.has_environment("BOT_PAD") else ""  ## walk onto this lobby pad
-var deep_mode := OS.get_environment("DD_MODE") if OS.has_environment("DD_MODE") else pad
+## The deep run: DD_MODE on the host (a TV machine learns it from the host's net state), else the lobby pad walked onto.
+var deep_mode: String:
+	get:
+		return BotKit.forced_mode(main.net, "DD_MODE") if main != null and BotKit.mode_forced(main.net, "DD_MODE") else pad
 var goal := OS.get_environment("BOT_GOAL") if OS.has_environment("BOT_GOAL") else ""
 var off_floor := 0
 var max_foes := 0

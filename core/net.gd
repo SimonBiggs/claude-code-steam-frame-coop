@@ -510,6 +510,23 @@ func state_has(key: String) -> bool:
 	return _state.has(key)
 
 
+const FORCED_MODE_KEY := "mode_forced"
+
+## A mode forced by an env setting (DB_MODE=hard, DD_MODE=heroic...: bots, launchers, the arcade's What's New "try"):
+## the game skips its mode pick. Host / local: the env value ("" when unset), shared as net state "mode_forced" so
+## every machine agrees. TV machine: always the host's (its own env is ignored), so a forced mode is set on the HOST
+## only (2026-11-12: Dungeon Delve needed DD_MODE on both machines; bots failed "mode picked" checks on forced modes).
+## Bots ask the same thing with BotKit.mode_forced(net, key). tests/forced_mode_test.gd fails games and bots that
+## read a *_MODE env directly.
+func forced_mode(env_key: String) -> String:
+	if mode == "client":
+		return String(_state.get(FORCED_MODE_KEY, ""))
+	var v := OS.get_environment(env_key)
+	if v != "":
+		state_set(FORCED_MODE_KEY, v)
+	return v
+
+
 ## Any machine: a copy of the whole store (for debugging or a late UI build).
 func state_all() -> Dictionary:
 	return _state.duplicate(true)

@@ -363,7 +363,7 @@ func _deep_checks(mode: String) -> void:
 			kit.assert_true(int(deep.get("told_" + kind, 0)) > 0, "%s: a %s happened with a tell" % [mode, kind])
 	if mode == "client":
 		return
-	kit.assert_true(deep.has("pick_mode") or OS.has_environment("MGP_MODE"), "%s: the mode was picked on the pick green %s" % [mode, str(deep)])
+	kit.assert_true(deep.has("pick_mode") or BotKit.mode_forced(main.net, "MGP_MODE"), "%s: the mode was picked on the pick green %s" % [mode, str(deep)])
 	if kit.seen("hole", 1) > 0 or kit.seen("hole", 2) > 0:
 		kit.assert_true(deep.has("pick_gift") or OS.has_environment("MGP_GIFT"), "%s: Gus's gift was picked after the practice putt" % mode)
 	if main.vr_rig != null and kit.tv_players() == 0 and main.party.local_slots().is_empty():

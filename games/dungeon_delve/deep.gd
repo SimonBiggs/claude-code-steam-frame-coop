@@ -615,7 +615,7 @@ func progress() -> Dictionary:
 
 ## HEROIC opens once the Slime King is beaten on BRAVE (kids kept stumbling onto it and losing in a minute).
 func heroic_unlocked() -> bool:
-	if OS.has_environment("DD_MODE"):
+	if net.forced_mode("DD_MODE") != "":
 		return true
 	return _bosses_beaten() & 1 != 0
 

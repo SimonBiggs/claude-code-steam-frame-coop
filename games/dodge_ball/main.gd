@@ -1591,8 +1591,8 @@ func _setup_deep() -> void:
 func _begin_deep() -> void:
 	season = SeasonKit.override("dodge_ball", Seeded.season(), Deep.SEASONS)
 	mode = Deep.mode_of(String(save.data.mode) if String(save.data.mode) != "" else "brave")
-	if OS.has_environment("DB_MODE"):  # (What's New "try" / bots: straight in)
-		mode = Deep.mode_of(OS.get_environment("DB_MODE"))
+	if net.forced_mode("DB_MODE") != "":  # (What's New "try" / bots: straight in)
+		mode = Deep.mode_of(net.forced_mode("DB_MODE"))
 		mode_picked = true
 	if OS.has_environment("DB_GIFT") and not Deep.gift(OS.get_environment("DB_GIFT")).is_empty():
 		gift = OS.get_environment("DB_GIFT")  # (What's New "try": the first round with that gift)

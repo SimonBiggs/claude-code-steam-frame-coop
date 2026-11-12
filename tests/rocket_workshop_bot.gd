@@ -574,8 +574,12 @@ func _deep_checks() -> void:
 				_check("gift_pick_pilot", true, str(h))
 			elif h[0] == "gift" and int(h[2]) > 0:
 				_check("gift_pick_crew", true, str(h))
-		if main.phase == "work" and main.floor_crew() == 0 and main.rocket_n >= Deep.FIRST_N and not main.hazards.list.is_empty():
-			_check("no_meteors_alone", false, "%d planned" % main.hazards.list.size())
+		# A lone pilot never gets a meteor TOLD (meteors planned while the crew was here stay quiet once it leaves:
+		# a flat host whose TV machine left mid-rocket, 2026-11-12).
+		if main.phase == "work" and main.floor_crew() == 0 and main.rocket_n >= Deep.FIRST_N and hz.seen > int(get_meta("seen_with_crew", 0)):
+			_check("no_meteors_alone", false, "%d told with nobody on the floor" % (hz.seen - int(get_meta("seen_with_crew", 0))))
+		if main.floor_crew() > 0:
+			set_meta("seen_with_crew", hz.seen)
 	if hz.landed > landed_was:
 		landed_was = hz.landed
 		if hz.bumps > int(get_meta("bumps_was", 0)):
@@ -779,7 +783,8 @@ func _simple_checks(delta: float) -> void:
 			for m in main.modules:
 				types.append(m.type)
 			var n: int = main.rocket_n
-			var ok: bool = types.size() <= (3 if P.simple_level(n) >= 3 else 2) and (n > P.SIMPLE_ORDER.size() or types[0] == P.SIMPLE_ORDER[n - 1])
+			# (at most the rocket's puzzle count for the mode played: HARD adds one from rocket 4, RW_MODE=hard too)
+			var ok: bool = types.size() <= G.simple_want(n, Deep.puzzle_opts(String(main.play_mode), "", n)) and (n > P.SIMPLE_ORDER.size() or types[0] == P.SIMPLE_ORDER[n - 1])
 			for a in main.panel.area_holders:
 				var want: bool = a == "lever" or types.has(a)
 				if main.panel.area_holders[a].visible != want:

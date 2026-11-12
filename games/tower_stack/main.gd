@@ -309,8 +309,8 @@ func _setup(mode: String) -> void:
 		net.state_set("town", (save.data.town as Array).duplicate(true))
 		net.state_set("made", int(save.data.built))
 		game_mode = String(save.data.get("mode", "brave"))
-		if OS.has_environment("TS_MODE") and G.MODE_TUNE.has(OS.get_environment("TS_MODE")):
-			game_mode = OS.get_environment("TS_MODE")
+		if net.forced_mode("TS_MODE") != "" and G.MODE_TUNE.has(net.forced_mode("TS_MODE")):
+			game_mode = net.forced_mode("TS_MODE")
 			Engine.set_meta("ts_mode_set", true)
 		save.data.sessions = int(save.data.sessions) + 1
 		save.mark_dirty()

@@ -2015,8 +2015,8 @@ func _begin_session() -> void:
 	season = SeasonKit.override("snowman_maker", Seeded.season(), Deep.SEASONS)
 	if String(save.data.get("mode", "")) != "":
 		difficulty = Deep.mode_of(String(save.data.mode))
-	if OS.has_environment("SM_MODE"):
-		difficulty = Deep.mode_of(OS.get_environment("SM_MODE"))
+	if net.forced_mode("SM_MODE") != "":
+		difficulty = Deep.mode_of(net.forced_mode("SM_MODE"))
 		mode_picked = true
 	if OS.has_environment("SM_GIFT") and not Deep.gift(OS.get_environment("SM_GIFT")).is_empty():
 		mode_picked = true

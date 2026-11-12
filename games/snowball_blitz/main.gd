@@ -1214,7 +1214,7 @@ func _end_practice() -> void:
 	if ghost_hand:
 		ghost_hand.show_demo(false, Vector3.ZERO, Vector3.ZERO, 0.0)
 	print("Practice over (VR hits %d, %.0f s)" % [vr_hits, practice_t])
-	if SIMPLE_MODE and wave == 0 and not Engine.has_meta("sb_mode_set") and not OS.has_environment("SB_MODE"):
+	if SIMPLE_MODE and wave == 0 and not Engine.has_meta("sb_mode_set") and net.forced_mode("SB_MODE") == "":
 		_begin_pick("mode")
 	else:
 		_skip_to_env_wave()
@@ -2463,7 +2463,7 @@ func _start_siege() -> void:
 	var seed_value := SiegeGen.daily_seed() if daily else Seeded.fresh_seed()
 	if OS.has_environment("SB_SEED"):
 		seed_value = int(OS.get_environment("SB_SEED"))
-	game_mode = OS.get_environment("SB_MODE") if SiegeGen.MODE_NUM.has(OS.get_environment("SB_MODE")) else String(save.data.mode)
+	game_mode = net.forced_mode("SB_MODE") if SiegeGen.MODE_NUM.has(net.forced_mode("SB_MODE")) else String(save.data.mode)
 	if not SiegeGen.MODE_NUM.has(game_mode):
 		game_mode = "brave"
 	siege = SiegeGen.siege(seed_value, lv, daily, game_mode)

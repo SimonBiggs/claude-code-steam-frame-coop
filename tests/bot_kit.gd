@@ -296,6 +296,20 @@ func assert_near(a: float, b: float, tolerance: float, msg: String) -> bool:
 	return assert_true(absf(a - b) <= tolerance, "%s (got %.3f, want %.3f +- %.3f)" % [msg, a, b, tolerance])
 
 
+## The game's mode was forced by its env setting (`env_key`, e.g. "DB_MODE": the game skips its mode pick and the
+## family's saved mode). Same answer on every machine: a TV machine asks the host's net state (net.forced_mode), so
+## set the env on the HOST only. Bots skip their "mode was picked" / "mode was saved" checks when it's true.
+## tests/forced_mode_test.gd fails bots that read a *_MODE env directly.
+static func mode_forced(net: Node, env_key: String) -> bool:
+	return forced_mode(net, env_key) != ""
+
+
+## The forced mode ("" = none): see mode_forced.
+static func forced_mode(net: Node, env_key: String) -> String:
+	assert(net != null, "BotKit.forced_mode needs the game's net (call it after the game's _ready)")
+	return String(net.forced_mode(env_key))
+
+
 ## A TV machine (net.mode "client") plays at the host's difficulty: the host shares it as net state `key` and `mine`
 ## (this machine's own value, e.g. main.game_mode) must match it. On the host / local game it only checks the host
 ## shares it. Call it late in a networked run, after the host's mode pick (Duo Arena 2026-11-12: the TV kept its own

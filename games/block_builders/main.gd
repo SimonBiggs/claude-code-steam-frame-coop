@@ -2611,8 +2611,8 @@ func _begin_deep() -> void:
 	session_seed = Seeded.fresh_seed()
 	season = SeasonKit.override("block_builders", Seeded.season(), Deep.SEASONS)
 	mode = Deep.mode_of(String(save.data.get("mode", "brave")))
-	if OS.has_environment("BB_MODE"):  # (What's New "try" / bots: straight in)
-		mode = Deep.mode_of(OS.get_environment("BB_MODE"))
+	if net.forced_mode("BB_MODE") != "":  # (What's New "try" / bots: straight in)
+		mode = Deep.mode_of(net.forced_mode("BB_MODE"))
 		mode_picked = true
 	bot_tricks = OS.has_environment("BB_TRICKS_NOW")
 	if OS.has_environment("BB_GIFT") and not Deep.gift(OS.get_environment("BB_GIFT")).is_empty():

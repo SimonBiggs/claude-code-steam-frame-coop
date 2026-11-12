@@ -281,7 +281,7 @@ func _checks() -> void:
 	kit.assert_true(deep.has("orbs_seen"), "%s: the pick orbs showed" % mode)
 	if mode != "client":
 		var stages: Array = main.picks.history.map(func(h: Array) -> String: return String(h[0]))
-		kit.assert_true(stages.has("mode"), "%s: the mode pick was taken (%s)" % [mode, str(main.picks.history)])
+		kit.assert_true(stages.has("mode") or BotKit.mode_forced(main.net, "FC_MODE"), "%s: the mode pick was taken (%s)" % [mode, str(main.picks.history)])  # (FC_MODE skips it)
 		kit.assert_true(stages.has("gift") or int(main.session_round) < 2, "%s: Nutmeg's gift pick came before round 2 (%s)" % [mode, str(main.picks.history)])
 		if kit.tv_players() > 0 or main.vr_rig != null:
 			kit.assert_true(main.picks.history.any(func(h: Array) -> bool: return int(h[2]) >= 0), "%s: a player really took a pick (%s)" % [mode, str(main.picks.history)])

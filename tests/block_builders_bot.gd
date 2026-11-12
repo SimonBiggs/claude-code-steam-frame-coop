@@ -1,4 +1,5 @@
 extends Node
+const BotKit := preload("res://tests/bot_kit.gd")
 ## Headless bot for Block Builders. Drives whichever players are local on this machine:
 ## the builder (flat cursor, or the VR hand with BB_FAKE_VR=1) places each level's known solution,
 ## and the runners wait for the path, then follow the level's bot_path to the flag. Banners are
@@ -541,7 +542,7 @@ func _exit_tree() -> void:
 			BotEnd.check(not (main.hazards.seen as Dictionary).is_empty(), "surprises came (BB_TRICKS_NOW)")
 		if OS.has_environment("BB_BOT_NO_DODGE") and main.net.mode != "client" and not (main.hazards.seen as Dictionary).is_empty():
 			BotEnd.check(main.hazards.hits_all > 0 or main.gift == "sticky", "a runner who doesn't dodge gets moved by a surprise")
-		if main.net.mode != "client" and sky_cleared >= 1 and not OS.has_environment("BB_MODE"):
+		if main.net.mode != "client" and sky_cleared >= 1 and not BotKit.mode_forced(main.net, "BB_MODE"):
 			BotEnd.check(int(picks_seen.get("mode", 0)) >= 1, "the mode pick came")
 		if main.net.mode != "client" and sky_cleared >= 2 and not OS.has_environment("BB_NO_GIFTS"):
 			BotEnd.check(int(picks_seen.get("gift", 0)) >= 1, "a gift pick came before a later sky course")

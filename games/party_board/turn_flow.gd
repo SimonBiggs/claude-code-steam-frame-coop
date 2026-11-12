@@ -387,7 +387,7 @@ func _simple_party() -> void:
 ## playing takes it). PB_MODE=<id> (What's New "try", bots) skips the pick.
 func _mode_pick() -> void:
 	mode_picked = true
-	var forced := OS.get_environment("PB_MODE")
+	var forced: String = main.net.forced_mode("PB_MODE")
 	if Deep.MODES.has(forced):
 		_set_mode(forced)
 		_simple_party()
