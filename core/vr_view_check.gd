@@ -13,6 +13,10 @@ extends RefCounted
 ## - no two panels drawn over each other: their rectangles, seen from the eyes, overlap (overlap());
 ## - no world words (name tags, pop-ups) right in front of the eyes;
 ## - no text glued to the face: a visible Label3D under the XR camera turns with the head.
+## - its words are drawn on top of its own panel and readable on it (text_problems()): a panel that skips the depth
+##   test shows through a nearer leaf or wall, so its text must skip it too (Fruit Catch 2026-11-12: TODAY'S HARVEST
+##   was a dark bar with no words in front of a low branch); text above the panel's render priority; enough lightness
+##   gap against the panel's fill.
 ## - not washed out: no see-through scenery (water, glass, mist) behind a panel draws after it. VR panels sit at
 ##   UiKit.VR_PRIO_PANEL (-4, under their own text), so a blended surface at the default priority 0 behind a card
 ##   is blended OVER it (Fishing Lake 2026-11-11: the lake's water made Ollie's cards a faint, far-looking ghost).
@@ -42,6 +46,9 @@ const OVERLAP_MIN_DEG2 := 1.0
 const FACE_D := 0.45
 const VR_LAYER := preload("res://core/vr_layer.gd").LAYER
 const VR_PRIO_PANEL := -4  ## UiKit.VR_PRIO_PANEL (tests/core_math_test.gd checks they match)
+const VR_PRIO_HILITE := -3  ## UiKit.VR_PRIO_HILITE (tests/core_math_test.gd checks they match)
+## Words on a VR panel need at least this Oklab lightness gap from the panel's fill (UiKit.TEXT on UiKit.BG is ~0.8).
+const MIN_TEXT_GAP := 0.35
 ## Node group: things VR panels must never cover (pick orbs). Any game can add its own must-see things.
 const KEEP_CLEAR := "vr_keep_clear"
 
@@ -84,6 +91,8 @@ static func problems(root: Node) -> Array[String]:
 		var small := _smallest_text_deg(c, head)
 		if small > 0.0 and small < MIN_TEXT_DEG:
 			out.append("%s: text only %.2f deg high (min %.1f)" % [name, small, MIN_TEXT_DEG])
+		for tp in text_problems(c):
+			out.append("%s: %s" % [name, tp])
 		var wash := washer(cam, c, p)
 		if wash != "":
 			out.append("%s: washed out by %s drawn over it (give it UiKit.VR_PRIO_UNDER_UI)" % [name, wash])
@@ -129,6 +138,86 @@ static func problems(root: Node) -> Array[String]:
 		var l := n as Label3D
 		if l.is_visible_in_tree() and l.text.strip_edges() != "" and l.transparency < 0.65 and not _ignored(l):
 			out.append("%s: text glued to the face (a Label3D under the XR camera)" % _name(l))
+	return out
+
+
+## A VR UI panel mesh: UiKit.vr_panel_material (panel / highlight priority, no depth test: floats over scenery).
+static func is_floating_panel(n: Node) -> bool:
+	if not n is MeshInstance3D:
+		return false
+	var mat := (n as MeshInstance3D).material_override as BaseMaterial3D
+	return mat != null and mat.no_depth_test and mat.render_priority >= VR_PRIO_PANEL and mat.render_priority <= VR_PRIO_HILITE
+
+
+## The floating panel a Label3D is written on (a panel mesh beside it or beside one of its parents, up to the placed
+## card), or null. Such text must skip the depth test like its panel (core/vr_text_guard.gd): otherwise a leaf or wall
+## between the eyes and the card hides the words while the panel still shows, a dark bar with nothing on it.
+static func panel_of(l: Node) -> MeshInstance3D:
+	var x := l.get_parent()
+	for i in 4:
+		if x == null or not x is Node3D or x is XROrigin3D or x is XRCamera3D:
+			return null
+		for c in x.get_children():
+			if c != l and is_floating_panel(c) and (c as MeshInstance3D).visible:
+				return c as MeshInstance3D
+		if x.has_meta("vr_placed"):
+			return null
+		x = x.get_parent()
+	return null
+
+
+## The panel's fill colour: the most common nearly-opaque vertex colour of its mesh (UiKit.panel_mesh is
+## vertex-coloured: shadow rim, border, fill), or the material's albedo.
+static func panel_fill(m: MeshInstance3D) -> Color:
+	var mat := m.material_override as BaseMaterial3D
+	if m.mesh == null or mat == null or not mat.vertex_color_use_as_albedo:
+		return mat.albedo_color if mat != null else Color.BLACK
+	var key := "vr_check_fill"
+	if m.mesh.has_meta(key):
+		return m.mesh.get_meta(key)
+	var counts := {}
+	for s in m.mesh.get_surface_count():
+		var cols = m.mesh.surface_get_arrays(s)[Mesh.ARRAY_COLOR]
+		if cols == null:
+			continue
+		for c in (cols as PackedColorArray):
+			if c.a >= 0.8:
+				var h := c.to_html()
+				counts[h] = int(counts.get(h, 0)) + 1
+	var best := mat.albedo_color
+	var most := 0
+	for h in counts:
+		if int(counts[h]) > most:
+			most = int(counts[h])
+			best = Color.html(h)
+	m.mesh.set_meta(key, best)
+	return best
+
+
+## What's wrong with the words on a VR card's panels: hidden by scenery the panel floats over (depth-tested text on a
+## no-depth panel), drawn under the panel (render priority), or too close to the panel's colour to read.
+static func text_problems(card: Node3D) -> Array[String]:
+	var out: Array[String] = []
+	for c in [card] + card.find_children("*", "Label3D", true, false):
+		if not c is Label3D:
+			continue
+		var l := c as Label3D
+		if not l.is_visible_in_tree() or l.text.strip_edges() == "" or l.transparency > 0.65 or l.modulate.a < 0.1:
+			continue
+		var p := panel_of(l)
+		if p == null:
+			continue
+		var mat := p.material_override as BaseMaterial3D
+		var words := "\"%s\"" % l.text.substr(0, 20).replace("\n", " ")
+		if not l.no_depth_test:
+			out.append("text %s is depth-tested on a panel that isn't: scenery in front hides the words, not the panel" % words)
+		if l.render_priority <= mat.render_priority or (l.outline_size > 0 and l.outline_render_priority <= mat.render_priority):
+			out.append("text %s drawn under its own panel (priority %d / outline %d, panel %d)" % [words, l.render_priority, l.outline_render_priority, mat.render_priority])
+		const Contrast := preload("res://core/contrast.gd")
+		var fill := panel_fill(p)
+		var gap := absf(Contrast.lightness_gap(Color(l.modulate, 1.0), fill))
+		if gap < MIN_TEXT_GAP:
+			out.append("text %s hard to read on its panel (lightness gap %.2f, min %.2f)" % [words, gap, MIN_TEXT_GAP])
 	return out
 
 
