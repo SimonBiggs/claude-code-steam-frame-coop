@@ -262,6 +262,9 @@ func finish(quit: bool = true, note := "") -> void:
 	if _finished:
 		return
 	_finished = true
+	var vr_view := int(Engine.get_meta("vr_view_failures", 0))  # core/vr_view_watch.gd's problems count too
+	failures += vr_view
+	checks += vr_view
 	if failures == 0 and checks == 0:  # a run that checked nothing tested nothing (tests/bot_end.gd's shared rule)
 		printerr("SCRIPT ERROR: BOT RESULT: FAIL (0 checks%s: this bot counted nothing before it ended)" % note)
 	elif failures == 0:
@@ -410,6 +413,7 @@ func drop_in_out(party: Node, time: float, stay: float, seated: Callable) -> voi
 ## standard standing player use vr_stand / vr_idle (VrRig.fake_pose: real metres x world_scale, BOT_VR_SEATED).
 func vr_pose(rig: Node, head: Vector3, left: Vector3, right: Vector3) -> void:
 	rig.camera.position = head
+	VrRig.fake_written(rig.camera)
 	rig.camera.basis = Basis()
 	rig.hand_l.position = left
 	rig.hand_l.basis = Basis()
@@ -486,6 +490,7 @@ func vr_head_home(rig: Node) -> void:
 func vr_head_height(rig: Node, h: float = -1.0) -> void:
 	var cam: Node3D = rig.camera
 	cam.position.y = (h if h > 0.0 else VrRig.fake_eye()) * float(rig.world_scale)
+	VrRig.fake_written(cam)
 
 
 ## tests/bot_end.gd quit_quietly calls this when a bot that hasn't finished is ended for it (core/quit_after.gd's

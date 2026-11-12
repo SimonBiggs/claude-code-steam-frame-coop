@@ -177,6 +177,16 @@ static func fake_stand(cam: Node3D, left: Node3D = null, right: Node3D = null, w
 	ft.ws = ws
 
 
+## A bot wrote the fake head / hands itself, in world units at TODAY's scale (tests/bot_kit.gd vr_pose / vr_head_height):
+## tell FakeTracking, or a scale change that same frame multiplies the new position again (2026-11-12: Roller Coaster's
+## VR builder came back from a ride at 28.8 m real eye height, 1.6 x 18 x 18 world units).
+static func fake_written(cam: Node3D) -> void:
+	var origin := cam.get_parent() as XROrigin3D if cam != null else null
+	var ft := origin.get_node_or_null("FakeTracking") as FakeTracking if origin != null else null
+	if ft != null:
+		ft.ws = XRServer.world_scale
+
+
 ## Fake headsets (fake_stand): real tracking is multiplied by XRServer.world_scale, so when a game changes the scale its
 ## fake head and hands move like a headset's would, on the next frame (a giant game's fake player kept ant's eyes at
 ## 1.6 world units, and a keeper's fit re-fitted itself forever, before 2026-11-12).

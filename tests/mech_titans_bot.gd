@@ -639,6 +639,7 @@ func _drive_vr(delta: float, phase: String) -> void:
 	var rest_l := head + Vector3(-0.25, -0.45, -0.3)
 	var rest_r := head + Vector3(0.25, -0.45, -0.3)
 	rig.camera.position = head
+	VrRig.fake_written(rig.camera)
 	rig.camera.basis = Basis()
 	if main.mech.beam_on:
 		var r := int(main.net.state_get("mission", 0))
