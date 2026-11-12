@@ -4,6 +4,11 @@ extends RefCounted
 ## giant leaves and flowers; SPACE: glowing crystals, light posts and big planets in the sky).
 ##   Props.build(track)    # called by track.gd build_info, adds everything under track.built
 
+const MeshKit := preload("res://core/mesh_kit.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
+## The season's drifting things (deep.gd SEASONS): blossom, pollen, leaves, snow.
+const DRIFT := {"spring": Color(1.0, 0.72, 0.85), "summer": Color(1.0, 0.95, 0.55), "autumn": Color(0.95, 0.5, 0.15), "winter": Color(0.97, 0.98, 1.0)}
+const SEASON_SIZE := 1.8  # the props by a kart-sized road
 const PATCH_COLORS := {"chocolate": Color(0.38, 0.2, 0.1), "mud": Color(0.24, 0.17, 0.08), "ice": Color(0.75, 0.92, 1.0), "moon": Color(0.7, 0.4, 1.0)}
 const BUMP_COLORS := {"gumdrop": [Color(1.0, 0.35, 0.55), Color(0.4, 0.85, 1.0), Color(1.0, 0.85, 0.3), Color(0.55, 1.0, 0.5)],
 	"rock": [Color(0.5, 0.55, 0.45), Color(0.45, 0.5, 0.42)], "snowball": [Color(0.97, 0.98, 1.0)], "meteor": [Color(0.35, 0.3, 0.35)]}
@@ -12,6 +17,8 @@ const BUMP_COLORS := {"gumdrop": [Color(1.0, 0.35, 0.55), Color(0.4, 0.85, 1.0),
 static func build(t) -> void:
 	if not t.hazards.is_empty():
 		_hazards(t)
+	if t.season != "" and str(t.info.get("theme", "")) != "space":
+		_season(t)
 	match str(t.info.get("theme", "")):
 		"jungle":
 			_jungle(t)
@@ -149,6 +156,31 @@ static func _back(t, ba: Array) -> Vector3:
 	var p: Array = t.point_at(float(ba[2]), float(ba[3]))
 	var yaw: float = p[1]
 	return Vector3(sin(yaw), 0.0, cos(yaw))
+
+
+## SEASONS (deep.gd): the season's things by the roadside (core/season_kit.gd props: tulips, sunflowers, pumpkins on
+## leaves, snowmen) facing the road, and its blossom / pollen / leaves / snow drifting round whoever this machine
+## watches (track.gd follow_weather). The snowy place has its own snow, so no second drift there.
+static func _season(t) -> void:
+	var rng := RandomNumberGenerator.new()
+	rng.seed = 7270 + t.look
+	var b := MeshKit.Builder.new()
+	var i := 0
+	for p: Vector3 in t._side_spots(rng, 18, 1.6, 6.0):
+		var lr: Array = t.locate(p, -1)
+		var road: Vector3 = t.point_at(float(lr[1]), 0.0)[0]
+		var face := Vector3(road.x - p.x, 0.0, road.z - p.z)
+		SeasonKit.prop(b, t.season, Vector3(p.x, 0.0, p.z), i, SEASON_SIZE, face.normalized() if face.length() > 0.1 else Vector3.BACK)
+		i += 1
+	var mi := MeshKit.instance(b.build(), false)
+	mi.name = "Season"
+	t.built.add_child(mi)
+	if t.snow == null:
+		var d := SeasonKit.drift(DRIFT.get(t.season, Color.WHITE), t.season, {"amount": 90, "lifetime": 7.0, "box": Vector3(16.0, 1.0, 16.0),
+			"at": Vector3(0.0, 7.0, 0.0), "size": 0.22, "speed": Vector2(0.8, 1.6)})
+		d.local_coords = false
+		t.built.add_child(d)
+		t.season_drift = d
 
 
 static func _jungle(t) -> void:
