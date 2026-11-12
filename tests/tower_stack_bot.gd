@@ -41,7 +41,11 @@ func _ready() -> void:
 	# One flat player alone (no VR giant, nobody else) pushes blocks slowly: a longer round, still under the real 180 s,
 	# so the crane can finish a tower for them before the lone check's end (120 s).
 	var lone := BotKit.bot_players(2, 6) == 1 and not OS.has_environment("DUO_HOST") and not OS.has_environment("DUO_JOIN") and not OS.has_environment("BOT_VR")
-	main.set("round_time", 95.0 if lone else 42.0)
+	# Local runs: 50 s (round 2 still starts by ~53 s, before the 58 s finish). 42 s left no room for one toppled
+	# stack, so about 1 local run in 30 never finished a tower (2026-11-12). Networked runs keep 42 s: the client
+	# finishes at 53 s and must see round 2.
+	var netted := OS.has_environment("DUO_HOST") or OS.has_environment("DUO_JOIN")
+	main.set("round_time", 95.0 if lone else (42.0 if netted else 50.0))
 	main.set("daily_ok", false)
 	main.set("try_open", 7)  # towergen OPEN_ALL: special blocks from job 2 on
 	add_child(main)
@@ -230,8 +234,22 @@ func _route(from: Vector3) -> Vector3:
 	return pad
 
 
-## The nearest block lying in the field (not on the stage, the pad, or in the air).
+## The plan's next block kind (main._crane_spot's rule), or -1: a block of that kind snaps into the plan; any other
+## kind is dropped on top anywhere and can knock plan blocks off (2026-11-12: about 1 run in 30 never finished a
+## tower in 58 s because the bots fed the crane whatever block was nearest).
+func _next_kind() -> int:
+	if main.site.is_empty():
+		return -1
+	var plan: Array = main.site.plan
+	for i in plan.size():
+		if (main.fill >> i) & 1 == 0:
+			return int(plan[i][0])
+	return -1
+
+
+## The nearest block lying in the field (not on the stage, the pad, or in the air), the plan's next kind first.
 func _loose_block(from: Vector3) -> Node3D:
+	var need := _next_kind()
 	var best: Node3D = null
 	var bd := INF
 	for id in main.blocks:
@@ -243,7 +261,7 @@ func _loose_block(from: Vector3) -> Node3D:
 			continue
 		if Vector2(p.x - main.PAD.x, p.z - main.PAD.z).length() < main.PAD_R:
 			continue
-		var dd := from.distance_to(p)
+		var dd := from.distance_to(p) + (0.0 if need < 0 or int(main.bkind.get(id, -1)) == need else 1000.0)
 		if dd < bd:
 			bd = dd
 			best = b
@@ -269,10 +287,10 @@ func _drive_vr(delta: float) -> void:
 		"find":
 			kit.vr_trigger(rig, 0.0)
 			var id := -1
-			for h in main.hover:
-				if h >= 0 and float(main.hover_t.get(h, 0.0)) > 0.7:
+			var need := _next_kind()
+			for h in main.hover:  # the plan's next kind first (see _next_kind)
+				if h >= 0 and float(main.hover_t.get(h, 0.0)) > 0.7 and (id < 0 or (need >= 0 and int(main.bkind.get(h, -1)) == need)):
 					id = h
-					break
 			if id >= 0 and vr_wait <= 0.0:
 				vr_phase = "reach"
 				rig.set_meta("bot_target", id)
