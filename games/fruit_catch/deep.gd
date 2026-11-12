@@ -166,7 +166,7 @@ static func hazards(h: Dictionary, spec: Dictionary) -> Array:
 		var e := {}
 		for attempt in 16:
 			e = _make(r, kind, t, md)
-			if _where_problem(h, e, out).is_empty():
+			if _where_problem(h, e, out).is_empty() and _kid_problems(h, out + [e]).is_empty():
 				break
 			e = {}
 		if not e.is_empty():
@@ -329,7 +329,16 @@ static func problems(h: Dictionary, list: Array, spec: Dictionary) -> Array:
 		elif wasp_secs(e) > AFTER + 0.5:
 			why.append("%s: the wasp takes %.1f s to fly by" % [tag, wasp_secs(e)])
 		prev.append(e)
-	# A small child keeping clear of every surprise still finishes Nutmeg's first dish (with and without a giant).
+	why.append_array(_kid_problems(h, list))
+	return why
+
+
+## A small child keeping clear of every surprise still finishes Nutmeg's first dish (with and without a giant).
+## hazards() places each surprise only where this still holds (2026-11-12: after the branches turned, two HARD seeds'
+## windfalls blocked too much early fruit), so it is fair by construction; problems() proves it.
+static func _kid_problems(h: Dictionary, list: Array) -> Array:
+	var why: Array = []
+	var secs := float(h.secs)
 	var skip := func(_i: int, d: Array) -> bool: return blocked(d, h, list)
 	var long := secs >= 60.0
 	var k1 := G.solo(h, G.KID_SHARE, false, skip)

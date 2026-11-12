@@ -26,6 +26,14 @@ const ARENA := 8.5  # == main.gd (the test checks)
 const SPEED := 4.8  # == main.gd
 const TRUNK_R := 0.9  # == main.gd
 const BRANCHES := 5  # == main.gd
+
+
+## Branch k's direction round the trunk (radians, from +X towards +Z): the ONE place main.gd (building the tree, a shaken
+## branch's drops) and _drops below take it from. Half a step round from +Z, so no branch tip sits dead ahead of the VR
+## giant (VR_START is on +Z): branch 0's leafy tip was 0.85 m in front of the eyes and pulled every VR card in to 0.55 m
+## (2026-11-12). The giant still reaches the tips either side.
+static func branch_angle(k: int) -> float:
+	return PI * 0.5 + PI / BRANCHES + k * TAU / BRANCHES
 const DROP_HEIGHT := 4.1  # == main.gd
 const FALL_G := 2.6  # == main.gd
 const HANG_TIME := 0.45  # == main.gd
@@ -153,7 +161,7 @@ static func _drops(r: RandomNumberGenerator, lf: float, secs: float, storm_at: f
 		var d := []
 		for attempt in 12:
 			var k := r.randi() % BRANCHES
-			var a := PI * 0.5 + k * TAU / BRANCHES + r.randf_range(-0.7, 0.7)
+			var a := branch_angle(k) + r.randf_range(-0.7, 0.7)
 			var home := Vector2(cos(a), sin(a)) * r.randf_range(1.3, 4.6)
 			d = [snappedf(t, 0.01), k, kind, snappedf(home.x, 0.01), snappedf(home.y, 0.01)]
 			if _drop_problem(d, wind, out).is_empty():

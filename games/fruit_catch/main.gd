@@ -277,7 +277,7 @@ func _build_world(vr: bool) -> void:
 	crown.add_child(MeshKit.instance(Art.tree(), not vr))
 	CameraRig.occluder(crown, TRUNK_R, 4.2)  # the follow cameras stop in front of the trunk (it filled the view)
 	for k in BRANCHES:
-		var a := PI * 0.5 + k * TAU / BRANCHES
+		var a := G.branch_angle(k)
 		var tip := Vector3(cos(a) * TIP_RADIUS, TIP_HEIGHT, sin(a) * TIP_RADIUS)
 		var b := Node3D.new()
 		b.position = BRANCH_ANCHOR + Vector3(cos(a), 0.0, sin(a)) * 0.45
@@ -1024,7 +1024,7 @@ func _held_by(h: int) -> int:
 func _drop_fruit(k: int) -> void:
 	if fruits.size() >= MAX_FRUIT:
 		return
-	var a := PI * 0.5 + k * TAU / BRANCHES + randf_range(-0.7, 0.7)
+	var a := G.branch_angle(k) + randf_range(-0.7, 0.7)
 	var pos := Vector3(cos(a), 0.0, sin(a)) * randf_range(1.3, 4.6) + Vector3.UP * DROP_HEIGHT
 	var kind := G.shake_kind(shake_rng, need_left(), float(harvest.get("rotten", 0.15)))
 	_spawn_drop(k, kind, pos)

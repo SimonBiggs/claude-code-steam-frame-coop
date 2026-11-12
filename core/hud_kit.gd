@@ -546,7 +546,13 @@ static func vr_banner(world: Node, cam: Node3D, title: String, subtitle: String 
 	var o := opts.duplicate()
 	o["color"] = opts.get("color", st[0])
 	o["duration"] = float(opts.get("duration", 2.6))
-	o["title_size"] = 0.12
+	# The same size in the headset at any distance (2026-11-12: Snowman Maker's SUNBEAM! / SNOW SLIDE! at 2.4 m read as
+	# a small pill next to the 1.6 m banners): a farther banner gets bigger words and a wider card.
+	var k := maxf(1.0, float(opts.get("distance", 1.6)) / 1.6)
+	o["title_size"] = 0.12 * k
+	o["body_size"] = float(opts.get("body_size", 0.05)) * k
+	if not opts.has("width"):
+		o["width"] = 1.3 * k
 	_vr_replace(world, "vr_banner")
 	var c := vr_card(world, cam, title, subtitle, o)
 	world.set_meta("vr_banner", c)
