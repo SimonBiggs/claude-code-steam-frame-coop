@@ -199,6 +199,7 @@ func _initialize() -> void:
 	var real_r := Deep.orb_r() / W.S
 	_expect(real_r >= 0.04 and real_r <= 0.1, "orbs are a modest size in VR (%.0f cm)" % (real_r * 100.0))
 	_expect(Deep.HAND_R / W.S < 0.03 and Deep.DWELL >= 0.3, "a VR hand has to reach in and stay")
+	_expect(Deep.TV_DWELL > 2.0 * Deep.TV_R / Deep.KNIGHT_SPEED, "a knight running past under an orb never picks it")
 	_expect(Deep.wait_for("mode", true) < Deep.wait_for("mode", false) and Deep.wait_for("gift", false) <= 20.0, "nobody to pick: the middle comes sooner")
 	print("GIANTS DEEP: %s (%d fails, %d ms, worst wave %.1f ms)" % ["PASS" if fails == 0 else "FAIL", fails, Time.get_ticks_msec() - t0, worst_ms[0]])
 	quit(1 if fails > 0 else 0)

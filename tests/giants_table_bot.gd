@@ -39,6 +39,10 @@ var seen := {}
 var smacks := 0
 var cues := {}  # simple mode: picture cues seen / learned
 var pick_t := 0.0
+var stuck_t := 0.0
+var stuck_at := Vector3.ZERO
+var detour_t := 0.0
+var detour_s := 1.0
 const Deep := preload("res://games/giants_table/deep.gd")
 
 
@@ -302,7 +306,20 @@ func _drive_picks(delta: float) -> Dictionary:
 				continue
 			busy[k] = true
 			var to: Vector3 = Vector3(at.x, 0.0, at.z) - Vector3(k.global_position.x, 0.0, k.global_position.z)
-			k.bot_input = {"move": to.normalized() if to.length() > 0.4 else Vector3.ZERO, "sword": false, "bow": false, "jump": false}
+			var mv := to.normalized() if to.length() > 0.4 else Vector3.ZERO
+			# Stuck on a tree or a cottage? Step sideways for a moment (a child steers round it).
+			if detour_t > 0.0:
+				detour_t -= delta
+				mv = (Vector3(-mv.z, 0.0, mv.x) * detour_s + mv * 0.2).normalized()
+			elif mv != Vector3.ZERO:
+				stuck_t += delta
+				if stuck_t > 0.5:
+					if k.global_position.distance_to(stuck_at) < 0.15:
+						detour_t = 0.9
+						detour_s = -detour_s
+					stuck_t = 0.0
+					stuck_at = k.global_position
+			k.bot_input = {"move": mv, "sword": false, "bow": false, "jump": false}
 	return busy
 
 

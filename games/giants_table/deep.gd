@@ -101,8 +101,8 @@ const ORB_SCALE := 2.3  # 0.6 * 2.3 = 1.4 units (7 cm) radius: a modest glass ba
 const HAND_R := 0.25  # a VR grab point this near an orb's edge is in it
 const DWELL := 0.35  # seconds a hand must stay in an orb (a sweep past never picks)
 const FLAT_R := 1.6  # the flat Giant's hovering hand this near an orb's middle (across) is in it
-const TV_R := 1.6  # a knight this near an orb's middle (across) takes it
-const TV_DWELL := 0.2
+const TV_R := 1.4  # a knight this near an orb's middle (across) takes it
+const TV_DWELL := 0.8  # (standing under it: a knight walking past under one never picks it)
 const ROW_WAIT := {"mode": 20.0, "gift": 16.0}  # nobody took one: the middle
 const EMPTY_WAIT := 8.0
 
