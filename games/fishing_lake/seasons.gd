@@ -37,6 +37,14 @@ const CARDS := {
 	"autumn": ["Autumn leaves!", "pumpkin", Color(1.0, 0.55, 0.15)],
 	"winter": ["Snow on the lake!", "snowflake", Color(0.75, 0.9, 1.0)],
 }
+## Ollie's card when he plants a keepsake (the props themselves are core/season_kit.gd prop()).
+## shared-picks-ok: seasons (story card words and pictures for SeasonKit's props, not props of our own)
+const KEEPSAKE_CARDS := {
+	"spring": ["Tulips for the shore!", "wildflowers"],
+	"summer": ["Sunflowers for you!", "sunflower"],
+	"autumn": ["A pumpkin for the shore!", "pumpkin"],
+	"winter": ["A snowman for the shore!", "snowman"],
+}
 const DRIFT := {"spring": Color(1.0, 0.75, 0.88), "summer": Color(1.0, 1.0, 0.92), "autumn": Color(0.95, 0.5, 0.12),
 	"winter": Color(0.97, 0.98, 1.0)}
 ## The flock's warn ring: pink, unlike Old Whiskers' orange (palette.gd checks it on every water).

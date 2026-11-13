@@ -11,7 +11,9 @@ const COLOR := Color(0.62, 0.42, 0.25)
 ## data: the raw save (no defaults filled in: always .get with a default). today: Seeded.today().
 ## grown: fish book pages found (book: {fish name: [times caught, best kg]}); daily: TODAY'S LAKE fished to sunset
 ## today (daily: {date: fish caught}). Second pass: shiny {fish name: shiny ones} (gold gems on the pages) and mode
-## (the family's GENTLE / BRAVE / HARD) are new keys with defaults (no layout change: no migrate_save needed).
+## (the family's GENTLE / BRAVE / HARD) are new keys with defaults (no layout change: no migrate_save needed). Third
+## pass: keepsakes [season, ...] (Ollie's shore garden, one per granted wish) is a new key too (main.gd reads it with
+## .get(..., [])).
 static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 	var book: Variant = data.get("book", {})
 	var pages := 0
@@ -27,4 +29,4 @@ static func progress_summary(data: Dictionary, today: String) -> Dictionary:
 ## A save as the game writes it after a few days (tests/progress_test.gd: it must read as grown > 0, daily done).
 static func sample(today: String) -> Dictionary:
 	return {"world": 123456, "days": 4, "book": {"Minnow": [6, 0.3], "Stripy Perch": [2, 1.1], "Rainbow Trout": [1, 2.4]},
-		"daily": {today: 7}, "wishes": 3, "last_wish": 2, "migrated": true, "shiny": {"Minnow": 1}, "mode": "gentle"}
+		"daily": {today: 7}, "wishes": 3, "last_wish": 2, "migrated": true, "shiny": {"Minnow": 1}, "mode": "gentle", "keepsakes": ["autumn", "winter"]}

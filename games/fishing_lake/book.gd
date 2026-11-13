@@ -23,7 +23,7 @@ static func save_defaults() -> Dictionary:
 	# book: fish name -> [times caught, best kg]; days: days fished; daily: date -> fish caught.
 	# shiny: fish name -> shiny ones caught (a gold star on the page); mode: the family's last GENTLE/BRAVE/HARD.
 	return {"world": -1, "days": 0, "book": {}, "daily": {}, "wishes": 0, "last_wish": -1, "migrated": false, "shiny": {},
-		"mode": "brave"}
+		"mode": "brave", "keepsakes": []}
 
 
 ## The level (0..3) after `days` days fished: what can swim in the lake.

@@ -162,7 +162,8 @@ func _initialize() -> void:
 	_expect(ks.size() == Seasons.MAX_KEEPSAKES, "the shore garden has %d spots" % ks.size())
 	_expect(not Seasons.check_spots([Lake.POND_C]).is_empty() and not Seasons.check_spots([Vector3(0, 0, 13), Vector3(0.5, 0, 13)]).is_empty(), "the garden check catches a keepsake in the pond or on the path")
 	for sn in Seasons.SEASONS:
-		_expect(Seasons.FLOCKS.has(sn) and Seasons.CARDS.has(sn) and Seasons.DRIFT.has(sn), "%s is dressed" % sn)
+		_expect(Seasons.FLOCKS.has(sn) and Seasons.CARDS.has(sn) and Seasons.DRIFT.has(sn) and Seasons.KEEPSAKE_CARDS.has(sn), "%s is dressed" % sn)
+		_expect(StoryCard.has_picture(String(Seasons.KEEPSAKE_CARDS[sn][1])), "%s keepsake picture exists" % sn)
 		_expect(StoryCard.has_picture(String(Seasons.CARDS[sn][1])) and StoryCard.has_picture(String(Seasons.FLOCKS[sn].pic)), "%s pictures exist" % sn)
 	# Hand checks: the checker catches broken lakes.
 	var g := LakeGen.generate(42, {"level": 3, "wish": LakeGen.KOI})

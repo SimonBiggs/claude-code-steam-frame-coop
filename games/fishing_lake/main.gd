@@ -494,6 +494,7 @@ func ripple(pos: Vector3, size: float, broadcast: bool = true) -> void:
 	var m := StandardMaterial3D.new()
 	m.albedo_color = Color(1, 1, 1, 0.7)
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	r.material_override = m
 	r.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -3386,6 +3387,7 @@ func _glow_mat(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	m.albedo_color = c
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	return m
@@ -3848,15 +3850,13 @@ func _plant_keepsake() -> void:
 	save.mark_dirty()
 	_send_tackle()
 	net.state_set("garden", ks.size())
-	var lines := {"spring": "Tulips for the shore!", "summer": "Sunflowers for you!", "autumn": "A pumpkin for the shore!",
-		"winter": "A snowman for the shore!"}
-	var pics := {"spring": "wildflowers", "summer": "sunflower", "autumn": "pumpkin", "winter": "snowman"}
+	var card: Array = Seasons.KEEPSAKE_CARDS[season]
 	get_tree().create_timer(4.4).timeout.connect(func() -> void:
-		story({"who": "OLLIE", "line": String(lines[season]), "pic": String(pics[season]), "color": Seasons.CARDS[season][2], "duration": 3.5}))
+		story({"who": "OLLIE", "line": String(card[0]), "pic": String(card[1]), "color": Seasons.CARDS[season][2], "duration": 3.5}))
 	var at: Vector3 = Seasons.keepsake_spots(ks.size())[ks.size() - 1]
 	get_tree().create_timer(4.6).timeout.connect(func() -> void:
 		burst(at + Vector3(0, 1.2, 0), Seasons.CARDS[season][2], 24))
-	print("Ollie's garden: a %s keepsake (%d)" % [season, ks.size()])
+	print("Ollie's garden: %s keepsake planted (%d)" % [season, ks.size()])
 
 
 func _reset_visits() -> void:

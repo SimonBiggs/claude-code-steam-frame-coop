@@ -563,8 +563,9 @@ func _summary() -> void:
 			fails.append("no Ollie's pond")
 		if not seen.has("season_" + main.season):
 			fails.append("the lake wasn't dressed for %s" % main.season)
-		if OS.has_environment("ARCADE_SEASON") and main.season != OS.get_environment("ARCADE_SEASON"):
-			fails.append("ARCADE_SEASON=%s but the lake is %s" % [OS.get_environment("ARCADE_SEASON"), main.season])
+		var want_season := preload("res://core/season_kit.gd").override(main.GAME_ID, "", main.Seasons.SEASONS)
+		if want_season != "" and main.season != want_season:
+			fails.append("the season override asks for %s but the lake is %s" % [want_season, main.season])
 		if mode != "client" and days_done >= 2:
 			var told := 0
 			var landed := 0
