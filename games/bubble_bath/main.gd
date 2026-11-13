@@ -310,7 +310,7 @@ func _build_world(vr: bool) -> void:
 	# The big score board, world-locked over the far end of the tub (reads from +Z: faces the VR player).
 	board = UiKit.label3d("", 0.42, "gold", true)
 	board.outline_size = 26
-	board.position = Vector3(0.0, 2.6, -HZ - 1.2)
+	board.position = Vector3(0.0, 3.1, -HZ - 1.2)  # (high enough that Mama Duck's VR story cards sit under it, not over it)
 	board.layers = UiKit.VR_LAYER  # the VR player's: on the TV it sat right under the timer pill and the story card
 	add_child(board)
 	island_root = Node3D.new()
