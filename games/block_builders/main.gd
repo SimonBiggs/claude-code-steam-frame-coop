@@ -22,7 +22,7 @@ const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV p
 ## a path; the runners run to the flag. That's it. No timer, score, stars, gift balloons, high-five
 ## rules, tips, hints text or awards; falling just pops you back with a boing. Eight short levels
 ## (levels.gd SIMPLE_LEVELS): level 1 is one gap to bridge and doubles as the PRACTICE: a glowing
-## see-through block marks the gap, and a ghost hand (ghost_hand.gd) shows the VR builder how to take a
+## see-through block marks the gap, and a ghost hand (core/ghost_hand.gd) shows the VR builder how to take a
 ## plank from the tray and drop it in; the TV runners get a glowing ring to jump through over the new
 ## bridge, then the flag. After that ONE new block per level (its glowing ghost shows where it goes).
 ## Everything in the builder's reach reacts to touch (props.gd): clouds puff, balloons pop, birds flap
@@ -53,7 +53,7 @@ const NetScript := preload("res://core/net.gd")
 const ClassicSeats := preload("res://core/classic_seats.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const PropsScript := preload("res://games/block_builders/props.gd")
-const GhostHandScript := preload("res://games/block_builders/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const CueScript := preload("res://games/block_builders/cue.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
@@ -179,7 +179,8 @@ var story_root: Control
 var vr_story: Node3D
 var run := {}  ## this level's numbers (RUN line)
 var props: Node3D
-var ghost_hand: Node3D
+var ghost_hand: GhostHand  # simple mode, VR builder: the see-through hand (core/ghost_hand.gd)...
+var ghost_block: MeshInstance3D  # ...and the see-through block it carries
 var ring_state := 0            # practice ring: 0 none, 1 glowing (level 1), 2 jumped through
 var ring_node: MeshInstance3D
 var solo := false              # host with no TV machine: P2 is the buddy runner driven here
@@ -307,16 +308,61 @@ func _setup_game(mode: String) -> void:
 
 ## SIMPLE_MODE: touchable toys, the ghost hand (VR builder only), the buddy runner (solo VR) and one
 ## short headline. Only one line of controls on the TV, and it fades after the first level.
+const GHOST_S := 9.0  # the ghost hand's size: a builder's hand in the toy world
+const GHOST_CYCLE := 4.2
+
+
+## SIMPLE_MODE practice for the VR builder: SHOWS how to build instead of text. The see-through hand
+## comes down onto the tray, curls its fingers round a block, carries it over to the glowing gap (the
+## see-through hint block) and lets go: the ghost block drops into place. It loops on the first level
+## until the builder puts down their first block, and comes back on any level if they haven't built
+## anything for a while.
+func _ghost_demo(delta: float) -> void:
+	var b = builder
+	var want: bool = b != null and b.vr and state == "play" and hint.size() >= 3 and b.held_kind == "" \
+		and ((level == 0 and placed_level == 0) or build_idle() > 20.0)
+	if not ghost_hand.gate(want, delta, 1.2):  # a moment to look around first
+		return
+	var kind: String = Art.KINDS[clampi(int(hint[0]), 0, Art.KINDS.size() - 1)]
+	var slot := Art.KINDS.find(kind)
+	if slot < 0 or not b.slot_on[slot]:
+		ghost_hand.visible = false
+		return
+	var t := ghost_hand.play("build", GHOST_CYCLE, delta)
+	var hc: Vector3 = hint[1]
+	var cell := Vector3(hc.x + 0.5, hc.y + 0.5, hc.z + 0.5)
+	var tray_p: Vector3 = b.slot_world(slot)
+	var over := cell + Vector3(0, 1.2, 0)
+	var grab_y := 0.46  # the block hangs under the grab point (like the real held block)
+	# Down onto the tray, grab, carry it over in an arc, let go (it drops into the gap), rise and fade.
+	var k := GhostHand.track([[0.0, tray_p + Vector3(0, 1.4, 0)], [0.7, tray_p, 0.0, 0.4], [1.1, tray_p, 1.0],
+		[2.9, over, 1.0, -1.8, 1.5], [3.3, over, 0.0], [GHOST_CYCLE, over + Vector3(0, (GHOST_CYCLE - 3.3) * 0.8, 0), 0.0, 1.0]], t)
+	var carry := t > 0.95 and t < 2.9
+	var drop := clampf((t - 2.9) / 0.3, 0.0, 1.0) if t >= 2.9 else 0.0
+	ghost_hand.set_alpha(ghost_hand.fade(GHOST_CYCLE, 0.3, 0.6))
+	# Face the hand along the way from the tray to the gap (fingers forward).
+	ghost_hand.pose(Transform3D(GhostHand.yaw_to(over - tray_p), k.p + Vector3(0, 0.08 * GHOST_S / 8.0, 0)), k.grip * 1.08)
+	var m := Art.block_mesh(kind)
+	if ghost_block.mesh != m:
+		ghost_block.mesh = m
+	ghost_block.visible = carry or drop > 0.0
+	var bp: Vector3 = k.p - Vector3(0, grab_y, 0)
+	if drop > 0.0:
+		bp = (over - Vector3(0, grab_y, 0)).lerp(Vector3(cell.x, hc.y, cell.z), ease(drop, 2.0))
+	ghost_block.global_transform = Transform3D(Basis(Vector3.UP, -int(hint[2]) * PI * 0.5).scaled(Vector3.ONE * 0.92), bp)
+
+
 func _setup_simple(mode: String) -> void:
 	props = PropsScript.new()
 	props.name = "Props"
 	props.main = self
 	add_child(props)
 	if builder.vr:
-		ghost_hand = GhostHandScript.new()
+		ghost_hand = GhostHand.new()
 		ghost_hand.name = "GhostHand"
-		ghost_hand.main = self
+		ghost_hand.size = GHOST_S
 		add_child(ghost_hand)
+		ghost_block = ghost_hand.prop(null, Color(1.0, 0.95, 0.5, 0.6), false)
 	help_label.text = ""
 	help_label.visible = false  # no controls line: picture cues in each view and the join cue instead
 	if mode == "client":
@@ -1382,7 +1428,7 @@ func _process(delta: float) -> void:
 	_update_vr_text()
 	_update_ring_visual()
 	if ghost_hand != null:
-		ghost_hand.update_demo(delta)
+		_ghost_demo(delta)
 	if simple:
 		_update_cues(delta)
 		_update_join_cue()

@@ -65,7 +65,7 @@ them; the knights bonk them. Everything below that needs explaining is switched 
   A + up arrow = jump (a quiet moment), a pulsing heart while you're down. Each fades once the knight has
   done it twice. A glowing arrow in the knight's colour bobs over the goblin the cue is about (only that
   knight's view shows it), and each view hides its own "P2" tag. The Giant's practice and rain umbrella
-  use the shared Cannon Cove ghost hand (`games/cannon_cove/ghost_hand.gd`), Giant-sized.
+  use the shared ghost hand (`core/ghost_hand.gd`), Giant-sized.
 
 **What's new (full mode):**
 - **The village lives and grows.** Villagers stroll between the cottages, the well and the campfire, hurry

@@ -21,7 +21,7 @@ extends Node3D
 ## Text: VR gets one short headline at a time (3-2-1 GO!, LAP 2, FINISH!); TV views show place + lap.
 ## No how-to words at all: the TV views show picture cues (a glowing pad button + an icon, CUES: A + up
 ## arrow = go, swaying left/right arrows = steer, a big red arrow = wrong way, turn this way) that fade
-## after the kid has done the move twice; the VR wheel gets two shared Cannon Cove ghost hands that turn
+## after the kid has done the move twice; the VR wheel gets two shared ghost hands (core/ghost_hand.gd) that turn
 ## it and squeeze the trigger, and a glowing arrow over the wheel when going the wrong way.
 ##
 ## THE GRAND TOUR (story.gd, trackgen.gd): every track is generated from a seed (the host sends a few numbers,

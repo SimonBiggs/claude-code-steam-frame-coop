@@ -25,7 +25,7 @@ const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV p
 ## games", "everything's being driven by text"). Everything below that needs explaining is switched off
 ## behind this one flag (not deleted). What's left is the cosy core loop with no way to fail:
 ##   plant a seed -> water it -> it blooms -> the bees pollinate it -> fruit -> pick it.
-##  - PRACTICE first. Gardener: a see-through glowing glove (ghost_hand.gd) takes a seed from the tray and
+##  - PRACTICE first. Gardener: a see-through glowing glove (core/ghost_hand.gd) takes a seed from the tray and
 ##    pushes it into a glowing ring on the soil; once planted it fetches the can and tips it over the
 ##    sprout. Bees: one flower glows with a halo and the bee's arrow points at it; once a bee has pollen
 ##    the arrow points to the hive. Later the ghost glove shows how to pick ripe fruit if nobody does.
@@ -75,7 +75,7 @@ const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
 const ClassicSeats := preload("res://core/classic_seats.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
-const GhostHandScript := preload("res://games/bee_garden/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const PropsScript := preload("res://games/bee_garden/props.gd")
 const HelpersScript := preload("res://games/bee_garden/helpers.gd")
 const CueScript := preload("res://games/bee_garden/cue.gd")
@@ -263,7 +263,10 @@ var round_t := 0.0
 var rain_done := false
 var gardener_idle := 0.0
 var props: Node3D
-var ghost_hand: Node3D
+var ghost_hand: GhostHand  # simple mode: the see-through glove (core/ghost_hand.gd) and what it carries:
+var ghost_seed: MeshInstance3D  # a seed (or, scaled up, a fruit)
+var ghost_can: Node3D  # the watering can
+var ghost_drops: Array[MeshInstance3D] = []
 var helpers: Node3D
 
 var info_label: Label
@@ -2319,9 +2322,17 @@ func _update_ghost_hand(delta: float) -> void:
 	if gardener == null or gardener.ghost or gardener.hands.is_empty():
 		return
 	if ghost_hand == null:
-		ghost_hand = GhostHandScript.new()
+		# A real-size gardening glove in world units (the gardener sees the world at XR world_scale 4).
+		ghost_hand = GhostHand.new()
+		ghost_hand.size = 3.5
+		ghost_hand.layers = VR_LAYER  # the bees' cameras don't draw this layer
 		add_child(ghost_hand)
-		ghost_hand.set_layer(VR_LAYER)  # the bees' cameras don't draw this layer
+		ghost_seed = ghost_hand.prop(W.sphere(0.07, 8), Color(0, 0, 0, 0), false)
+		ghost_can = ghost_hand.ghostify(W.make_can())
+		for i in 3:
+			var d := ghost_hand.prop(W.sphere(0.04, 6), Color(0, 0, 0, 0), false)
+			d.scale = Vector3(0.8, 1.3, 0.8)
+			ghost_drops.append(d)
 	var busy := false
 	for h in gardener.hands:
 		if h.held != "" or h.gripping:
@@ -2349,9 +2360,74 @@ func _update_ghost_hand(delta: float) -> void:
 				a = head_pos(i) + Vector3(0.0, -0.1, 0.08)
 				b = W.BASKET_POS + Vector3(0.0, 0.3, 0.0)
 				break
-	ghost_hand.show_demo(want, a, b, busy, delta)
+	_ghost_demo(want, a, b, busy, delta)
 	if gardener.flat:
 		_update_gardener_cue(want if ghost_hand.visible else "", delta)
+
+
+## The glove's three loops, in world units. Fades in when the gardener has been idle for a moment.
+##  - "seed":  reach into the seed tray (a), close, carry the seed to the glowing spot (b), PUSH it into
+##             the soil, open, lift away.
+##  - "water": reach for the watering can (a), close, carry it over the spot (b) and TIP it (drops fall).
+##  - "pick":  reach for the ripe fruit (a), close, carry it to the basket (b), let go.
+func _ghost_demo(want: String, a: Vector3, b: Vector3, busy: bool, delta: float) -> void:
+	if not ghost_hand.gate(want != "", delta, 1.0, busy):
+		return
+	var t := ghost_hand.play(want, 3.6 if want == "water" else 3.0, delta)
+	ghost_seed.visible = false
+	ghost_can.visible = false
+	for d in ghost_drops:
+		d.visible = false
+	var start := a + Vector3(0.0, 0.9, 0.5)
+	var at_a := a + Vector3(0.0, 0.25 if want != "pick" else 0.05, 0.12)
+	if want == "water":
+		at_a = a + Vector3(0.0, 0.55, 0.0)
+	var over_b := b + Vector3(0.0, 0.9, 0.3)
+	var k := GhostHand.track([[0.0, start], [0.7, at_a, 0.0], [0.95, at_a, 1.0], [1.9, over_b, 1.0, -1.8, 0.4]], t)
+	var p: Vector3 = k.p
+	var grip: float = k.grip
+	var alpha := 0.55 * minf(1.0, t / 0.3)
+	var tilt := -0.6
+	if t >= 1.9:
+		var k2 := t - 1.9
+		match want:
+			"seed":
+				# Push it down into the soil, open, lift away.
+				var soil := b + Vector3(0.0, 0.12, 0.1)
+				if k2 < 0.5:
+					p = over_b.lerp(soil, ease(k2 / 0.5, -1.5))
+				elif k2 < 0.75:
+					p = soil
+					grip = 1.0 - (k2 - 0.5) / 0.25
+				else:
+					p = soil.lerp(over_b, (k2 - 0.75) / 0.35)
+					grip = 0.0
+					alpha = 0.55 * maxf(0.0, 1.0 - (k2 - 0.75) / 0.35)
+			"water":
+				# Tip the can: the spout goes down and water drops fall on the spot.
+				tilt = -0.6 - 0.75 * minf(1.0, k2 / 0.4)
+				p = over_b + Vector3(0.0, 0.0, 0.35)
+				if k2 > 0.4:
+					for i in ghost_drops.size():
+						var dk := fmod(k2 * 1.6 + i * 0.33, 1.0)
+						ghost_drops[i].visible = true
+						ghost_drops[i].global_position = b + Vector3(0.0, 0.7 * (1.0 - dk) + 0.05, 0.0)
+				if k2 > 1.3:
+					alpha = 0.55 * maxf(0.0, 1.0 - (k2 - 1.3) / 0.4)
+			_:
+				# Let go over the basket.
+				grip = maxf(0.0, 1.0 - k2 / 0.3)
+				alpha = 0.55 * maxf(0.0, 1.0 - (k2 - 0.4) / 0.5) if k2 > 0.4 else 0.55
+	ghost_hand.set_alpha(alpha)
+	ghost_hand.pose(Transform3D(Basis(Vector3.RIGHT, tilt), p), grip)
+	var hx: Transform3D = ghost_hand.hand.global_transform
+	if want == "seed" or want == "pick":
+		ghost_seed.visible = t > 0.8 and grip > 0.5
+		ghost_seed.global_position = hx * Vector3(0, -0.12, -0.1)
+		ghost_seed.scale = Vector3(1.0, 0.8, 1.3) * (1.0 if want == "seed" else 2.0)
+	elif want == "water":
+		ghost_can.visible = t > 0.8
+		ghost_can.global_transform = hx * Transform3D(Basis(), Vector3(0.0, 0.0, 0.05))
 
 
 ## Simple mode, flat gardener (split screen): low in its view a pulsing button (RT on a controller,

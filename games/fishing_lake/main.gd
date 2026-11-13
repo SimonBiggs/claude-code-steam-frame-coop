@@ -25,7 +25,7 @@ extends Node3D
 ## target score, upgrades, journal, treasure maps / bottles, frenzy, streaks, multipliers, awards, line
 ## snaps, the stats boards and nearly all text (one short headline at a time).
 ## No how-to words at all: the TV views show picture cues (a glowing pad button + an icon, CUES) that
-## fade after the kid has done the move twice; VR gets the shared Cannon Cove ghost hand doing the cast
+## fade after the kid has done the move twice; VR gets the shared ghost hand (core/ghost_hand.gd) doing the cast
 ## and a glowing arrow over the practice ring.
 
 const VrText := preload("res://core/vr_text.gd")
@@ -43,7 +43,7 @@ const MusicScript := preload("res://games/fishing_lake/calm_music.gd")
 const JoinListenerScript := preload("res://games/fishing_lake/join_listener.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
-const CoveGhostHand := preload("res://games/cannon_cove/ghost_hand.gd")  # shared see-through hand
+const GhostHand := preload("res://core/ghost_hand.gd")  # shared see-through hand
 const LakeGen := preload("res://games/fishing_lake/lakegen.gd")
 const Book := preload("res://games/fishing_lake/book.gd")
 const Seeded := preload("res://core/seeded.gd")
@@ -3443,7 +3443,7 @@ func _build_ghost_demo() -> void:
 	pivot.name = "Pivot"
 	ghost_demo.add_child(pivot)
 	# The see-through hand is the shared one from Cannon Cove, curled round the ghost rod.
-	var hand: Node3D = CoveGhostHand.new()
+	var hand: Node3D = GhostHand.new()
 	hand.name = "Hand"
 	ghost_demo.add_child(hand)  # top_level: placed on the pivot every frame (_update_teaching)
 	hand.visible = true

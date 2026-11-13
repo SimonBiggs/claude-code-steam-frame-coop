@@ -20,7 +20,7 @@ extends Node3D
 ## games", "everything's being driven by text"). Everything below that it cuts is switched off, not
 ## deleted. In simple mode Rocket Workshop is just the talking puzzle:
 ##  - Rocket 1 is a PRACTICE: the blueprint shows one big glowing button; the matching real button on the
-##    desk glows too and a see-through ghost hand (ghost_hand.gd, pilot only) presses it. Then the ghost
+##    desk glows too and a see-through ghost hand (core/ghost_hand.gd, pilot only) presses it. Then the ghost
 ##    hand pulls the glowing lever: "the TV tells, the pilot does".
 ##  - One new desk control per rocket (button, plugs, dial, switches, shapes; at most two puzzles + the
 ##    lever); only the controls this rocket needs are on the desk. The ghost hand shows how a new one moves.
@@ -60,7 +60,7 @@ const ClassicSeats := preload("res://core/classic_seats.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const VrText := preload("res://core/vr_text.gd")
 const PropsScript := preload("res://games/rocket_workshop/props.gd")
-const GhostHandScript := preload("res://games/rocket_workshop/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const CueScript := preload("res://games/rocket_workshop/cue.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
@@ -201,7 +201,7 @@ var center_tween: Tween
 var vr_center: Label3D
 var simple := SIMPLE_MODE  # other scripts read main.simple
 var props: Node3D  # simple mode: touchable toys round the pilot
-var ghost_hand: Node3D  # simple mode: shows the pilot how (pilot only)
+var ghost_hand: GhostHand  # simple mode: shows the pilot how (pilot only)
 var oops_t := 0.0
 var join_cue: Control  # simple mode: pulsing A + plus + person (a spare controller can join)
 var pilot_arrow: MeshInstance3D  # simple mode: a glowing arrow over the practice button / the lever
@@ -336,9 +336,9 @@ func _setup_game(mode: String) -> void:
 			"done" if String(save.data.daily) == Seeded.today() else "due", session_seed])
 	if SIMPLE_MODE:
 		if mode != "client":
-			ghost_hand = GhostHandScript.new()
+			ghost_hand = GhostHand.new()
+			ghost_hand.layers = PANEL_LAYER  # only the pilot sees it
 			add_child(ghost_hand)
-			set_layers(ghost_hand, PANEL_LAYER)
 		else:
 			_show_center("", 0.0, false)  # clear "Connecting…"; no words: the first rocket rolls out
 	elif mode == "host":
@@ -1897,7 +1897,7 @@ func _update_simple(delta: float) -> void:
 		demo = panel.demo_path({"type": "lever"})
 	panel.glow_key = glow
 	if ghost_hand != null:
-		ghost_hand.play(demo, delta)
+		_ghost_path(demo, delta)
 	var point := glow
 	if phase == "ready" and launched < 2:
 		point = "lever"
@@ -2893,3 +2893,38 @@ func _update_vr_center() -> void:
 	vr_center.modulate.a = center_label.modulate.a
 	vr_center.outline_modulate = Color(0, 0, 0, center_label.modulate.a)
 	VrText.follow(vr_center, players[0].xr_camera, self, 0.3, 1.8)
+
+
+## Simple mode: the see-through hand SHOWS the pilot what to do (instead of text). points: a path of
+## [world position, grip] (panel.demo_path()): the fingertip follows it (pressing a button, or grabbing a
+## plug, the dial or the lever and moving it), fades out, waits a moment and starts again. Empty: hidden.
+func _ghost_path(points: Array, delta: float) -> void:
+	if not ghost_hand.gate(not points.is_empty(), delta):
+		return
+	const MOVE := 0.55  # seconds per path step
+	const HOLD := 0.2
+	const REST := 0.9  # pause between loops
+	var steps := points.size()
+	var end := steps * (MOVE + HOLD)
+	var t := ghost_hand.play("path", end + REST, delta)
+	var k := t / (MOVE + HOLD)
+	var i := mini(int(k), steps - 1)
+	var f := clampf((k - i) * (MOVE + HOLD) / MOVE, 0.0, 1.0)
+	var to: Array = points[i]
+	var from: Array = points[maxi(i - 1, 0)]
+	var a: Vector3 = from[0]
+	var b: Vector3 = to[0]
+	var pos := a.lerp(b, ease(f, -1.8)) if i > 0 else b
+	var grip: bool = bool(to[1]) if f > 0.5 or i == 0 else bool(from[1])
+	var alpha := GhostHand.ALPHA * minf(1.0, t / 0.25)
+	if t > end:
+		alpha *= maxf(0.0, 1.0 - (t - end) / 0.4)
+	ghost_hand.set_alpha(alpha)
+	# The finger points down and a little away from the pilot, like reaching over the desk.
+	var hb := Basis(Vector3.RIGHT, 0.5 - PI * 0.5)
+	if grip:
+		ghost_hand.set_grip(1.0)
+	else:
+		ghost_hand.set_point()
+	ghost_hand.pose(Transform3D(hb, pos - hb * ghost_hand.fingertip()))
+

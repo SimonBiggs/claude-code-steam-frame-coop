@@ -23,7 +23,7 @@ extends Node3D
 ## games", "everything's being driven by text"): roll the dice, hop along the board, a quick minigame
 ## after each round, collect STARS. That's it. Four short rounds; the party starts by itself (no setup
 ## menu, no how-to cards). The first roll is a PRACTICE roll: in VR a see-through ghost hand
-## (ghost_hand.gd) shows how to grab the dice and throw it; TV players see a glowing A button on their
+## (core/ghost_hand.gd) shows how to grab the dice and throw it; TV players see a glowing A button on their
 ## spinning dice block. Spaces are only blue (good: hop 2 more), red (bad: slide back 2) and START; the
 ## STAR is picked up just by passing or landing on it (then it flies off somewhere new). Paths pick
 ## themselves (towards the STAR). No coins, shop, items, events, duels, kid-mode menu or bonus stars.
@@ -46,7 +46,7 @@ extends Node3D
 ## cue_learned); a seat's cues reset when its player leaves. Glowing arrows: one bobs over the STAR on
 ## the first two rounds (where everyone is heading, every screen); for the VR giant one bobs over the
 ## dice to grab until they've grabbed it twice, and one over the spot to touch in a minigame until it
-## has worked twice (with the ghost hand, ghost_hand.gd, unchanged). A spare controller sees a pulsing
+## has worked twice (with the ghost hand, core/ghost_hand.gd, unchanged). A spare controller sees a pulsing
 ## A + plus + person; a lost controller is a soft pop (a happy ding when it's back), a full party /
 ## someone leaving is a soft pop. Pause: just PAUSED (never a second one under the pause menu).
 
@@ -80,7 +80,7 @@ const GiantAvatar := preload("res://games/party_board/giant_avatar.gd")
 const CeremonyScript := preload("res://games/party_board/ceremony.gd")
 const UiMenu := preload("res://core/ui_menu.gd")
 const PropsScript := preload("res://games/party_board/props.gd")
-const GhostHand := preload("res://games/party_board/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const CueScript := preload("res://games/party_board/cue.gd")
 const PartyGen := preload("res://games/party_board/partygen.gd")
 const Festival := preload("res://games/party_board/festival.gd")
@@ -125,7 +125,11 @@ var festival: Festival  ## SIMPLE: Mango's festival pieces and the winners' flag
 var vr_story: Node3D
 var simple := SIMPLE_MODE
 var props: PropsScript  ## SIMPLE: touchable island (every machine; touches are found where the VR player is)
-var ghost: GhostHand  ## SIMPLE, VR player only: the see-through teaching hand
+var ghost: GhostHand  ## SIMPLE, VR player only: the see-through teaching hand (core/ghost_hand.gd)...
+var ghost_die: MeshInstance3D  ## ...and the ghost die it throws
+var ghost_want := ""  ## the demo asked for: "", "throw" (ghost_from -> ghost_to) or "tap" (ghost_from)
+var ghost_from := Vector3.ZERO
+var ghost_to := Vector3.ZERO
 ## SECOND PASS (deep.gd): the pick orbs (modes, Mango's gifts), the warned board surprises, the gifts over the tokens,
 ## the season on the island and Mango's party hall. State "deep" {mode, season, hall_n}, "hz"; sticky event "orbs".
 var picks: PicksScript
@@ -310,6 +314,9 @@ func _setup(mode: String) -> void:
 			ghost = GhostHand.new()
 			ghost.name = "GhostHand"
 			add_child(ghost)
+			var bm := BoxMesh.new()
+			bm.size = Vector3.ONE * 0.085
+			ghost_die = ghost.prop(bm, Color(1.0, 0.95, 0.55, 0.55), false)
 	if simple:
 		_build_arrows()
 		_build_deep()
@@ -854,6 +861,8 @@ func _tv_input(delta: float) -> void:
 
 
 func _process(delta: float) -> void:
+	if ghost != null:
+		_ghost_tick(delta)
 	if not ready_to_play:
 		return
 	if split != null:
@@ -869,6 +878,69 @@ func _process(delta: float) -> void:
 			picks.tick(delta)
 		runner.host_tick(delta)
 		consume_presses()
+
+
+# --- The ghost hand (SIMPLE, VR player only): SHOWS the move instead of text --------------------------
+
+## The hand comes down on the waiting dice (from), curls its fingers round it, swings it towards the island
+## (to) and lets go: the ghost die flies off. Loops until ghost_hide().
+func ghost_throw(from: Vector3, to: Vector3) -> void:
+	ghost_want = "throw"
+	ghost_from = from
+	ghost_to = to
+
+
+## The hand reaches to a spot and taps it twice (minigame demos). Loops until ghost_hide().
+func ghost_tap(at: Vector3) -> void:
+	ghost_want = "tap"
+	ghost_from = at
+
+
+func ghost_hide() -> void:
+	ghost_want = ""
+	if ghost != null:
+		ghost.hide_demo()
+
+
+func _ghost_tick(delta: float) -> void:
+	if not ghost.gate(ghost_want != "", delta):
+		return
+	var cycle := 3.2
+	var t := ghost.play(ghost_want, cycle, delta)
+	ghost.set_alpha(ghost.fade(cycle, 0.3, 0.5))
+	var from := ghost_from
+	if ghost_want == "tap":
+		var cam := get_viewport().get_camera_3d()
+		var head := cam.global_position if cam != null else from + Vector3(0, 0.5, 0.6)
+		var p: Vector3
+		if t < 0.8:
+			p = from.lerp(head, 0.35).lerp(from + Vector3(0, 0.06, 0), ease(t / 0.8, 0.5))
+		else:
+			p = from + Vector3(0, 0.02 + 0.07 * absf(sin(fmod((t - 0.8) / 0.6, 1.0) * PI)), 0)
+		ghost.pose(Transform3D(GhostHand.yaw_to(from - head) * Basis(Vector3.RIGHT, -0.5), p))
+		ghost.set_point()  # the pointing finger out
+		ghost_die.visible = false
+		return
+	var to := ghost_to
+	var at := from + Vector3(0, 0.04, 0)
+	var swing_to := from.lerp(to, 0.35) + Vector3(0, 0.22, 0)
+	# Down onto the dice, grab, swing towards the island, let go: the ghost die flies on.
+	var k := GhostHand.track([[0.0, from + Vector3(0, 0.25, 0)], [0.6, at, 0.0, 0.5], [0.9, at, 1.0], [1.7, swing_to, 1.0, -1.6]], t)
+	var p: Vector3 = k.p
+	var grip: float = k.grip
+	var die_p := from
+	if t >= 1.7:
+		var k2 := clampf((t - 1.7) / 1.0, 0.0, 1.0)
+		p = swing_to + Vector3(0, 0.02, 0) * k2
+		grip = maxf(0.0, 1.0 - (t - 1.7) / 0.2)
+		# The die flies on in an arc and lands near `to`.
+		die_p = (swing_to - Vector3(0, 0.04, 0)).lerp(to, k2) + Vector3(0, sin(k2 * PI) * 0.12, 0)
+	elif t >= 0.9:
+		die_p = p - Vector3(0, 0.04, 0)
+	ghost.pose(Transform3D(GhostHand.yaw_to(to - from), p), grip * 1.08)
+	ghost_die.visible = true
+	ghost_die.global_position = die_p
+	ghost_die.rotation = Vector3(t * 3.0, t * 4.0, 0) if t > 1.7 else Vector3.ZERO
 
 
 # --- Effects (host plays them and sends them to the TV machine) --------------------------------------

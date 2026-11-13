@@ -469,7 +469,7 @@ func _hide_demo() -> void:
 			n.queue_free()
 	_demo_nodes.clear()
 	if _demo_on and main.ghost != null:
-		main.ghost.hide_demo()
+		main.ghost_hide()
 	_demo_on = false
 
 
@@ -483,7 +483,7 @@ func _update_demo() -> void:
 	if main.ghost != null and mg != null and is_instance_valid(mg) and mg.giant:
 		var g: Vector3 = mg.bot_vr_goal()
 		if g != Vector3.INF:
-			main.ghost.show_tap(mg.to_global(g))
+			main.ghost_tap(mg.to_global(g))
 
 
 func _show_result_simple(res: Dictionary) -> void:

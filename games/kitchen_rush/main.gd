@@ -14,7 +14,7 @@ const HudKit := preload("res://core/hud_kit.gd")
 ## games", "everything's being driven by text"). The core: the VR CHEF chops and stacks at the counter;
 ## the TV RUNNERS fetch ingredients and carry plates to customers. With the flag on:
 ##  - PRACTICE first: one patient customer wants a TOASTIE (bun + cheese). The cheese waits on the board;
-##    a see-through ghost hand (ghost_hand.gd, chef's headset only) shows CHOP, then STACK on the plate,
+##    a see-through ghost hand (core/ghost_hand.gd, chef's headset only) shows CHOP, then STACK on the plate,
 ##    and a glowing spot shows where. The runners' arrow leads to the glowing BUN crate, then to the
 ##    glowing pass, then to the customer. Serving them starts round 1.
 ##  - One dish at first (TOASTIE); one new dish per round (SALAD, BURGER, PIZZA). Tickets are pictures
@@ -58,7 +58,7 @@ const PauseMenuScript := preload("res://core/pause_menu.gd")
 const JoinInputScript := preload("res://games/kitchen_rush/join_input.gd")
 const GuideScript := preload("res://games/kitchen_rush/guide.gd")
 const PropsScript := preload("res://games/kitchen_rush/props.gd")
-const GhostHandScript := preload("res://games/kitchen_rush/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const Parties := preload("res://games/kitchen_rush/parties.gd")
 const Cafe := preload("res://games/kitchen_rush/cafe.gd")
 const Save := preload("res://core/save.gd")
@@ -212,7 +212,8 @@ var gifts_shown: Array = []
 var story_count := 0
 var last_story: Dictionary = {}
 var props: Node3D
-var ghost_hand: Node3D
+var ghost_hand: GhostHand  # simple mode, VR chef: the see-through hand (core/ghost_hand.gd)...
+var ghost_knife: MeshInstance3D  # ...and its knife (chop demo)
 var chef_spot: MeshInstance3D
 var crate_glows := {}  # ingredient kind -> glowing lid on its crate / garden bed
 var pass_glow: MeshInstance3D
@@ -3193,10 +3194,51 @@ func _update_chef_teaching(delta: float) -> void:
 	var busy: bool = key != chef_busy or holding
 	chef_busy = key
 	if ghost_hand == null:
-		ghost_hand = GhostHandScript.new()
+		ghost_hand = GhostHand.new()
+		ghost_hand.layers = chef.viewmodel_layer()
 		add_child(ghost_hand)
-		set_layers(ghost_hand, chef.viewmodel_layer())
-	ghost_hand.show_demo(mode, a, b, busy, delta)
+		# The ghost knife (same place as the chef's real one: the blade sticks out 7-29 cm in front).
+		var bm := BoxMesh.new()
+		bm.size = Vector3(0.008, 0.05, 0.22)
+		ghost_knife = ghost_hand.prop(bm, Color(0, 0, 0, 0), true, Transform3D(Basis(), Vector3(0, -0.012, -0.18)))
+	_ghost_demo(mode, a, b, busy, delta)
+
+
+## The ghost hand's two loops (it fades in after the chef has been idle for a moment):
+##  - "chop": the knife hand hovers over the ingredient (a) and swings DOWN through it, twice.
+##  - "stack": the hand reaches the ingredient (a), closes, carries it over to the plate (b) and lets go.
+func _ghost_demo(mode: String, a: Vector3, b: Vector3, busy: bool, delta: float) -> void:
+	if not ghost_hand.gate(mode != "", delta, 1.2, busy):
+		return
+	var p := a
+	var grip := 0.0
+	var tilt := 0.0
+	var alpha := 0.55
+	ghost_knife.visible = mode == "chop"
+	if mode == "chop":
+		var t := ghost_hand.play(mode, 2.2, delta)
+		var top := a + Vector3(0, 0.3, 0.18)
+		var low := a + Vector3(0, -0.02, 0.18)
+		var k := fmod(t, 1.1)
+		if k < 0.6:
+			p = low.lerp(top, ease(k / 0.6, -1.6))  # lift up
+			tilt = -0.5 * (k / 0.6)
+		else:
+			p = top.lerp(low, ease((k - 0.6) / 0.25, 2.5) if k < 0.85 else 1.0)  # CHOP!
+			tilt = -0.5 + 0.8 * minf(1.0, (k - 0.6) / 0.25)
+		grip = 1.0
+		alpha = 0.55 * minf(1.0, t / 0.3)
+	else:
+		var t := ghost_hand.play(mode, 2.8, delta)
+		var at_item := a + Vector3(0, 0.06, 0.06)
+		var at_plate := b + Vector3(0, 0.1, 0.06)
+		var k := GhostHand.track([[0.0, a + Vector3(0, 0.25, 0.15)], [0.7, at_item, 0.0], [0.95, at_item, 1.0],
+			[1.9, at_plate, 1.0, -1.8, 0.15], [2.2, at_plate, 0.0]], t)  # ...let go
+		p = k.p
+		grip = k.grip
+		alpha = ghost_hand.fade(2.7)
+	ghost_hand.set_alpha(alpha)
+	ghost_hand.pose(Transform3D(Basis(Vector3.RIGHT, tilt), p), grip)
 
 
 ## The chef tapped the service bell: DING! If a dish is waiting on the counter: ORDER UP!

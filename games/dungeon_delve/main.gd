@@ -11,7 +11,7 @@ extends Node3D
 ## - No failure: a slime bump just makes a hero dizzy for two seconds; no numbers: gold keys show
 ##   how far you got.
 ## - PRACTICE: the knight gets a glowing straw dummy and a ghost hand swinging a sword through it
-##   (ghost_hand.gd); the heroes get one glowing pot to bonk.
+##   (core/ghost_hand.gd); the heroes get one glowing pot to bonk.
 ## - Everything in reach does something: pots, torches, chests, a friendly skeleton (dungeon.gd).
 ## - Text: VR gets one short headline on the far wall; the TV shows one short line at most.
 ## Modes as in games/engine_template: local (one shared TV view), host (VR on the Steam Frame,
@@ -40,7 +40,7 @@ const Dungeon := preload("res://games/dungeon_delve/dungeon.gd")
 const Monsters := preload("res://games/dungeon_delve/monsters.gd")
 const Hero := preload("res://games/dungeon_delve/hero.gd")
 const VrHands := preload("res://games/dungeon_delve/vr_hands.gd")
-const GhostHand := preload("res://games/dungeon_delve/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const Deep := preload("res://games/dungeon_delve/deep.gd")
 
 const GAME_ID := "dungeon_delve"
@@ -168,8 +168,10 @@ func _setup(mode: String) -> void:
 		hands = VrHands.new()
 		add_child(hands)
 		hands.setup(self, vr_rig)
-		ghost = GhostHand.new()
+		ghost = GhostHand.new()  # practice: the see-through glove + sword shows the swing
+		ghost.look = GhostHand.Look.GLOVE
 		add_child(ghost)
+		ghost.prop(VrHands.sword_mesh())
 		_build_blink()
 	sky = SkyKit.apply(self, "dungeon", vr_rig != null)
 	sky.env.ambient_light_energy = 1.2
@@ -467,7 +469,11 @@ func _ghost(delta: float, phase: String) -> void:
 				best = d
 				target = c
 		on = best < 4.0
-	ghost.show_demo(on, target, vr_rig.head_position(), delta)
+	# The see-through glove's sword swings right through the target, on a loop.
+	if ghost.gate(on, delta):
+		var t := ghost.play("swing", 2.4, delta)
+		ghost.set_alpha(ghost.fade(2.4, 0.3, 0.3))
+		ghost.pose(GhostHand.slash(t, target, vr_rig.head_position()))
 
 
 ## Host: bop a monster (slot 0 = the knight, -1 = a thrown pot). Returns true if it counted.

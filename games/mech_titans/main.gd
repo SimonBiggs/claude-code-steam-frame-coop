@@ -13,7 +13,7 @@ extends Node3D
 ## combat.gd (rules), support.gd (vehicles, AI, citizens), missions.gd (flow, stars), fx.gd.
 ##
 ## SIMPLE_MODE (data.gd; on): no hangar, briefing, shop, stars or results. The game starts straight in
-## round 1: a PRACTICE moment (VR: a ghost hand, ghost_hand.gd, shows a punch at a glowing target, then
+## round 1: a PRACTICE moment (VR: a ghost hand, core/ghost_hand.gd, shows a punch at a glowing target, then
 ## at another; TV: one glowing ring each to fly / drive through, toys.gd), then ONE slow friendly kaiju
 ## to punch until it's dizzy and goes home. A cheer, then the next round, which unlocks one new thing
 ## (round 2 the beam, round 3 the dash; TV players get one new vehicle per round, Y swaps). The Titan
@@ -64,7 +64,7 @@ const Support := preload("res://games/mech_titans/support.gd")
 const Missions := preload("res://games/mech_titans/missions.gd")
 const Kaiju := preload("res://games/mech_titans/kaiju.gd")
 const Toys := preload("res://games/mech_titans/toys.gd")
-const GhostHand := preload("res://games/mech_titans/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const Teach := preload("res://games/mech_titans/teach.gd")
 const RoundGen := preload("res://games/mech_titans/roundgen.gd")
 const Creatures := preload("res://core/creatures.gd")
@@ -121,7 +121,8 @@ var combat: Combat
 var support: Support
 var missions: Missions
 var toys: Toys
-var ghost: GhostHand
+var ghost: GhostHand  # practice, VR pilot: the see-through hand (core/ghost_hand.gd)...
+var ghost_beam: MeshInstance3D  # ...and its pulsing beam
 var teach: Teach  ## SIMPLE_MODE: picture cues instead of how-to words
 var pause_menu: Node
 var built_map := -1
@@ -305,8 +306,15 @@ func _setup(mode: String) -> void:
 		if vr_rig != null:
 			ghost = GhostHand.new()
 			ghost.name = "GhostHand"
-			ghost.main = self
+			ghost.layers = Data.LAYER_VR_ONLY
 			mech.cockpit.add_child(ghost)
+			var c := CylinderMesh.new()
+			c.top_radius = 0.012
+			c.bottom_radius = 0.012
+			c.height = 1.0
+			c.radial_segments = 6
+			c.rings = 1
+			ghost_beam = ghost.prop(c, Color(0.5, 0.95, 1.0, 0.4), false)  # reaches the far target: passes behind VR cards
 	party.allow_slot0 = mode != "client" and vr_rig == null
 	awards.set_player(0, "TITAN")
 	if mode != "client":
@@ -2060,7 +2068,7 @@ func _process(delta: float) -> void:
 	if ghost != null:
 		var pk := missions.practice_kind if missions != null else ""
 		var gk := "punch" if pk.begins_with("punch") else ("beam" if pk == "beam" else "")
-		ghost.show_move(gk if phase == "play" else "", missions.practice_target if missions != null else Vector3.ZERO, delta)
+		_ghost_move(gk if phase == "play" else "", missions.practice_target if missions != null else Vector3.ZERO, delta)
 	if vr_rig != null:
 		var vig := clampf(mech.speed / Mech.WALK_SPEED * 0.55 + mech.turning * 0.75 + (0.9 if mech.dash_t > 0.0 else 0.0), 0.0, 1.0)
 		mech.cockpit.set_vignette(vig)
@@ -2132,3 +2140,50 @@ func _client_dialogue(index: int) -> void:
 func _client_advance() -> void:
 	var seats := party.local_slots()
 	net.request(seats[0] if not seats.is_empty() else 1, "dlg_next", [])
+
+
+## SIMPLE_MODE practice for the VR pilot: the see-through hand SHOWS the move in the cockpit (in front of
+## the pilot's own shoulder): "punch": a fist pulls back, then jabs fast towards the glowing practice
+## target, again and again; "beam": the hand points at the far target, the trigger finger squeezes and a
+## ghost beam pulses. kind "" hides it.
+func _ghost_move(kind: String, target: Vector3, delta: float) -> void:
+	if not ghost.gate(kind != "" and vr_rig != null, delta):
+		return
+	var cycle := 1.7
+	var t := ghost.play(kind, cycle, delta)
+	var ck: Node3D = mech.cockpit
+	var head: Vector3 = ck.to_local(vr_rig.camera.global_position)
+	var tl := ck.to_local(target)
+	var dir := (tl - head).normalized()
+	var shoulder := head + Vector3((-1.0 if tl.x < 0.0 else 1.0) * 0.2, -0.3, 0.0)
+	ghost.set_alpha(ghost.fade(cycle, 0.25, 0.3))
+	var p: Vector3
+	var aim := dir
+	ghost_beam.visible = false
+	if kind == "punch":
+		var reach := 0.0
+		if t < 0.55:
+			reach = -0.06 * (t / 0.55)  # pull back
+		elif t < 0.75:
+			reach = lerpf(-0.06, 0.5, ease((t - 0.55) / 0.2, 0.4))  # fast jab
+		elif t < 1.15:
+			reach = 0.5
+		else:
+			reach = lerpf(0.5, 0.0, (t - 1.15) / (cycle - 1.15))
+		p = shoulder + Vector3(0, 0.05, -0.12) + dir * reach
+		ghost.set_grip(1.15)  # a fist
+	else:
+		p = shoulder + Vector3(0, 0.08, -0.3)
+		aim = (tl - p).normalized()
+		var squeeze := t > 0.5 and t < 1.3
+		ghost.set_point(0.27 if squeeze else 0.0)  # pointing with the first finger, squeezing the trigger
+		ghost_beam.visible = squeeze
+		if squeeze:
+			var blen := 2.5
+			var side := aim.cross(Vector3.FORWARD)
+			side = side.normalized() if side.length() > 0.01 else Vector3.RIGHT
+			var by := Basis(side, aim, side.cross(aim))  # the beam's +Y along aim
+			ghost_beam.global_transform = ck.global_transform * Transform3D(by.scaled_local(Vector3(1.0, blen, 1.0)), p + aim * (0.08 + blen * 0.5))
+			(ghost_beam.material_override as StandardMaterial3D).albedo_color.a = 0.25 + 0.2 * sin(t * 30.0)
+	ghost.pose(ck.global_transform * Transform3D(UiKit.face(aim), p))
+

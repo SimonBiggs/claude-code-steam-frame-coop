@@ -12,7 +12,7 @@ just: **the builder grabs blocks from the tray and makes a path, the runners run
 - Eight short levels (`levels.gd` SIMPLE_LEVELS): one gap to bridge, two bridges, then ONE new block
   per level: stairs, crates, a spring, a fan, a launch pad, and a rainbow finale.
 - Practice: level 1 is one gap. A glowing see-through block shows where the plank goes, and the VR
-  builder sees a ghost hand (`ghost_hand.gd`) take a plank from the tray and drop it in. The runners
+  builder sees a ghost hand (`core/ghost_hand.gd`) take a plank from the tray and drop it in. The runners
   get a glowing ring to jump through over the new bridge, then the flag. On later levels the glowing
   block shows where the first block goes straight away. The tray shows what's left as little cubes.
 - Everything in reach reacts (`props.gd`): toy blocks on a little cloud by your left hip (knock them

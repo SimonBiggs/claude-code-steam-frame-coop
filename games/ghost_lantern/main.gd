@@ -10,7 +10,7 @@ const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV p
 ## games", "everything's being driven by text"): the lantern lights the friendly ghosts up and makes
 ## them dizzy; the TV players vacuum them. That's all.
 ##  - PRACTICE first: the lantern-bearer gets a sleepy ghost floating in front (it only shows in the
-##    light) and, in VR, a see-through ghost hand (ghost_hand.gd) that sweeps a lantern onto it; light
+##    light) and, in VR, a see-through ghost hand (core/ghost_hand.gd) that sweeps a lantern onto it; light
 ##    it until it wakes, giggles and pops, then a second one. Each TV player gets one glowing ghost in
 ##    front of them to vacuum (a pulsing RT + ghost picture until they have caught two).
 ##  - Gentle nights, one new thing at a time: 1 three slow plain ghosts, 2 + little fast sprites,
@@ -36,7 +36,7 @@ const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV p
 const SIMPLE_MODE := true
 const PropsScript := preload("res://games/ghost_lantern/props.gd")
 const Looks := preload("res://games/ghost_lantern/looks.gd")
-const GhostHandScript := preload("res://games/ghost_lantern/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const VR_PRACTICE := 2  # sleepy practice ghosts the lantern-bearer wakes up
 
 const PlayerScript := preload("res://games/ghost_lantern/player.gd")
@@ -208,7 +208,8 @@ var bubble: TextureRect
 var pad_wait := {}  # player index -> seconds left to plug their controller back in
 var simple := SIMPLE_MODE  # other scripts read main.simple
 var props: Node3D  # simple mode: the touchable things around the lantern-bearer
-var ghost_hand: Node3D  # simple mode: the practice ghost hand (VR lantern-bearer only)
+var ghost_hand: GhostHand  # simple mode: the practice ghost hand (VR lantern-bearer only)
+var ghost_beam: MeshInstance3D  # its lantern's see-through light cone
 var practice := SIMPLE_MODE  # simple mode: practice ghosts before night 1 (mirrored to the TV)
 var practice_t := 0.0
 var vr_woken := 0  # practice ghosts the lantern-bearer has woken up
@@ -2145,13 +2146,41 @@ func _update_ghost_hand(delta: float) -> void:
 	if ghost_hand == null:
 		if target == null:
 			return
-		ghost_hand = GhostHandScript.new()
+		ghost_hand = GhostHand.new()
+		ghost_hand.layers = p.viewmodel_layer()
 		add_child(ghost_hand)
-		p._set_layers(ghost_hand, p.viewmodel_layer())
-	if target == null:
-		ghost_hand.show_demo(false, Transform3D(), Vector3.ZERO, false, delta)
-	else:
-		ghost_hand.show_demo(true, p.xr_camera.global_transform, target.global_position, target.reveal > 0.5, delta)
+		# A fist round the lantern handle; the lantern hangs below and points its light along -Z.
+		var glass := SphereMesh.new()
+		glass.radius = 0.045
+		glass.height = 0.09
+		glass.radial_segments = 8
+		glass.rings = 4
+		ghost_hand.prop(glass, Color(0, 0, 0, 0), true, Transform3D(Basis().scaled(Vector3(1.0, 1.25, 1.0)), Vector3(0, -0.06, -0.02)))
+		var cm := CylinderMesh.new()
+		cm.top_radius = 0.02
+		cm.bottom_radius = 0.55
+		cm.height = 2.2
+		cm.radial_segments = 12
+		cm.rings = 1
+		cm.cap_top = false
+		cm.cap_bottom = false
+		ghost_beam = ghost_hand.prop(cm, Color(0.8, 1.0, 0.7, 0.12), true, Transform3D(Basis(Vector3.RIGHT, PI / 2.0), Vector3(0, -0.06, -1.14)))
+	var lit: bool = target != null and target.reveal > 0.5  # the player's real beam is on it: hide and wait
+	if not ghost_hand.gate(target != null, delta, 1.2, lit):
+		return
+	# Rest where the right hand is, sweep the beam across until it points at the ghost, hold, fade.
+	var t := ghost_hand.play("sweep", 3.0, delta)
+	var head: Transform3D = p.xr_camera.global_transform
+	var yaw_basis := Basis(Vector3.UP, head.basis.get_euler().y)
+	var rest := head.origin + yaw_basis * Vector3(0.24, -0.4, -0.4)
+	var to: Vector3 = (target.global_position - rest).normalized()
+	var off := to.rotated(Vector3.UP, 1.0 if to.cross(yaw_basis * Vector3.FORWARD).y < 0.0 else -1.0)
+	var dir := off.slerp(to, ease(clampf((t - 0.3) / 1.4, 0.0, 1.0), -1.8)).normalized()
+	var alpha := ghost_hand.fade(3.0, 0.3, 0.5, 0.5)
+	ghost_hand.set_alpha(alpha)
+	(ghost_beam.material_override as StandardMaterial3D).albedo_color.a = alpha * (0.16 if t > 1.7 else 0.1)
+	var up := Vector3.UP if absf(dir.y) < 0.95 else Vector3.BACK
+	ghost_hand.pose(Transform3D(UiKit.aim(dir, up), rest + Vector3(0, sin(t * 3.0) * 0.01, 0)), 0.8)
 
 
 ## Practice: a soft glowing arrow bobs above the sleepy ghost, pointing down at it ("shine here"),
