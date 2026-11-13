@@ -281,15 +281,7 @@ static func gift(id: String) -> Dictionary:
 
 ## Three different unlocked gifts: the newest unlock always among them (the same on every machine for a seed).
 static func gift_choices(hall_n: int, seed_value: int) -> Array:
-	var un := unlocked(hall_n)
-	var newest: String = un[un.size() - 1]
-	var pool: Array = Seeded.shuffled(Seeded.rng(seed_value, "gifts"), un.filter(func(id: String) -> bool: return id != newest))
-	var out: Array = [newest]
-	for id in pool:
-		if out.size() >= 3:
-			break
-		out.append(id)
-	return Seeded.shuffled(Seeded.rng(seed_value, "gift order"), out)
+	return PickOrbs.gift_choices(unlocked(hall_n), "", seed_value)  # (the shared gift pick)
 
 
 ## A die with a gift on (LUCKY DIE: 1-3 count 3 more). Never more than DIE_MAX.

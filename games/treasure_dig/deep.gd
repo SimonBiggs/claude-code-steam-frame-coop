@@ -287,23 +287,7 @@ static func gift(id: String) -> Dictionary:
 ## Three different unlocked tools: the newest unlock always among them, not the last one again when there are
 ## others (the same on every machine for a seed).
 static func gift_choices(cases: int, last: String, seed_value: int) -> Array:
-	var un := unlocked(cases)
-	var newest: String = un[un.size() - 1]
-	var pool: Array = []
-	for id in un:
-		if id != newest and (id != last or un.size() <= 3):
-			pool.append(id)
-	pool = Seeded.shuffled(Seeded.rng(seed_value, "gifts"), pool)
-	var out: Array = [newest] if newest != last or un.size() <= 3 else []
-	for id in pool:
-		if out.size() >= 3:
-			break
-		out.append(id)
-	if out.size() < 3:
-		for id in un:
-			if out.size() < 3 and not out.has(id):
-				out.append(id)
-	return Seeded.shuffled(Seeded.rng(seed_value, "gift order"), out)  # (the newest not always on the same orb)
+	return PickOrbs.gift_choices(unlocked(cases), last, seed_value)  # (the shared gift pick)
 
 
 # --- Museum -----------------------------------------------------------------------------------------------
