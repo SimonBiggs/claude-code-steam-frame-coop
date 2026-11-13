@@ -11,11 +11,16 @@ extends RefCounted
 ## only counts when that lake happens to have it.
 ## check(lake) lists what's wrong (empty = fair): every spot reachable by a cast from the jetty end and
 ## by the boats, spots apart, the wish catchable, every fish in the mix has its spot and its weather.
-## Network: the host sends [seed, level, wish, daily]; every machine rebuilds the same lake.
+## THIRD PASS: opts.season (seasons.gd) changes the weather mix, and FLOCK VISITS (visits: [{at, pos, r}]) are
+## seeded on their own stream (the rest of the lake is the same with or without them): none on a first lake,
+## then 1-3, each on open water a cast can reach, apart in time, never on the legend's or the golden fish's
+## arrival. check() proves them; a mode plays the first Tackle.num(mode).visits of them.
+## Network: the host sends [seed, level, wish, daily, season]; every machine rebuilds the same lake.
 
 const Seeded := preload("res://core/seeded.gd")
 const Lake := preload("res://games/fishing_lake/lake.gd")
 const FishScript := preload("res://games/fishing_lake/fish.gd")
+const Seasons := preload("res://games/fishing_lake/seasons.gd")
 
 const MINNOW := 0
 const PERCH := 1
@@ -80,11 +85,13 @@ static func generate(seed_value: int, opts: Dictionary = {}) -> Dictionary:
 	var level := clampi(int(opts.get("level", 3)), 0, 3)
 	var daily := bool(opts.get("daily", false))
 	var want := int(opts.get("wish", -1))
+	var season := String(opts.get("season", ""))
+	var ww: Array = Seasons.WEATHER_W.get(season, Seasons.WEATHER_W[""])
 	var shape_for := -1 if daily or not unlocked(want, level) else want
 	var r := Seeded.rng(seed_value, "lake")
 	# Weather (the wish's weather when it needs one).
 	var ws := weathers_for(level)
-	var weather: String = ws[Seeded.weighted(r, [3, 2, 2].slice(0, ws.size()))]
+	var weather: String = ws[Seeded.weighted(r, ww.slice(0, ws.size()))]
 	if NEEDS.has(shape_for):
 		weather = NEEDS[shape_for]
 	var sky: Array = SKY[weather]
@@ -134,9 +141,46 @@ static func generate(seed_value: int, opts: Dictionary = {}) -> Dictionary:
 		"p0": snappedf(r.randf_range(float(sky[1]), float(sky[2])), 0.001), "p1": snappedf(r.randf_range(float(sky[3]), float(sky[4])), 0.001),
 		"rain_from": snappedf(rain_from, 0.001), "rain_to": snappedf(rain_to, 0.001), "spots": spots, "mix": mix,
 		"legend": legend, "legend_at": snappedf(r.randf_range(0.45, 0.7), 0.001),
-		"golden": golden, "golden_at": snappedf(r.randf_range(0.2, 0.6), 0.001), "wish": -1}
+		"golden": golden, "golden_at": snappedf(r.randf_range(0.2, 0.6), 0.001), "wish": -1, "season": season}
 	lake.wish = want if catchable(lake).has(want) else -1
+	lake["visits"] = _visits(seed_value, lake)
 	return lake
+
+
+## Flock visits (their own seeded stream): [{at: day fraction, pos, r}], in time order.
+static func _visits(seed_value: int, lake: Dictionary) -> Array:
+	var level := int(lake.level)
+	if level <= 0:
+		return []
+	var r := Seeded.rng(seed_value, "visits")
+	var n := 1 if level == 1 else (1 + r.randi() % 2 if level == 2 else 2 + r.randi() % 2)
+	var out: Array = []
+	var tries := 0
+	while out.size() < n and tries < 40:
+		tries += 1
+		var at := snappedf(r.randf_range(Seasons.VISIT_FROM, Seasons.VISIT_TO), 0.001)
+		if _visit_time_problem(at, lake, out) != "":
+			continue
+		for p in _slots(r):
+			var pp: Vector3 = p
+			if reach_problem(pp, Seasons.VISIT_R) == "":
+				out.append({"at": at, "pos": pp, "r": Seasons.VISIT_R})
+				break
+	out.sort_custom(func(a: Dictionary, b: Dictionary) -> bool: return float(a.at) < float(b.at))
+	return out
+
+
+static func _visit_time_problem(at: float, lake: Dictionary, others: Array) -> String:
+	if at < Seasons.VISIT_FROM - 0.0001 or at > Seasons.VISIT_TO + 0.0001:
+		return "at %.2f outside the day" % at
+	if bool(lake.legend) and absf(at - float(lake.legend_at)) < 0.1:
+		return "on Old Whiskers' arrival"
+	if bool(lake.golden) and absf(at - float(lake.golden_at)) < 0.06:
+		return "on the golden fish's visit"
+	for o in others:
+		if absf(at - float(o.at)) < Seasons.VISIT_GAP:
+			return "too soon after another flock"
+	return ""
 
 
 ## Candidate spot centres (a jittered fan in front of the jetty), shuffled.
@@ -251,4 +295,19 @@ static func check(lake: Dictionary) -> Array:
 		why.append("the wish %d can't be caught" % int(lake.wish))
 	if lake.weather == "rain" and not (float(lake.rain_from) < float(lake.rain_to) - 0.3):
 		why.append("too little rain")
+	var vs: Array = lake.get("visits", [])
+	if level <= 0 and not vs.is_empty():
+		why.append("flocks on a first lake")
+	if vs.size() > 3:
+		why.append("%d flocks" % vs.size())
+	for i in vs.size():
+		var v: Dictionary = vs[i]
+		var tp := _visit_time_problem(float(v.at), lake, vs.slice(0, i))
+		if tp != "":
+			why.append("flock %d: %s" % [i, tp])
+		var rp := reach_problem(v.pos, float(v.r))
+		if rp != "":
+			why.append("flock %d: %s" % [i, rp])
+		if i > 0 and float(v.at) < float(vs[i - 1].at):
+			why.append("flocks out of order")
 	return why

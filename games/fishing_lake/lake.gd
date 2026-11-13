@@ -147,6 +147,13 @@ var map_beam_mat: StandardMaterial3D
 var t := 0.0
 var night := 0.0
 var terrain_bumps: Array[float] = []
+var crown_mm: MultiMeshInstance3D  # the tree crowns (set_season recolours them)
+var crown_base: Array[Color] = []
+var season := ""
+var season_root: Node3D  # this season's props by the jetty foot, the drift and the winter ice
+var garden_root: Node3D  # OLLIE'S SHORE GARDEN (seasons.gd keepsakes)
+var _garden_key := ""
+var garden_n := 0
 
 
 func build() -> void:
@@ -479,6 +486,7 @@ func _build_landmarks() -> void:
 	beam_mat = StandardMaterial3D.new()
 	beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	beam_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	beam_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	beam_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	beam_mat.albedo_color = Color(1.0, 0.9, 0.55, 0.0)
@@ -592,7 +600,8 @@ func _build_plants() -> void:
 	leaf.vertex_color_use_as_albedo = true
 	leaf.vertex_color_is_srgb = true
 	leaf.roughness = 0.9
-	_multimesh(cone, leaf, crowns, crown_cols)
+	crown_mm = _multimesh(cone, leaf, crowns, crown_cols)
+	crown_base = crown_cols.duplicate()
 	# Round bushes and flowers on the banks, rocks along the water's edge.
 	var bushes: Array[Transform3D] = []
 	var bush_cols: Array[Color] = []
@@ -740,6 +749,7 @@ func _build_tank() -> void:
 	var gm := StandardMaterial3D.new()
 	gm.albedo_color = Color(0.5, 0.85, 1.0, 0.3)
 	gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	gm.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	gm.roughness = 0.1
 	gm.emission_enabled = true
 	gm.emission = Color(0.2, 0.45, 0.6)
@@ -800,6 +810,7 @@ func _build_weather() -> void:
 	rain_mat = StandardMaterial3D.new()
 	rain_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	rain_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	rain_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	rain_mat.albedo_color = Color(0.8, 0.88, 1.0, 0.0)
 	var drop: Mesh = main.box_mesh(Vector3(0.012, 0.32, 0.012))
 	rain_far = _rain_emitter(drop, 260, Vector3(24.0, 0.5, 24.0), 1.15)
@@ -964,6 +975,7 @@ func _build_markers() -> void:
 	map_beam_mat = StandardMaterial3D.new()
 	map_beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	map_beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	map_beam_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	map_beam_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	map_beam_mat.albedo_color = Color(1.0, 0.3, 0.2, 0.45)
 	map_beam.material_override = map_beam_mat
@@ -1170,6 +1182,7 @@ func set_spots(spots: Array) -> void:
 				var dm := StandardMaterial3D.new()
 				dm.albedo_color = Color(0.02, 0.08, 0.2, 0.55)
 				dm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				dm.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 				dm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 				disc.material_override = dm
 				disc.position.y = 0.015
@@ -1203,6 +1216,7 @@ func set_spots(spots: Array) -> void:
 				var sm := StandardMaterial3D.new()
 				sm.albedo_color = Color(0.95, 0.88, 0.6, 0.45)
 				sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				sm.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 				sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 				sand.material_override = sm
 				sand.position.y = 0.012
@@ -1229,6 +1243,7 @@ func set_wish(kind: int, pos: Vector3) -> void:
 		wish_beam_mat = StandardMaterial3D.new()
 		wish_beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		wish_beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		wish_beam_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 		wish_beam_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 		beam.material_override = wish_beam_mat
 		beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -1460,6 +1475,7 @@ func _build_pond() -> void:
 	var wm := StandardMaterial3D.new()
 	wm.albedo_color = Color(0.35, 0.75, 0.9, 0.45)
 	wm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	wm.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	wm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	inner.material_override = wm
 	inner.position = Vector3(0, 0.025, 0)  # the fish swim half through it (the lake's own water hides deeper fish)
@@ -1565,3 +1581,104 @@ func update_pond(found: Array, shiny: Dictionary, level: int) -> void:
 		var a := t * (0.5 + 0.06 * i) * s + i * 1.7
 		f.position = Vector3(cos(a) * r, 0.03 + 0.015 * sin(t * 1.5 + i), sin(a) * r)
 		f.rotation.y = atan2(-sin(a) * s, cos(a) * s)  # fish face +Z: along the circle
+
+
+# --- SEASONS (third pass, seasons.gd) ----------------------------------------------------
+const SeasonKit := preload("res://core/season_kit.gd")
+const MeshKit := preload("res://core/mesh_kit.gd")
+const Seasons := preload("res://games/fishing_lake/seasons.gd")
+
+
+## Dress the lake for a season (every machine; the host's season comes with the lake key).
+func set_season(s: String) -> void:
+	s = Seasons.valid(s)
+	if s == season:
+		return
+	season = s
+	if season_root != null:
+		season_root.queue_free()
+	season_root = Node3D.new()
+	season_root.name = "Season"
+	add_child(season_root)
+	# Trees: blossom in spring, gold and red in autumn, frosty in winter.
+	if crown_mm != null:
+		var rng := RandomNumberGenerator.new()
+		rng.seed = 99
+		for i in crown_base.size():
+			var c := crown_base[i]
+			match s:
+				"spring":
+					if rng.randf() < 0.45:
+						c = Color(1.0, 0.72, 0.85).lerp(Color(0.98, 0.9, 0.95), rng.randf() * 0.5)
+				"autumn":
+					c = [Color(0.95, 0.5, 0.12), Color(0.85, 0.25, 0.12), Color(0.95, 0.75, 0.2), c][rng.randi() % 4]
+				"winter":
+					c = c.lerp(Color(0.92, 0.95, 1.0), 0.65)
+			crown_mm.multimesh.set_instance_color(i, c)
+	# Two seasonal props by the jetty foot (core/season_kit.gd).
+	var b := MeshKit.Builder.new()
+	for i in 2:
+		var at := Vector3(-2.3 if i == 0 else 2.3, 0.0, SHORE_Z + 1.2)
+		at.y = ground_y(at)
+		SeasonKit.prop(b, s, at, i, 1.1, Vector3(0, 0, -1))
+	season_root.add_child(MeshKit.instance(b.build(), false))
+	# What drifts down over the lake (summer: a little dandelion fluff).
+	season_root.add_child(SeasonKit.drift(Seasons.DRIFT[s], s, {"box": Vector3(18.0, 1.0, 14.0), "at": Vector3(0.0, 8.0, -6.0),
+		"amount": 30 if s == "summer" else 70, "size": 0.12 if s == "summer" else 0.16}))
+	# Winter: ice along the shore (the spots and boats keep 2 m off the shore: lakegen.reach_problem).
+	if s == "winter":
+		var ice := MeshInstance3D.new()
+		var st := SurfaceTool.new()
+		st.begin(Mesh.PRIMITIVE_TRIANGLES)
+		var seg := 64
+		var r0 := LAKE_R - 1.4
+		var r1 := LAKE_R + 0.3
+		for i in seg:
+			var a0 := TAU * float(i) / seg
+			var a1 := TAU * float(i + 1) / seg
+			var p00 := LAKE_C + Vector3(sin(a0) * r0, 0.04, cos(a0) * r0)
+			var p01 := LAKE_C + Vector3(sin(a1) * r0, 0.04, cos(a1) * r0)
+			var p10 := LAKE_C + Vector3(sin(a0) * r1, 0.04, cos(a0) * r1)
+			var p11 := LAKE_C + Vector3(sin(a1) * r1, 0.04, cos(a1) * r1)
+			for v in [p00, p11, p10, p00, p01, p11]:
+				st.set_normal(Vector3.UP)
+				st.add_vertex(v)
+		ice.mesh = st.commit()
+		var m := StandardMaterial3D.new()
+		m.albedo_color = Color(0.85, 0.93, 1.0)
+		m.roughness = 0.3
+		m.cull_mode = BaseMaterial3D.CULL_DISABLED
+		ice.material_override = m
+		ice.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		season_root.add_child(ice)
+	_garden_key = ""  # (the garden doesn't change with the season, but rebuild it once the lake is dressed)
+
+
+## OLLIE'S SHORE GARDEN: one seasonal keepsake per granted wish (seasons.gd keepsake_spots), oldest nearest the jetty.
+func update_garden(keepsakes: Array) -> void:
+	var key := str(keepsakes)
+	if key == _garden_key:
+		return
+	_garden_key = key
+	garden_n = mini(keepsakes.size(), Seasons.MAX_KEEPSAKES)
+	if garden_root != null:
+		garden_root.queue_free()
+		garden_root = null
+	if keepsakes.is_empty():
+		return
+	garden_root = Node3D.new()
+	garden_root.name = "OlliesGarden"
+	add_child(garden_root)
+	var spots := Seasons.keepsake_spots(keepsakes.size())
+	var b := MeshKit.Builder.new()
+	for i in spots.size():
+		var at: Vector3 = spots[i]
+		at.y = ground_y(at) - 0.02
+		var face := LAKE_C - at
+		face.y = 0.0
+		SeasonKit.prop(b, Seasons.valid(String(keepsakes[i])), at, i, 1.5, face.normalized())
+	garden_root.add_child(MeshKit.instance(b.build(), false))
+
+
+func garden_count() -> int:
+	return garden_n
