@@ -8,3 +8,8 @@ arcade/thumbs/*.import
 # LAN update state of this copy (signed manifest, staging, backup: core/lan_update.gd) and Python caches of tools/
 .update/
 __pycache__/
+# shots / videos written by a tool into the project root by mistake (never real work: see dev.debt stray-file)
+/*.png
+/*.jpg
+/*.mp4
+/{*

@@ -11,7 +11,7 @@
 //   await g.shot()                                       // PNG path (Read it), default ~/.cache/gdev-offscreen/<port>/shot.png
 //   await g.log(30); await g.quit()                      // godot.list(), godot.stopAll()
 //   g = await godot.launch({project, scene, vr: true})   // fake VR player (BOT_VR=1): g.vr({head, look, left, right,
-//     trigger, grip, a, b, stick_l, stick_r}), g.vrSwing("right", [0,.3,-.6]), g.vrTrigger(), g.vrShot() = headset view (g.vrShot(path, {stereo: true}): both eyes side by side),
+//     trigger, grip, a, b, stick_l, stick_r}), g.vrSwing("right", [0,.3,-.6]), g.vrTrigger(), g.vrShot() = headset view (g.vrShot({stereo: true}) or g.vrShot(path, {stereo: true}): both eyes side by side),
 //     g.span(a, b, fps, {vr: true}) / g.at(t, {vr: true}) = the recorded headset view
 //   Several MACHINES (one host + TV-machine clients, networked over one shared DUO_PORT on 127.0.0.1):
 //   grp = await godot.launchGroup({project, scene, clients: 2, vr, record})   // host DUO_HOST=1 (+BOT_VR=1 if vr), clients
@@ -25,6 +25,15 @@ import { existsSync } from "node:fs";  // sync-ok: safeCwd's single stat per spa
 import { join, resolve } from "node:path";
 
 const HOME = process.env.HOME!;
+
+/** Where a shot / video goes. A relative path lands in this run's folder, never the game project (git add -A then
+ *  commits it: g.vrShot({stereo: true}) wrote a PNG named '{ "stereo": true }' into duo-arena, 2026-11-12). An options
+ *  object or anything that isn't a string is refused loudly instead of being turned into a file name. */
+export function outPath(p: unknown, dir: string, def: string): string {
+  if (p === undefined || p === null || p === "") return join(dir, def);
+  if (typeof p !== "string") throw new Error(`godot.ts: output path must be a string, got ${JSON.stringify(p)} (options go in the next argument, e.g. g.vrShot(undefined, {stereo: true}))`);
+  return p.startsWith("/") ? p : p.startsWith("~/") ? join(HOME, p.slice(2)) : join(dir, p);
+}
 const GDEV = join(HOME, ".local/share/gdev");
 const RUNS = join(HOME, ".cache/gdev-offscreen");
 const AUTOLOAD = 'GDev="*res://addons/gdev/bridge.gd"';
@@ -186,7 +195,7 @@ export class Game {
   sleep(seconds: number) { return this.cmd("wait", { seconds }); }
   speed(value: number) { return this.cmd("speed", { value }); }
   scene(path: string) { return this.cmd("scene", { path }); }
-  async shot(path = join(this.dir, "shot.png"), width = 1280) { return (await this.cmd("shot", { path, width })).path as string; }
+  async shot(path?: string, width = 1280) { return (await this.cmd("shot", { path: outPath(path, this.dir, "shot.png"), width })).path as string; }
   // --- Fake VR (launch with vr: true) ---
   /** Drive the VR player: {head, look, left, right: [x,y,z] world (relative: true = move by), trigger, grip: 0..1,
    *  a, b: bool, stick_l, stick_r: [x,y]}. Returns head/hand positions; g.vr() just reports them. */
@@ -202,7 +211,9 @@ export class Game {
   /** What the headset would show: PNG from the VR head camera (or any Camera3D node path). */
   /** (Waits up to ~1 s for VR cards / banners to finish fading in or out first, so a shot never shows a card
    *  half-faded as "washed out": Snowman Maker's TUMBLE card 2026-11-12. o.settle: false shoots at once.) */
-  async vrShot(path = join(this.dir, "vr.png"), o: { camera?: string; width?: number; height?: number; stereo?: boolean; settle?: boolean } = {}) {
+  async vrShot(path?: string | { camera?: string; width?: number; height?: number; stereo?: boolean; settle?: boolean }, o: { camera?: string; width?: number; height?: number; stereo?: boolean; settle?: boolean } = {}) {
+    if (path && typeof path === "object" && !Array.isArray(path)) { o = { ...path, ...o }; path = undefined; }  // g.vrShot({stereo: true})
+    path = outPath(path, this.dir, "vr.png");
     const { settle, ...rest } = o;
     if (settle !== false) await this.settleVrUi();
     return (await this.cmd("camshot", { path, ...rest })).path as string;
@@ -290,7 +301,8 @@ export class Game {
     return out.trim().split("\n");
   }
   /** MP4 of the recording (or from..to), real speed. Returns its path (SendUserFile it to Simon). */
-  async video(from: number | string = 0, to?: number | string, out = join(this.dir, "run.mp4"), o: { vr?: boolean } = {}) {
+  async video(from: number | string = 0, to?: number | string, out?: string, o: { vr?: boolean } = {}) {
+    out = outPath(out, this.dir, "run.mp4");
     const fr = await this.frames(o);
     const a = await this.time(from), b = to === undefined ? Infinity : await this.time(to);
     const pick = fr.filter(f => f.t >= a && f.t <= b);

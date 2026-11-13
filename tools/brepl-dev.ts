@@ -358,6 +358,11 @@ export async function debt() {
       const noUid = (await sh(`git ls-files '*.gd' | while read f; do [ -n "$(git ls-files "$f.uid")" ] || echo "$f"; done | head -5`, dir)).out.trim();
       if (noUid) issues.push({ kind: "missing-uid", what: `${r}: scripts with no .uid in git: ${noUid.split("\n").join(", ")}`, fix: "import in a worktree (godot-test --headless --path . --import), commit the .uid files and land" });
     }
+    // Stray files: a tool's options object or a bare file name used as an output path writes junk into the repo and
+    // git add -A commits it (a 450 KB PNG named '{ "stereo": true }' sat in duo-arena from 2026-11-12). Tracked names
+    // with JSON/quote characters, or shots/videos at the repo root, are never real work.
+    const stray = (await sh(`git ls-files | grep -E '[{}"\\\\]|^[^/]*\\.(png|jpe?g|mp4|webm|gif)$' | head -5`, dir)).out.trim();
+    if (stray) issues.push({ kind: "stray-file", what: `${r}: junk tracked files: ${stray.split("\n").join(", ")}`, fix: "git rm them and land; find the tool that wrote them (godot.ts outPath refuses non-string paths) and fix it" });
     if (+ahead > 0) issues.push({ kind: "unpushed", what: `${r}: ${ahead} commits not pushed`, fix: "git push" });
     const main = (await sh("git symbolic-ref --short HEAD", dir)).out;
     for (const b of (await sh(`git branch --format='%(refname:short)' --no-merged ${main}`, dir)).out.split("\n").filter(Boolean)) {
