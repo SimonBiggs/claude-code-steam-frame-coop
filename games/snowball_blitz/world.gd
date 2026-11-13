@@ -225,6 +225,7 @@ static func _chimney_smoke() -> CPUParticles3D:
 	var qm := StandardMaterial3D.new()
 	qm.albedo_color = Color(0.85, 0.85, 0.9, 0.35)
 	qm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	qm.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # (see-through scenery: under VR cards)
 	qm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	q.material = qm
 	smoke.mesh = q
@@ -335,6 +336,7 @@ static func _add_snowfall(main: Node3D, vr: bool) -> void:
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
 	m.albedo_color = Color(1, 1, 1, 0.9)
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # (see-through scenery: under VR cards)
 	q.material = m
 	p.mesh = q
 	p.position = Vector3(0, 14, 0)
@@ -430,6 +432,7 @@ static func _add_village_square(main: Node3D, radius: float, rng: RandomNumberGe
 	ice.roughness = 0.05
 	pond.material_override = ice
 	pond.position = pond_at
+	pond.name = "Pond"  # (rink.gd grows it with Bobo's skating friends)
 	main.add_child(pond)
 	var family: Array[Transform3D] = []
 	for i in 3:

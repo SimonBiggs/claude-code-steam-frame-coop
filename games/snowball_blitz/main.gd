@@ -47,6 +47,13 @@ const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV p
 ## Snow King's and the Yeti's big attacks glow and put a ring on the snow first (core/warn_rings.gd, every machine).
 ## Events: "orbs" [stage, entries] and "gifts" {slot: gifts} are sticky (a late machine catches up), "take" [i, slot],
 ## "warn" [boss net id, pos, radius, colour, secs]. SB_WAVE=n jumps to wave n after the picks (What's New "try").
+##
+## THIRD PASS: SEASONS (seasons.gd: the square dresses for the season, SeasonKit / ARCADE_SEASON; net state "season"),
+## WARNED SURPRISES (tricks.gd: SNOW SLIDE lines and ICICLES circles, seeded per siege, told on warn rings + a card
+## first; events "trick" [wave, kind, plan] / "trick_go" [wave, kind, plan], net state "trick" "tell:W:kind" /
+## "go:W:kind"; SB_TRICK=slide|icicles puts one in every wave from wave 1 for tests and What's New), and BOBO'S
+## FRIENDS (rink.gd: a seeded visitor per siege who stays to skate on the growing pond once STAY_WAVES waves are held;
+## save.data.rink; sticky event "rink" [ids, visitor]).
 const SIMPLE_MODE := true
 const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
@@ -60,6 +67,10 @@ const WarnRings := preload("res://core/warn_rings.gd")
 const Gifts := preload("res://games/snowball_blitz/gifts.gd")
 const Bosses := preload("res://games/snowball_blitz/bosses.gd")
 const Looks := preload("res://games/snowball_blitz/looks.gd")
+const Tricks := preload("res://games/snowball_blitz/tricks.gd")
+const Seasons := preload("res://games/snowball_blitz/seasons.gd")
+const Rink := preload("res://games/snowball_blitz/rink.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
 const ORB_ROW := Vector3(0.0, 0.0, -4.4)  # the pick orbs float in a row here (in front of the VR player, inside the fort)
 const ORB_GAP := 2.4
 const ORB_Y := 2.0  # (above the walls and the props round the VR player, seen from every start spot)
@@ -220,6 +231,17 @@ var pick_ids: Array = []
 var pick_t := 0.0
 var picked := {}  # slot -> orb index (this pick)
 var gifts_taken := {}  # slot -> [gift ids] this game (telemetry)
+var season := ""  # this game's season (seasons.gd; every machine)
+var seasons_node: Node3D
+var rink: Node3D  # Bobo's friends' skating pond (rink.gd; every machine)
+var friend := ""  # this siege's visitor (rink.gd id)
+var friend_stayed := false
+var trick := {}  # host / local: this wave's surprise (tricks.gd), {} when none
+var trick_t := 0.0  # host: seconds to its tell (phase "wait"), then to its going off ("tell")
+var trick_phase := ""  # "", "wait", "tell", "go"
+var trick_log: Array = []  # every machine: [wave, kind, told (siege_t), went (siege_t)] (bots check the tell came first)
+var tricks_done := 0
+var slides: Array = []  # every machine: rolling snow slide balls [{node, from, dir, len, t}]
 
 
 func _ready() -> void:
@@ -227,6 +249,12 @@ func _ready() -> void:
 	var xr := XRServer.find_interface("OpenXR")
 	var will_vr := xr != null and xr.is_initialized() and not OS.has_environment("DUO_JOIN")
 	WorldScript.build(self, ARENA_RADIUS, will_vr)
+	seasons_node = Seasons.new()
+	add_child(seasons_node)
+	rink = Rink.new()
+	rink.name = "Rink"
+	add_child(rink)
+	rink.attach(get_node("Pond"))
 	_build_fort()
 	_build_hud()
 	if SIMPLE_MODE:
@@ -250,6 +278,7 @@ func _ready() -> void:
 	net.sticky_event("village")  # a machine that joins later gets the latest one (core/net.gd)
 	net.sticky_event("orbs")
 	net.sticky_event("gifts")
+	net.sticky_event("rink")
 	seats = ClassicSeats.new(self, {
 		"no_keys": -2,  # player.gd key_set -2: controller only
 		"free_actions": ["restart", "pause"],
@@ -353,10 +382,12 @@ func mat(mat_name: String) -> StandardMaterial3D:
 		"ice":
 			m = make_material(Color(0.6, 0.85, 1.0, 0.45), 0.6)
 			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			m.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # (see-through scenery: under VR cards)
 			m.roughness = 0.1
 		"thaw":
 			m = make_material(Color(1.0, 0.65, 0.3, 0.35), 1.0)
 			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			m.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # (see-through scenery: under VR cards)
 		"skin":
 			m = make_material(Color(1.0, 0.8, 0.65), 0.0)
 		"lid":
@@ -372,6 +403,7 @@ func mat(mat_name: String) -> StandardMaterial3D:
 		"steam":
 			m = make_material(Color(1, 1, 1, 0.35), 0.0)
 			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			m.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # (see-through scenery: under VR cards)
 			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		_:
 			if mat_name.begins_with("scarf"):
@@ -1089,6 +1121,9 @@ func _start_simple_wave() -> void:
 	wave_spawned = 0
 	simple_new_left = 0
 	spawn_timer = float((plan.spawns as Array)[0][0])
+	trick = (siege.get("tricks", {}) as Dictionary).get(wave, {}).duplicate(true)
+	trick_phase = "wait" if not trick.is_empty() else ""
+	trick_t = float(trick.get("at", 0.0))
 	var nk := SiegeGen.new_kind(siege, wave)
 	if nk != "":
 		_story_for_all("Look out!", KIND_PICS.get(nk, "snowman"), Color(0.6, 0.85, 1.0))
@@ -1112,6 +1147,8 @@ func _end_simple_wave() -> void:
 		seg_hp[i] = SEG_MAX  # fresh snow on every wall
 	director().on_wave_cleared(wave)
 	sound("clear")
+	if wave >= Rink.STAY_WAVES:
+		_friend_stays()
 	if wave == SIMPLE_FINALE and not director().won:
 		director().won = true
 		break_timer = 10.0
@@ -1432,6 +1469,7 @@ func _process(delta: float) -> void:
 		music.play_track(1 if boss_hp >= 0.0 else maxi(wave - 1, 0) / 3)
 	director().tick(delta)
 	_update_story(delta)
+	_update_slides(delta)
 	siege_t += delta
 	if props:
 		props.tick(delta)
@@ -1465,6 +1503,7 @@ func _process(delta: float) -> void:
 			_update_practice(delta)
 			return
 		_regrow_walls(delta)
+		_trick_tick(delta)
 		if pick_stage != "":
 			_pick_tick(delta)
 			return  # the orbs hold the game until everyone has picked (or the time runs out)
@@ -2279,6 +2318,13 @@ func apply_event(kind: String, args: Array) -> void:
 				props.client_event(args)
 		"village":
 			_build_village(args[0], int(args[1]))
+		"rink":
+			rink.show_friends(args[0])
+			rink.set_visitor(String(args[1]))
+		"trick":
+			_trick_show(int(args[0]), args[1])
+		"trick_go":
+			_trick_fx(int(args[0]), args[1])
 		"story":
 			_story(args[0], args[1], args[2], args.size() > 3 and bool(args[3]))
 		"orbs":
@@ -2438,6 +2484,8 @@ func _update_vr_hurt(delta: float) -> void:
 func _on_state_changed(key: String, value: Variant) -> void:
 	if key == "mode" and net.mode == "client" and SiegeGen.MODE_NUM.has(String(value)):
 		game_mode = String(value)
+	if key == "season" and net.mode == "client":
+		_apply_season(String(value))
 
 
 ## Host / local: a new game. Count the play-day (igloos grow a stage each day), pick the siege (TODAY'S
@@ -2449,7 +2497,7 @@ func _start_siege() -> void:
 		# village: [[play-day built, golden, waves beaten, want], ...]; days: days played; daily: the date
 		# TODAY'S BLIZZARD was played.
 		save.defaults = {"village": [], "igloos": 0, "days": 0, "last_day": "", "daily": "", "games": 0, "best_wave": 0, "wins": 0,
-			"mode": "brave"}  # mode: the family's last GENTLE / BRAVE / HARD pick (the middle orb next visit)
+			"mode": "brave", "rink": []}  # rink: Bobo's friends who stayed to skate (rink.gd ids, oldest first); mode: the family's last GENTLE / BRAVE / HARD pick (the middle orb next visit)
 		add_child(save)
 	var today := Seeded.today()
 	var new_day := String(save.data.last_day) != today
@@ -2466,7 +2514,14 @@ func _start_siege() -> void:
 	game_mode = net.forced_mode("SB_MODE") if SiegeGen.MODE_NUM.has(net.forced_mode("SB_MODE")) else String(save.data.mode)
 	if not SiegeGen.MODE_NUM.has(game_mode):
 		game_mode = "brave"
-	siege = SiegeGen.siege(seed_value, lv, daily, game_mode)
+	siege = _make_siege(seed_value, lv, daily)
+	_apply_season(SeasonKit.override(GAME_ID, Seeded.season(), Seasons.SEASONS))
+	net.state_set("season", season)  # (local too: bots watch it)
+	friend = Rink.pick(int(siege.seed), season)
+	friend_stayed = false
+	tricks_done = 0
+	trick = {}
+	trick_phase = ""
 	gifts_taken = {}
 	_send_gifts()
 	if net.mode == "host":
@@ -2481,12 +2536,19 @@ func _start_siege() -> void:
 	village_days = int(save.data.days)
 	_build_village(save.data.village, village_days)
 	_send_village()
+	_send_rink()
+	print("Snowball Blitz: %s, visitor %s, surprises %s, %d friends skating" % [season, friend,
+		str((siege.tricks as Dictionary).keys().map(func(n: int) -> String: return "%d:%s" % [n, siege.tricks[n].kind])),
+		(save.data.rink as Array).size()])
 	var want := int(siege.want)
 	if daily:
 		_story_for_all("TODAY'S BLIZZARD!", "igloo", Color(1.0, 0.85, 0.3))
 	_story_for_all("Hi! I'm Bobo!", "polarbear", SiegeGen.WANT_COLORS[want])
+	_story_for_all(Seasons.LINES[season], Seasons.PICS[season], Seasons.CARD_COLORS[season])
 	if new_day and not (save.data.village as Array).is_empty():
 		_story_for_all("Our igloos grew!", "igloo", Color(0.6, 0.85, 1.0))
+	var fr := Rink.find(friend)
+	_story_for_all("%s is here!" % fr.name, String(fr.pic), fr.body)
 	_story_for_all(_want_line(), SiegeGen.WANTS[want], SiegeGen.WANT_COLORS[want])  # last: the card a late joiner sees (sticky "story")
 
 
@@ -2537,7 +2599,9 @@ func _log_run(end: String) -> void:
 		"daily": bool(siege.daily), "secs": snappedf(siege_t, 0.1), "score": score, "won": director().won,
 		"players": party_size(), "vr": not players.is_empty() and players[0].vr, "net": net.mode,
 		"fort": snappedf(fort_fraction(), 0.01), "igloos": (save.data.village as Array).size() if save else 0,
-		"days": int(save.data.days) if save else 0, "mode": game_mode, "gifts": _gift_counts()})
+		"days": int(save.data.days) if save else 0, "mode": game_mode, "gifts": _gift_counts(),
+		"season": season, "friend": friend, "stayed": friend_stayed, "tricks": tricks_done,
+		"rink": (save.data.rink as Array).size() if save else 0})
 
 
 func _exit_tree() -> void:
@@ -2643,7 +2707,7 @@ func _story(line: String, pic: String, color: Color, urgent: bool = false) -> vo
 		story_queue = story_queue.filter(func(q: Array) -> bool: return not (q.size() > 3 and bool(q[3])))  # an older prompt is stale now
 		story_queue.push_front([line, pic, color, true])
 		story_t = minf(story_t, 0.2)
-	elif story_queue.size() < 4:
+	elif story_queue.size() < 7:
 		story_queue.append([line, pic, color])
 
 
@@ -2785,7 +2849,7 @@ func _finish_pick() -> void:
 		var m := PickOrbs.mode(game_mode)
 		_story_for_all(String(PickOrbs.MODE_LINES.get(game_mode, "Let's go!")), String(m.get("pic", "star")), m.get("color", Color.WHITE))
 		if wave == 0 and not siege.is_empty():
-			siege = SiegeGen.siege(int(siege.seed), int(siege.level), bool(siege.daily), game_mode)  # the same seed, this mode
+			siege = _make_siege(int(siege.seed), int(siege.level), bool(siege.daily))  # the same seed, this mode
 			print("Snowball Blitz siege: mode %s (%s)" % [game_mode, str((siege.waves as Array).map(func(w: Dictionary) -> int: return (w.spawns as Array).size()))])
 		_skip_to_env_wave()
 
@@ -2838,3 +2902,201 @@ func boss_tell(s, pos: Vector3, radius: float, col: Color, secs: float) -> void:
 	if net.mode == "host":
 		net.event("warn", [s.net_id, pos, radius, col, secs])
 	sound("roar", -8.0, 1.4 if s.kind == "king" else 1.0)
+
+# --- Third pass: seasons, Bobo's friends, warned surprises -----------------------------------------------
+
+## Every machine: dress the square and the snowmen's hats for the season (seasons.gd).
+func _apply_season(s: String) -> void:
+	if not Seasons.SEASONS.has(s):
+		return
+	season = s
+	seasons_node.set_season(s)
+	mat("hat").albedo_color = Seasons.hat(s)
+
+
+## Host / local: the siege for a seed in this game's mode, with its warned surprises (tricks.gd).
+func _make_siege(seed_value: int, lv: int, daily: bool) -> Dictionary:
+	var s := SiegeGen.siege(seed_value, lv, daily, game_mode)
+	s.tricks = Tricks.plan(s)
+	if OS.has_environment("SB_TRICK") and Tricks.KINDS.has(OS.get_environment("SB_TRICK")):
+		s.tricks = _forced_tricks(OS.get_environment("SB_TRICK"), seed_value)
+	return s
+
+
+## SB_TRICK=slide|icicles (tests, What's New): that surprise in every plain wave from wave 1, quickly.
+func _forced_tricks(kind: String, seed_value: int) -> Dictionary:
+	var out := {}
+	var r := Seeded.rng(seed_value, "forced")
+	for n in range(1, 31):
+		if Tricks.BOSS_WAVES.has(n):
+			continue
+		var t := Tricks.one(r, kind, game_mode)
+		t.at = 4.0
+		out[n] = t
+	print("SB_TRICK=%s: a %s in every plain wave" % [kind, kind])
+	return out
+
+
+## Host / local: the friends who stayed and this siege's visitor, to every machine (sticky: late machines catch up).
+func _send_rink() -> void:
+	if save == null:
+		return
+	var ids: Array = (save.data.rink as Array).duplicate()
+	var vis := "" if friend_stayed else friend
+	rink.show_friends(ids)
+	rink.set_visitor(vis)
+	if net and net.mode == "host":
+		net.event("rink", [ids, vis])
+
+
+## Host / local: the family held the fort for STAY_WAVES waves: the visitor stays to skate (once per siege).
+func _friend_stays() -> void:
+	if friend_stayed or friend == "" or save == null:
+		return
+	friend_stayed = true
+	var list: Array = save.data.rink
+	list.append(friend)
+	while list.size() > Rink.KEEP:
+		list.pop_front()
+	save.mark_dirty()
+	_send_rink()
+	var fr := Rink.find(friend)
+	_story_for_all("%s stays to skate!" % fr.name, String(fr.pic), fr.body)
+	sound("fanfare", -8.0, 1.3)
+	if net.mode != "client":
+		net.state_set("friend_stayed", "%s:%d" % [friend, list.size()])
+	print("Snowball Blitz: %s stays to skate (%d friends on the pond)" % [friend, list.size()])
+
+
+## Host / local: this wave's surprise: wait AT seconds, tell it (rings + a card) for TELL seconds, then it goes.
+func _trick_tick(delta: float) -> void:
+	if trick_phase == "" or trick.is_empty():
+		return
+	if trick_phase == "wait" and (in_break or game_over):
+		trick_phase = ""  # the wave was over before its surprise: no surprise
+		return
+	trick_t -= delta
+	if trick_t > 0.0:
+		return
+	match trick_phase:
+		"wait":
+			trick_phase = "tell"
+			trick_t = float(trick.tell)
+			_trick_show(wave, trick)
+			_story_for_all(Tricks.NAMES[trick.kind], Tricks.PICS[trick.kind], Tricks.COLORS[trick.kind], true)
+			sound("bell", -2.0, 0.7)
+			if net.mode == "host":
+				net.event("trick", [wave, trick])
+			net.state_set("trick", "tell:%d:%s" % [wave, trick.kind])
+		"tell":
+			trick_phase = ""
+			tricks_done += 1
+			_trick_fx(wave, trick)
+			if net.mode == "host":
+				net.event("trick_go", [wave, trick])
+			net.state_set("trick", "go:%d:%s" % [wave, trick.kind])
+			if trick.kind == "icicles":
+				get_tree().create_timer(0.4).timeout.connect(_icicles_land.bind(trick.duplicate(true)))
+
+
+## Every machine: the told shapes on the snow (exactly tricks.gd zones()).
+func _trick_show(w: int, t: Dictionary) -> void:
+	var col: Color = Tricks.COLORS.get(String(t.kind), Color.ORANGE)
+	for z in Tricks.zones(t):
+		rings.shape(String(z.kind), z.pos, z.dir, z.size, col, float(t.tell), {"style": "disc", "stay": 0.4})
+	trick_log.append([w, String(t.kind), siege_t, -1.0])
+	print("SURPRISE told: wave %d %s for %.1f s" % [w, t.kind, float(t.tell)])
+
+
+## Every machine: the surprise goes (a ball rolls / icicles drop); the host does the hits.
+func _trick_fx(w: int, t: Dictionary) -> void:
+	if not trick_log.is_empty() and int(trick_log[-1][0]) == w and float(trick_log[-1][3]) < 0.0:
+		trick_log[-1][3] = siege_t
+	else:
+		trick_log.append([w, String(t.kind), -1.0, siege_t])  # (went without a tell seen here: the bot fails it)
+	print("SURPRISE goes: wave %d %s" % [w, t.kind])
+	if String(t.kind) == "slide":
+		var ball := MeshInstance3D.new()
+		ball.mesh = sphere_mesh(Tricks.SLIDE_R)
+		ball.material_override = mat("snow")
+		add_child(ball)
+		_ink_outline(ball)
+		slides.append({"node": ball, "from": t.from, "dir": t.dir, "len": float(t.len), "t": 0.0, "hit": {}})
+		sound("roar", -6.0, 0.5)
+	else:
+		for z in Tricks.zones(t):
+			for k in 4:
+				var ic := MeshInstance3D.new()
+				var cm := CylinderMesh.new()
+				cm.top_radius = 0.12
+				cm.bottom_radius = 0.0
+				cm.height = 0.7
+				cm.radial_segments = 6
+				ic.mesh = cm
+				ic.material_override = mat("ice")
+				var off := Vector3(cos(k * 1.7), 0.0, sin(k * 1.7)) * Tricks.ICICLE_R * 0.55
+				ic.position = (z.pos as Vector3) + off + Vector3.UP * 9.0
+				add_child(ic)
+				var tw := ic.create_tween()
+				tw.tween_property(ic, "position:y", SEG_HEIGHT + 0.2, 0.4).set_ease(Tween.EASE_IN).set_trans(Tween.TRANS_QUAD)
+				tw.tween_callback(func() -> void: puff(ic.position, Color(0.8, 0.9, 1.0), 10, 0.08))
+				tw.tween_interval(0.4)
+				tw.tween_callback(ic.queue_free)
+		sound("thud", -4.0, 1.5)
+
+
+## The rolling snow-slide ball is snow-white on the snow: the ink outline (core/contrast.gd, like the snowmen).
+func _ink_outline(mi: MeshInstance3D) -> void:
+	preload("res://core/contrast.gd").outline(mi)
+
+
+## Host / local: the icicles land: a little snow off each told wall (never the last of it), a cold splat for anyone
+## standing in a circle, a bonk for snowmen there.
+func _icicles_land(t: Dictionary) -> void:
+	if net.mode == "client" or not is_inside_tree():
+		return
+	var hit: float = float(Tricks.ICICLE_HIT.get(game_mode, 25.0))
+	for i in t.get("segs", []):
+		var si := int(i)
+		seg_hp[si] = maxf(seg_hp[si] - hit, minf(seg_hp[si], Tricks.ICICLE_KEEP))
+	for z in Tricks.zones(t):
+		for p in players:
+			if p.active and WarnRings.inside("circle", z.pos, z.dir, z.size, p.global_position, 0.3):
+				p.take_damage(4.0, z.pos)
+				print("SURPRISE: icicles splat P%d" % (p.index + 1))
+		for s in get_tree().get_nodes_in_group("snowmen"):
+			if not s.dead and WarnRings.inside("circle", z.pos, z.dir, z.size, s.global_position, s.radius()):
+				s.take_hit(3.0, Vector3.UP, -1)
+
+
+## Every machine: roll the snow slides; the host bowls over the snowmen in the way (a boss just wobbles).
+func _update_slides(delta: float) -> void:
+	for sl in slides.duplicate():
+		sl.t = float(sl.t) + delta
+		var d := float(sl.t) * Tricks.SLIDE_SPEED
+		var node: MeshInstance3D = sl.node
+		if d > float(sl.len) or not is_instance_valid(node):
+			if is_instance_valid(node):
+				puff(node.position, Color(1, 1, 1), 20, 0.12)
+				node.queue_free()
+			slides.erase(sl)
+			continue
+		var pos: Vector3 = (sl.from as Vector3) + (sl.dir as Vector3) * d + Vector3.UP * Tricks.SLIDE_R
+		node.position = pos
+		node.rotate(Vector3.UP.cross(sl.dir as Vector3).normalized(), delta * Tricks.SLIDE_SPEED / Tricks.SLIDE_R)
+		if fmod(float(sl.t), 0.15) < delta:
+			puff(pos - Vector3.UP * Tricks.SLIDE_R, Color(1, 1, 1), 4, 0.1)
+		if net.mode == "client":
+			continue
+		for s in get_tree().get_nodes_in_group("snowmen"):
+			if s.dead or (sl.hit as Dictionary).has(s.get_instance_id()):
+				continue
+			var to: Vector3 = s.global_position - pos
+			to.y = 0.0
+			if to.length() < Tricks.SLIDE_W * 0.5 + s.radius():
+				sl.hit[s.get_instance_id()] = true
+				s.take_hit(2.0 if s.is_boss() else 99.0, (sl.dir as Vector3) * 10.0 + to.normalized() * 4.0, -1)
+				print("SURPRISE: the snow slide bowls over a %s" % s.kind)
+		for p in players:
+			if p.active and Vector2(p.global_position.x - pos.x, p.global_position.z - pos.z).length() < Tricks.SLIDE_W * 0.5:
+				p.take_damage(4.0, pos)

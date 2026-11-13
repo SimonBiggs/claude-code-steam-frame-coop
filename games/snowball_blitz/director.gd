@@ -430,6 +430,7 @@ func _build_blizzard() -> void:
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
 	m.albedo_color = Color(1, 1, 1, 0.85)
 	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # (see-through scenery: under VR cards)
 	q.material = m
 	blizzard_fx.mesh = q
 	blizzard_fx.position = Vector3(-6, 9, 0)

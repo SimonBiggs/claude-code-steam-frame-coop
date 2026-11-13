@@ -1,5 +1,9 @@
 extends Node
 const BotKit := preload("res://tests/bot_kit.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
+const Seasons := preload("res://games/snowball_blitz/seasons.gd")
+const Tricks := preload("res://games/snowball_blitz/tricks.gd")
+const Rink := preload("res://games/snowball_blitz/rink.gd")
 ## Headless bot for Snowball Blitz. The first local player snipes the nearest snowman with charged
 ## lobs; the second local player packs the most damaged fort wall (and throws when the fort is fine).
 ## On the client it also wakes player 3 by "pressing" throw.
@@ -35,6 +39,9 @@ var headline_re := RegEx.create_from_string(HEADLINES)
 var turn_waits := 0  # simple mode: times a TV player looked away until the turn cue showed
 var turn_wait_t := -1.0
 var turn_gap := 0.0
+## Net state watcher (tests/bot_kit.gd watch_state: counts every "trick" / "season" / "friend_stayed" the moment it is
+## set, never a polled flag). Not in the tree: this bot keeps its own counted verdict (tests/bot_end.gd).
+var watch: Node
 
 
 func _ready() -> void:
@@ -48,6 +55,8 @@ func _ready() -> void:
 		Input.parse_input_event(up)
 	main = load("res://games/snowball_blitz/main.tscn").instantiate()
 	add_child(main)
+	watch = BotKit.new()
+	watch.watch_state(main.net)
 
 
 func _physics_process(delta: float) -> void:
@@ -469,6 +478,9 @@ func _tip_error(who: String, text: String) -> void:
 
 
 func _exit_tree() -> void:
+	if watch != null:
+		watch.free()
+		watch = null
 	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
 	if main != null and is_instance_valid(main):
 		# (Not after a restart: a game over (Enter, or the game's own restart) reloads the scene, and this bot, at wave 0.)
@@ -561,6 +573,7 @@ func _pad_test() -> void:
 ## built an igloo once a wave was beaten; a TV machine got the village from the host.
 func _check_siege() -> void:
 	_check_host_mode()
+	_check_deep3()
 	if main.net.mode == "client":
 		_bot_check(main.village_count >= 0, "the TV machine got Bobo's village (%d igloos)" % main.village_count)
 		_bot_check(saw.has("orbs") or main.wave < 2, "the TV machine showed the pick orbs")
@@ -588,3 +601,39 @@ func _check_host_mode() -> void:
 func _bot_check(ok: bool, what: String) -> void:
 	if BotEnd.check(ok, what):  # counted: tests/bot_end.gd prints the BOT RESULT
 		print("Bot: OK " + what)
+
+
+## Third pass: seasons, Bobo's visiting friend + the skating pond, warned surprises (every machine).
+## SB_TRICK=slide|icicles (host env) puts a surprise in every plain wave: then both machines must see it told, then go,
+## each one told for at least its tell before it went.
+func _check_deep3() -> void:
+	var want := SeasonKit.override("snowball_blitz", "", Seasons.SEASONS)
+	_bot_check(Seasons.SEASONS.has(main.season), "a season (%s)" % main.season)
+	if want != "":
+		_bot_check(main.season == want, "the season test setting dresses the square (%s)" % want)
+	_bot_check(main.seasons_node.season == main.season, "the square is dressed for %s" % main.season)
+	_bot_check((main.seasons_node.props != null) == (main.season != "winter"), "season props (%s)" % main.season)
+	_bot_check(main.mat("hat").albedo_color.is_equal_approx(Seasons.hat(main.season)), "the snowmen wear %s hats" % main.season)
+	_bot_check(main.rink.visitor != null or main.rink.friend_ids.size() > 0, "Bobo's visitor waits by the pond (%s, %d skating)" % [main.rink.visitor_id, main.rink.friend_ids.size()])
+	_bot_check(main.rink.skaters.size() == mini(main.rink.friend_ids.size(), Rink.SHOW), "every friend skates (%d)" % main.rink.skaters.size())
+	if main.net.mode != "client":
+		_bot_check(not (main.siege.get("tricks", {}) as Dictionary).is_empty(), "the siege has surprises")
+		_bot_check(Tricks.check(main.siege.tricks, main.game_mode).is_empty() or OS.has_environment("SB_TRICK"), "the siege's surprises are fair")
+		if main.wave > Rink.STAY_WAVES or (main.wave == Rink.STAY_WAVES and main.in_break):
+			_bot_check(main.friend_stayed, "the visitor stayed to skate after %d waves" % Rink.STAY_WAVES)
+	else:
+		_bot_check(watch.seen_values("season").size() > 0, "the TV machine got the host's season")
+	var told := 0
+	var went := 0
+	for k in watch.seen_values("trick"):
+		if String(k).begins_with("tell:"):
+			told += watch.seen("trick", k)
+		elif String(k).begins_with("go:"):
+			went += watch.seen("trick", k)
+	print("Bot: surprises told %d went %d log %s" % [told, went, str(main.trick_log)])
+	if OS.has_environment("SB_TRICK") and main.wave >= 2:
+		_bot_check(told > 0 and went > 0, "surprises were told and went (%d / %d)" % [told, went])
+	for e in main.trick_log:
+		if float(e[3]) >= 0.0:
+			_bot_check(float(e[2]) >= 0.0 and float(e[3]) - float(e[2]) >= float(Tricks.MIN_TELL["hard"]) - 0.3,
+				"wave %d %s was told %.1f s before it went" % [int(e[0]), e[1], float(e[3]) - float(e[2])])

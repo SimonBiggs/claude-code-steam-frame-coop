@@ -33,6 +33,9 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "sb-friends", "date": "2026-11-13", "game": "snowball_blitz", "pic": "penguin", "line": "Bobo's friends skate!"},
+	{"id": "sb-surprises", "date": "2026-11-13", "game": "snowball_blitz", "pic": "snowslide", "line": "Snow slides warn first", "try": {"SB_TRICK": "slide"}},
+	{"id": "sb-seasons", "date": "2026-11-13", "game": "snowball_blitz", "pic": "daisy", "line": "Seasons on Bobo's hill"},
 	{"id": "duo2-friends", "date": "2026-11-12", "game": "duo_arena", "pic": "sproutbot", "line": "Save Nova's lost friends!", "try": {"DA_ZONE": "jungle"}},
 	{"id": "duo2-gifts", "date": "2026-11-12", "game": "duo_arena", "pic": "novazap", "line": "Nova's gifts after bosses!"},
 	{"id": "duo2-surprises", "date": "2026-11-12", "game": "duo_arena", "pic": "coconut", "line": "Coconuts! Watch the rings!", "try": {"DA_ZONE": "jungle"}},
