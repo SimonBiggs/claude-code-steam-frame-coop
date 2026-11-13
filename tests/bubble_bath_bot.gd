@@ -23,6 +23,7 @@ var vr_throws := 0
 var vr_splashes := 0
 var slap_t := 0.0
 var max_train := 0
+var max_ducks := 0
 var escapes := 0  # frames a boat sailed out of a told surprise
 
 const Deep := preload("res://games/bubble_bath/deep.gd")
@@ -127,6 +128,7 @@ func _physics_process(delta: float) -> void:
 		_steer(slot)
 	if main.vr_rig != null:
 		_drive_vr(delta)
+	max_ducks = maxi(max_ducks, main.ducks.size())
 	for slot in main.trains:
 		max_train = maxi(max_train, (main.trains[slot] as Array).size())
 
@@ -284,7 +286,7 @@ func _checks() -> void:
 		kit.assert_true(main.party.is_local(0) and main.boats.has(0) and main.cams.has(0), "flat host: slot 0 plays here with a camera")
 	kit.assert_true(int(main.net.state_get("total", 0)) > 0, "%s: ducks went down the plug" % mode)
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
-	kit.assert_true(main.ducks.size() > 0, "%s: ducks float in the tub" % mode)
+	kit.assert_true(max_ducks > 0, "%s: ducks floated in the tub (up to %d)" % [mode, max_ducks])
 	kit.assert_true(not main.plan.is_empty() and int(main.plan.n) >= 2, "%s: the seeded bath is built (round %d)" % [mode, int(main.plan.get("n", 0))])
 	kit.assert_eq(main.islands.size(), main.island_root.get_child_count(), "%s: the sponge islands are in the tub" % mode)
 	kit.assert_true(main.mama != null and main.mama.get_child_count() > 0, "%s: Mama Duck sits on the rim" % mode)

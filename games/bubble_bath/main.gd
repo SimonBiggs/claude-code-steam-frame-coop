@@ -491,7 +491,7 @@ func _move_local_boats(delta: float) -> void:
 	var send := send_t <= 0.0
 	if send:
 		send_t = 1.0 / 30.0
-	var playing := String(net.state_get("phase", "play")) == "play"
+	var playing := String(net.state_get("phase", "play")) != "results"  # (boats sail during picks too: under an orb)
 	for slot in party.local_slots():
 		if not boats.has(slot):
 			continue
