@@ -163,6 +163,7 @@ func _sync_bubbles() -> void:
 	for id in want:
 		if not _bubbles.has(id):
 			_bubbles[id] = _make_bubble(want[id])
+			bubbles_shown += 1
 
 
 func _make_bubble(a: Array) -> Node3D:
@@ -230,6 +231,11 @@ func _make_bubble(a: Array) -> Node3D:
 ## The bubble for a wish (bots and effects), or null.
 func bubble(id: int) -> Node3D:
 	return _bubbles.get(id, null)
+
+
+## Bubbles ever made this run: bots check this, not bubble_count(), so a short-lived bubble is never missed between
+## two polls on a busy machine (landing flake 2026-11-13).
+var bubbles_shown := 0
 
 
 func bubble_count() -> int:
