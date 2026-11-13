@@ -7,7 +7,7 @@
 //   peer(name).send(source, text, images)   a remote mpsc send into that machine's channel (pictures copied)
 //   peer(name).pipe(source, stream)         stream lines across
 //   peer(name).eval(code)                   run code in that REPL, oneshot reply (needs SSH access there)
-import { mkdirSync, unlinkSync, readFileSync } from "node:fs";
+import { mkdirSync, unlinkSync, readFileSync } from "node:fs";  // sync-ok: start() only (mkdir, hostname, stale socket)
 import { inspect } from "node:util";
 
 const CACHE = `${process.env.HOME}/.cache/brepl`;
@@ -17,9 +17,9 @@ let server: any = null;
 
 export function start(ctx: { send: Function; show: Function }) {
   const { send, show } = ctx;
-  mkdirSync(IMG_DIR, { recursive: true });
-  const me = (() => { try { return readFileSync("/etc/hostname", "utf8").trim(); } catch { return "brepl"; } })();
-  try { unlinkSync(INBOX); } catch {}
+  mkdirSync(IMG_DIR, { recursive: true });  // sync-ok: start()
+  const me = (() => { try { return readFileSync("/etc/hostname", "utf8").trim(); } catch { return "brepl"; } })();  // sync-ok: start()
+  try { unlinkSync(INBOX); } catch {}  // sync-ok: start()
   server = Bun.listen({
     unix: INBOX,
     socket: {

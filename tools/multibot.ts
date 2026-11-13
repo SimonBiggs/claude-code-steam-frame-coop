@@ -168,8 +168,10 @@ export async function runGroup(o: GroupOpts): Promise<GroupResult> {
     let path = project;
     if (o.copies) {
       path = join(dir, `p${k}`);
-      const cp = Bun.spawnSync(["rsync", "-a", "--exclude", ".git", "--exclude", ".dev", `${project}/`, `${path}/`]);
-      if (cp.exitCode !== 0) throw new Error(`copying the project for machine ${k} failed: ${cp.stderr}`);
+      // Async: a spawnSync rsync of a whole project froze every agent's brepl calls while it copied.
+      const cp = Bun.spawn(["rsync", "-a", "--exclude", ".git", "--exclude", ".dev", `${project}/`, `${path}/`], { stdout: "ignore", stderr: "pipe" });
+      const cpErr = await new Response(cp.stderr).text();
+      if ((await cp.exited) !== 0) throw new Error(`copying the project for machine ${k} failed: ${cpErr}`);
       env.BOT_OWN_COPY = "1";
     }
     runs.push(new Promise(res => {

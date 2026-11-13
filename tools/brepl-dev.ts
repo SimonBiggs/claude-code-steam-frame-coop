@@ -22,7 +22,7 @@ const TOOL_COPIES: Record<string, string> = {  // installed file -> repo copy (k
   [join(BIN, "voice-bridge")]: "tools/voice-bridge", [join(BIN, "claude-watchdog")]: "tools/claude-watchdog",
   [join(HOME, ".local/share/gdev/recsheet.py")]: "tools/recsheet.py", [join(HOME, ".local/share/brepl/dev.ts")]: "tools/brepl-dev.ts",
   [join(HOME, ".local/share/brepl/mcp.ts")]: "tools/brepl-mcp.ts", [join(HOME, ".local/share/brepl/multibot.ts")]: "tools/multibot.ts", [join(HOME, ".local/share/brepl/alerts.ts")]: "tools/brepl-alerts.ts",
-  [join(HOME, ".local/share/brepl/peers.ts")]: "tools/brepl-peers.ts", [join(BIN, "brepl-tunnel")]: "tools/brepl-tunnel",
+  [join(HOME, ".local/share/brepl/peers.ts")]: "tools/brepl-peers.ts", [join(HOME, ".local/share/brepl/channel-watch.ts")]: "tools/brepl-channel-watch.ts", [join(BIN, "brepl-tunnel")]: "tools/brepl-tunnel",
   [join(HOME, ".config/systemd/user/brepl-tunnel@.service")]: "tools/systemd/brepl-tunnel@.service",
   [join(BIN, "test-throttle")]: "tools/test-throttle", [join(BIN, "duo-nightly-tests")]: "tools/duo-nightly-tests",
   [join(HOME, ".config/systemd/user/duo-nightly-tests.service")]: "tools/systemd/duo-nightly-tests.service", [join(HOME, ".config/systemd/user/duo-nightly-tests.timer")]: "tools/systemd/duo-nightly-tests.timer", [join(BIN, "duo-deploy-deck")]: "tools/duo-deploy-deck",
@@ -257,6 +257,20 @@ export async function playstats(o: { since?: string; game?: string; recent?: num
  *  (branch merge-arcade, fast-forwarded to main after every landing), so it must never be flagged as stale. */
 const PERMANENT_WORKTREES = new Set([join(GP, "wt-merge")]);
 
+const SYNC_CALL = /\b(spawnSync|execSync|execFileSync|readFileSync|writeFileSync|appendFileSync|readdirSync|statSync|lstatSync|existsSync|mkdirSync|unlinkSync|rmSync|copyFileSync|renameSync|openSync|readSync|writeSync|closeSync|accessSync|realpathSync|scanSync|gzipSync|gunzipSync)\b\s*[(:,}]/;  // sync-ok: the pattern itself
+/** Lines in brepl's server-side code (core, modules, gdev/godot.ts) that call a *Sync function without "sync-ok". */
+export async function syncCallsInBrepl(): Promise<string[]> {
+  const dir = join(HOME, ".local/share/brepl");
+  const files = [join(BIN, "brepl"), join(HOME, ".local/share/gdev/godot.ts"),
+    ...(await readdir(dir).catch(() => [] as string[])).filter(f => f.endsWith(".ts") && !/\.(check|chk)/.test(f)).map(f => join(dir, f))];
+  const out: string[] = [];
+  for (const f of files) {
+    const lines = (await readFile(f, "utf8").catch(() => "")).split("\n");
+    lines.forEach((l, i) => { if (SYNC_CALL.test(l) && !/sync-ok/.test(l) && !/^\s*(\/\/|\*)/.test(l)) out.push(`${f.replace(HOME, "~")}:${i + 1}: ${l.trim().slice(0, 120)}`); });
+  }
+  return out;
+}
+
 export async function debt() {
   const issues: { kind: string; what: string; fix: string }[] = [];
   // The shared-globals guard (see installGlobalsGuard) must be live: without it agents' generic globals clash again.
@@ -286,6 +300,10 @@ export async function debt() {
   // Voice echo (2026-11-11): every TTS player must log to ~/.claude/said.log, or the room/Deck mics feed Claude's own words back.
   for (const f of (await sh(`grep -lIE "say\\.py|piper |\\bespeak\\b" ~/.local/bin/* 2>/dev/null | grep -v '\\.bak' | xargs -r grep -L said.log`, LIVE)).out.split("\n").filter(Boolean))
     issues.push({ kind: "tts-no-said-log", what: f, fix: "append 'ts<TAB>text' to ~/.claude/said.log at start and end of playback (saidecho.py drops echoes)" });
+  // Sync calls in brepl (2026-11-13, two ants): brepl is ONE event loop for every agent, so a spawnSync / execSync /
+  // readFileSync on a timer or in a job freezes everyone (alerts.ts's freeze watchdog names the culprit afterwards).
+  // Every server-side brepl file must use async versions; startup-only or CLI-side ones say "// sync-ok: <why>".
+  for (const f of await syncCallsInBrepl()) issues.push({ kind: "sync-in-brepl", what: f, fix: "use the async version (Bun.spawn / Bun.$ / fs/promises / Bun.file): sync calls freeze every agent's brepl; startup- or CLI-only lines may say // sync-ok: <why>" });
   for (const pt of PATTERNS) {
     const hits = (await sh(`grep -rlE ${JSON.stringify(pt.files)} --include=*.gd ${pt.dirs ?? "core games arcade"}`, STAGE)).out.split("\n").filter(Boolean);
     for (const f of hits) {

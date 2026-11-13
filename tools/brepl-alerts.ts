@@ -1,7 +1,7 @@
 // alerts.ts: watchers that post to the brepl channel by themselves (Simon, 2026-10-24: "add alerts and things
 // that automatically go to your channel ... and therefore automatically trigger your monitor"). Loaded by the
 // brepl server as `alerts`; the Monitor on channel.jsonl wakes Claude for each one. Async only, so nothing here
-// can freeze the brepl.
+// can freeze the brepl (dev.debt's sync-in-brepl check flags any *Sync call). Also the freeze watchdog (below).
 //   alerts.list()                                  what's watching, and each alert's last state
 //   alerts.add(name, everySec, async () => text | null, o?)   post when the text changes (null = all fine)
 //   alerts.tail(name, shellCmd, /regex/)           post each matching line of a long-running command
@@ -143,12 +143,135 @@ async function newErrors(path: string): Promise<string[]> {
 // --- Built-in alerts ----------------------------------------------------------------------------
 const meminfo = async () => Object.fromEntries((await Bun.file("/proc/meminfo").text()).split("\n").map((l) => l.split(/:\s+/)).map(([k, v]) => [k, parseInt(v) / 1024 / 1024]));
 
+// --- Freeze watchdog: say WHAT blocked the event loop -------------------------------------------------------
+// brepl is one process for every agent: synchronous code anywhere (spawnSync, execSync, readFileSync over a big
+// tree, a long CPU loop) freezes all of them. JS can't look at itself while it's blocked, so a Worker thread
+// watches a heartbeat in shared memory and, while the main thread is stuck, records: the main thread's state
+// (S + wchan do_wait = waiting on a child, i.e. spawnSync/execSync; R = busy running JS), the child processes
+// started during the freeze (names the command), the timer callback running (setTimeout / setInterval are
+// wrapped to label each callback with where it was registered) and the running jobs. After it unfreezes, the
+// report goes to the channel and ~/.cache/brepl/freezes.log.
+// System suspend (2026-11-12 17:57 and 11-13 07:04, the only two "freezes" so far: the suspend key / powerdevil)
+// freezes user.slice and every process with it; that is not a brepl bug, so it's only logged (suspend_stats).
+const FREEZE_LOG = join(HOME, ".cache/brepl/freezes.log");
+const FREEZE_MS = 2000;
+const suspends = async () => {
+  let n = 0;
+  for (const f of ["success", "fail"]) n += parseInt(await Bun.file(`/sys/power/suspend_stats/${f}`).text().catch(() => "0")) || 0;
+  return n;
+};
+const WORKER_SRC = `
+const fs = require("fs");
+let hb, lab, len, pid, snapped = false;
+const read = (p) => { try { return fs.readFileSync(p, "utf8").trim(); } catch { return ""; } };  // sync-ok: the watchdog Worker thread
+self.onmessage = (e) => {
+  hb = new Float64Array(e.data.sab, 0, 1); len = new Int32Array(e.data.sab, 8, 1); lab = new Uint8Array(e.data.sab, 16); pid = e.data.pid;
+  setInterval(() => {
+    const age = Date.now() - hb[0];
+    if (age < 1500) { snapped = false; return; }
+    if (snapped) return;
+    snapped = true;
+    const ps = Bun.spawnSync(["ps", "-o", "pid=,etimes=,args=", "--ppid", String(pid)]).stdout.toString().split("\\n")  // sync-ok: Worker thread
+      .map((l) => l.trim()).filter((l) => l && Number(l.split(/\\s+/)[1]) <= Math.ceil(age / 1000) + 1 && !/ ps -o pid=/.test(l));
+    const state = read("/proc/" + pid + "/task/" + pid + "/stat").replace(/^.*\\) /, "").split(" ")[0];
+    postMessage({ age, state, wchan: read("/proc/" + pid + "/task/" + pid + "/wchan"), children: ps,
+      label: new TextDecoder().decode(lab.slice(0, len[0])) });
+  }, 250);
+};`;
+let fw: { worker: Worker; tick: any; snap: any; origST: any; origSI: any; send: any } | null = null;
+function startFreezeWatch() {
+  const sab = new SharedArrayBuffer(16 + 1024);
+  const hb = new Float64Array(sab, 0, 1), len = new Int32Array(sab, 8, 1), lab = new Uint8Array(sab, 16);
+  const enc = new TextEncoder();
+  const setLabel = (s: string) => { const b = enc.encode(s).slice(0, lab.length); lab.set(b); len[0] = b.length; };
+  let base = "", inTimer = "";
+  const label = () => setLabel([inTimer && `timer callback from ${inTimer}`, base].filter(Boolean).join("; "));
+  // Label every timer callback with where it was set (the first stack frame outside this file).
+  const site = () => (new Error().stack ?? "").split("\n").slice(2).map((l) => l.trim()).find((l) => !l.includes("alerts.ts") && !l.includes("native")) ?? "?";
+  const wrap = (fn: any, at: string) => typeof fn !== "function" ? fn : function (this: any, ...a: any[]) {
+    const prev = inTimer; inTimer = at; label();
+    try { return fn.apply(this, a); } finally { inTimer = prev; label(); }
+  };
+  const origST = globalThis.setTimeout, origSI = globalThis.setInterval;
+  (globalThis as any).setTimeout = Object.assign((fn: any, ms?: number, ...a: any[]) => origST(wrap(fn, site()), ms, ...a), origST);
+  (globalThis as any).setInterval = Object.assign((fn: any, ms?: number, ...a: any[]) => origSI(wrap(fn, site()), ms, ...a), origSI);
+  const worker = new Worker(URL.createObjectURL(new Blob([WORKER_SRC], { type: "application/javascript" })));
+  worker.unref?.();
+  let snap: any = null;
+  worker.onmessage = (e) => { snap = e.data; };
+  worker.postMessage({ sab, pid: process.pid });
+  let last = Date.now(), susp: Promise<number> = suspends(), suspAt = last;
+  const tick = origSI(async () => {
+    const now = Date.now(), lag = now - last - 250;
+    last = now; hb[0] = now;
+    if (lag < FREEZE_MS && now - suspAt > 30_000) { susp = suspends(); suspAt = now; }  // fresh baseline
+    const running = ((globalThis as any).jobs?.() ?? []).filter((j: any) => j.status === "running").map((j: any) => `#${j.id} ${j.name}`);
+    const b = running.length ? `running jobs: ${running.join(", ").slice(0, 600)}` : "";
+    if (b !== base) { base = b; label(); }
+    if (lag < FREEZE_MS) return;
+    const was = await susp;
+    susp = suspends();
+    await Bun.sleep(300);  // the worker's report arrives on the next turns of the loop
+    const s = snap; snap = null;
+    const suspended = (await susp) !== was;
+    const what = !s ? "no snapshot from the watchdog thread"
+      : [s.label || "no timer callback or job was running",
+         s.state === "R" ? "main thread was busy running JS (a CPU loop, big JSON / regex / sort, or a sync fs call)"
+           : `main thread was waiting (${s.state} in ${s.wchan || "?"}${s.wchan === "do_wait" ? ": a spawnSync / execSync child" : ""})`,
+         s.children.length ? `started during the freeze: ${s.children.join(" | ").slice(0, 400)}` : ""].filter(Boolean).join("\n");
+    const { appendFile } = await import("node:fs/promises");
+    await appendFile(FREEZE_LOG, JSON.stringify({ at: new Date(now).toISOString(), lagMs: lag, suspended, ...(s ?? {}) }) + "\n").catch(() => {});
+    if (suspended) return;  // the machine slept (suspend key / powerdevil): every process stopped, not a brepl bug
+    fw?.send("⚠ brepl frozen", `the event loop was blocked for ${(lag / 1000).toFixed(1)}s (use async versions, e.g. Bun.spawn / fs.promises, not spawnSync / readFileSync). Culprit:\n${what}`);
+  }, 250);
+  (tick as any).unref?.();
+  // A brepl core from before 2026-11-13 runs its own vague freeze check (and posts on suspend): drop its posts.
+  const g = globalThis as any, origSend = g.send;
+  if (g.__breplCore !== 2) g.send = (src: any, text: any, ...r: any[]) =>
+    src === "⚠ brepl frozen" && /use async versions, e\.g\. Bun\.spawn not spawnSync\)$/.test(String(text)) ? 0 : origSend(src, text, ...r);
+  fw = { worker, tick, snap, origST, origSI, send: origSend };
+}
+function stopFreezeWatch() {
+  if (!fw) return;
+  clearInterval(fw.tick);
+  fw.worker.terminate();
+  (globalThis as any).setTimeout = fw.origST;
+  (globalThis as any).setInterval = fw.origSI;
+  (globalThis as any).send = fw.send;
+  fw = null;
+}
+
+// One brepl server per user. A second one (2026-11-11: `brepl` auto-started one while systemd restarted brepl.service)
+// loses ~/.cache/brepl.sock but kept every watcher running, so each alert and "reloaded" line came twice. Whoever
+// answers on the socket owns the watchers; a duplicate stays quiet and says so.
+async function socketOwner(): Promise<number | null> {
+  return await new Promise((ok) => {
+    let buf = "";
+    const t = setTimeout(() => ok(null), 2000);
+    Bun.connect({ unix: join(HOME, ".cache/brepl.sock"), socket: {
+      open(s) { s.write("process.pid\0"); }, data(_, d) { buf += d.toString(); },
+      close() { clearTimeout(t); ok(parseInt(buf) || null); }, error() { clearTimeout(t); ok(null); }, connectError() { clearTimeout(t); ok(null); },
+    } }).catch(() => { clearTimeout(t); ok(null); });
+  });
+}
+export let duplicate = false;
+
 /** Hot reload (brepl loads this module with start/stop): stop every watcher before the new copy starts. */
 export function stop() {
+  stopFreezeWatch();
   for (const name of [...all.keys()]) off(name);
   all.clear();
 }
-export function start() { startAll(); }
+export async function start() {
+  const owner = await socketOwner();
+  duplicate = owner !== null && owner !== process.pid;
+  if (duplicate) {
+    send("brepl", `duplicate brepl server pid ${process.pid}: pid ${owner} owns ~/.cache/brepl.sock, so this one's watchers stay off. Stop it: kill ${process.pid}`);
+    return;
+  }
+  startAll();
+  startFreezeWatch();
+}
 
 export function startAll() {
   // Microphone plugged in / unplugged (voice only works with one).

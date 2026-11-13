@@ -4,7 +4,7 @@
 // Bun REPL (~/.local/bin/brepl) and returns its text AND every image it showed: show(...paths) or a
 // returned image path / array of paths, e.g. `g.span(0, 10, 2)` comes back as the sheets themselves.
 // Registered with: claude mcp add brepl -s user -- ~/.local/bin/bun ~/.local/share/brepl/mcp.ts
-import { readFileSync, statSync } from "node:fs";
+import { readFile, stat } from "node:fs/promises";
 
 const BREPL = `${process.env.HOME}/.local/bin/brepl`;
 const MAX_IMAGES = 12, MAX_BYTES = 4_500_000;
@@ -63,11 +63,11 @@ async function call(code: string, isPoll = false) {
   const notes: string[] = [];
   for (const path of paths.slice(0, MAX_IMAGES)) {
     try {
-      const size = statSync(path).size;
+      const size = (await stat(path)).size;
       if (size > MAX_BYTES) { notes.push(`[image too big to show (${(size / 1e6).toFixed(1)} MB): ${path}]`); continue; }
       const ext = path.split(".").pop()!.toLowerCase();
       content.push({ type: "text", text: `[image: ${path}]` });
-      content.push({ type: "image", data: readFileSync(path).toString("base64"), mimeType: MIME[ext] ?? "image/png" });
+      content.push({ type: "image", data: (await readFile(path)).toString("base64"), mimeType: MIME[ext] ?? "image/png" });
     } catch (e) { notes.push(`[cannot read image ${path}: ${e}]`); }
   }
   if (paths.length > MAX_IMAGES) notes.push(`[${paths.length - MAX_IMAGES} more images not shown]`);

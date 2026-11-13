@@ -1,6 +1,10 @@
 #!/usr/bin/env bun
 // channel-watch: one short line per new brepl channel entry, for a Claude Code Monitor (which can only carry
 // text). Pull the full output and pictures with the brepl_poll tool. Run: bun ~/.local/share/brepl/channel-watch.ts
+if (process.env.MC_CHAT_SESSION) {  // the Minecraft chat session must not take the main session's channel (2026-11-01)
+  console.log("channel-watch: this is the Minecraft chat session (MC_CHAT_SESSION): the brepl channel belongs to the main session");
+  process.exit(1);
+}
 const tail = Bun.spawn(["tail", "-n0", "-F", `${process.env.HOME}/.cache/brepl/channel.jsonl`], { stdout: "pipe", stderr: "ignore" });
 let buf = "";
 for await (const chunk of tail.stdout) {

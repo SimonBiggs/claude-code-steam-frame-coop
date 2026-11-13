@@ -21,7 +21,7 @@
 //   await godot.netStatus(g)  // the same for one Game;  godot.launch({..., duoPort}) picks the network port (default control+1000)
 import { spawn, type ChildProcess } from "node:child_process";
 import { copyFile, mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync } from "node:fs";  // sync-ok: safeCwd's single stat per spawn
 import { join, resolve } from "node:path";
 
 const HOME = process.env.HOME!;
@@ -46,8 +46,8 @@ const sh = async (cmd: string[]) => {
 /** A child started from a deleted folder (a removed worktree as brepl's cwd) logs "getcwd(...) is null" and can't open
  *  res:// (2026-10-29). Every spawn here runs from a folder that exists: brepl itself goes HOME when its cwd is gone. */
 export function safeCwd(dir?: string): string {
-  try { if (!existsSync(process.cwd())) process.chdir(process.env.HOME!); } catch { process.chdir(process.env.HOME!); }
-  return dir && existsSync(dir) ? dir : process.env.HOME!;
+  try { if (!existsSync(process.cwd())) process.chdir(process.env.HOME!); } catch { process.chdir(process.env.HOME!); }  // sync-ok: one stat
+  return dir && existsSync(dir) ? dir : process.env.HOME!;  // sync-ok: one stat
 }
 
 const running = new Map<number, Game>();

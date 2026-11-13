@@ -7,15 +7,41 @@
 // One server per user on ~/.cache/brepl.sock, started on first use. State persists between calls:
 // bare assignments (x = 1) and globalThis.* live on; const/let/var stay local to that call.
 // The last expression is returned (top-level await works). console.log output is printed before the result.
-import { existsSync, unlinkSync } from "node:fs";
+import { existsSync, unlinkSync } from "node:fs";  // sync-ok: CLI and server startup only
 import { inspect } from "node:util";
 import { spawn } from "node:child_process";
 
 const SOCK = `${process.env.HOME}/.cache/brepl.sock`;
 const args = process.argv.slice(2);
 
+// Start the server: through brepl.service when that's installed, so there's only ever ONE server (2026-11-11: a CLI
+// auto-start raced a systemd restart; the later one took the socket and the other ran every watcher twice for days).
+const startServer = async () => {
+  const svc = await new Response(Bun.spawn(["systemctl", "--user", "is-enabled", "brepl"], { stdout: "pipe", stderr: "ignore" }).stdout).text();
+  if (svc.trim() === "enabled") await Bun.spawn(["systemctl", "--user", "start", "brepl"]).exited;
+  else spawn(process.execPath, [import.meta.path, "--serve"], { detached: true, stdio: "ignore" }).unref();
+  for (let i = 0; i < 60 && !existsSync(SOCK); i++) await Bun.sleep(50);  // sync-ok: CLI side, not the server
+};
+
 if (args[0] === "--serve") {
-  if (existsSync(SOCK)) unlinkSync(SOCK);
+  // One server only: if another one answers on the socket, or holds the lock (two starting at once), exit quietly.
+  const { openSync, writeSync, readFileSync, closeSync } = await import("node:fs");  // sync-ok: startup, before any work
+  const LOCK = `${SOCK}.pid`;
+  const alive = (pid) => { try { return pid !== process.pid && readFileSync(`/proc/${pid}/cmdline`, "utf8").includes("--serve"); } catch { return false; } };  // sync-ok: startup
+  const answering = await new Promise((ok) => {
+    const t = setTimeout(() => ok(false), 1500);
+    Bun.connect({ unix: SOCK, socket: { open(c) { c.write("process.pid\0"); }, data() { clearTimeout(t); ok(true); }, error() { ok(false); }, connectError() { ok(false); } } }).catch(() => ok(false));
+  });
+  if (answering) { console.error("brepl: a server is already running on " + SOCK + ", exiting"); process.exit(0); }
+  for (let i = 0; i < 2; i++) {
+    try { const fd = openSync(LOCK, "wx"); writeSync(fd, String(process.pid)); closeSync(fd); break; } catch {}  // sync-ok: startup
+    await Bun.sleep(150);  // the winner may not have written its pid yet
+    const other = parseInt(readFileSync(LOCK, "utf8")) || 0;  // sync-ok: startup
+    if (alive(other)) { console.error(`brepl: server pid ${other} is starting, exiting`); process.exit(0); }
+    unlinkSync(LOCK);  // sync-ok: startup; a stale lock
+  }
+  globalThis.__breplCore = 2;  // alerts.ts owns the freeze watchdog (older cores ran their own)
+  if (existsSync(SOCK)) unlinkSync(SOCK);  // sync-ok: startup
   // Everything beyond this core lives in HOT-RELOADABLE modules (Simon, 2026-10-24: "hot-reload features that mean
   // you don't have to restart"). Each may export start(ctx) / stop(); saving the file reloads it automatically
   // (stop the old copy, import the new one, start it) and posts "reloaded <name>" to the channel. reload() reloads
@@ -40,9 +66,9 @@ if (args[0] === "--serve") {
   // returns them as pictures; the CLI just lists them. Returned image paths (or arrays of them) count too.
   const FG_SECONDS = Number(process.env.BREPL_FG_SECONDS ?? 3);
   const IMG = /\.(png|jpe?g|webp|gif)$/i;
-  const { mkdirSync, appendFileSync } = await import("node:fs");
+  const { mkdirSync, appendFileSync } = await import("node:fs");  // sync-ok: startup mkdir; send() appends one small line
   const { AsyncLocalStorage } = await import("node:async_hooks");
-  mkdirSync(`${process.env.HOME}/.cache/brepl`, { recursive: true });
+  mkdirSync(`${process.env.HOME}/.cache/brepl`, { recursive: true });  // sync-ok: startup
   const als = new AsyncLocalStorage();
   const real = { log: console.log, error: console.error };
   const text = (a) => a.map((x) => (typeof x === "string" ? x : inspect(x, { depth: 3, colors: false }))).join(" ");
@@ -75,7 +101,7 @@ if (args[0] === "--serve") {
   // seen (images shown as pictures). Kept in ~/.cache/brepl/channel.jsonl (+ .seen cursor), so unseen
   // entries survive a restart and a Monitor on that file can wake Claude.
   const CH = `${process.env.HOME}/.cache/brepl/channel.jsonl`, CH_SEEN = CH.replace(/jsonl$/, "seen");
-  const { readFileSync: rf, writeFileSync: wf, existsSync: ex } = await import("node:fs");
+  const { readFileSync: rf, writeFileSync: wf, existsSync: ex } = await import("node:fs");  // sync-ok: startup load + poll()'s tiny cursor file, never on a timer
   let channel = ex(CH) ? rf(CH, "utf8").trim().split("\n").filter(Boolean).slice(-3000).map((l) => JSON.parse(l)) : [];
   wf(CH, channel.map((e) => JSON.stringify(e) + "\n").join(""));
   let seen = ex(CH_SEEN) ? Number(rf(CH_SEEN, "utf8")) || 0 : 0;
@@ -84,7 +110,7 @@ if (args[0] === "--serve") {
     const e = { seq: ++chSeq, t: new Date().toTimeString().slice(0, 8), source: String(source), text: typeof text === "string" ? text : inspect(text, { depth: 4, colors: false }), images: [images].flat().filter(Boolean) };
     channel.push(e);
     if (channel.length > 3000) channel = channel.slice(-2000);
-    appendFileSync(CH, JSON.stringify(e) + "\n");
+    appendFileSync(CH, JSON.stringify(e) + "\n");  // sync-ok: one small line, keeps the channel in order
     return e.seq;
   };
   // pipe(source, readable): stream lines into the channel as they come (a ReadableStream, Bun.spawn(...).stdout,
@@ -139,20 +165,14 @@ if (args[0] === "--serve") {
   globalThis.jobs = () => [...jobs.values()].map((j) => ({ id: j.id, name: j.name, status: j.status, secs: Math.round(((j.ended ?? Date.now()) - j.started) / 1000), polled: j.polled }));
   // Nothing may block (Simon, 2026-10-24: "make sure that none of them block"). JS can't interrupt synchronous
   // code, so: running jobs are mirrored to jobs.json and channel.jsonl is on disk, letting brepl_poll answer from
-  // the files when the server is frozen; the CLI gives up waiting after FG_SECONDS + 2; and a frozen event loop is
-  // reported to the channel afterwards with the job that caused it.
+  // the files when the server is frozen; the CLI gives up waiting after FG_SECONDS + 2; and alerts.ts's freeze
+  // watchdog (a Worker thread) reports a frozen event loop afterwards, naming what blocked it.
   const JOBS_FILE = `${process.env.HOME}/.cache/brepl/jobs.json`;
+  let jobsText = "";
   setInterval(() => {
-    const running = [...jobs.values()].filter((j) => j.status === "running").map((j) => ({ id: j.id, name: j.name, started: j.started }));
-    wf(JOBS_FILE, JSON.stringify(running));
+    const running = JSON.stringify([...jobs.values()].filter((j) => j.status === "running").map((j) => ({ id: j.id, name: j.name, started: j.started })));
+    if (running !== jobsText) { jobsText = running; Bun.write(JOBS_FILE, running).catch(() => {}); }
   }, 1000).unref?.();
-  let tick = Date.now(), current = null;
-  setInterval(() => {
-    const lag = Date.now() - tick - 500;
-    tick = Date.now();
-    if (lag > 2000) send("⚠ brepl frozen", `the event loop was blocked for ${(lag / 1000).toFixed(1)}s${current ? ` by: ${current.name}` : ""} (synchronous code: use async versions, e.g. Bun.spawn not spawnSync)`);
-    if (current && current.status !== "running") current = null;  // cleared here, not when it ends, so the report above can name it
-  }, 500).unref?.();
   const run = async (code) => {
     // Heredoc: a first line "//@write PATH" (or "//@append PATH") writes the REST of the call to PATH verbatim, with
     // no JS quoting at all, so GDScript with backticks, ${...} and backslashes goes through untouched (agents used to
@@ -192,7 +212,6 @@ if (args[0] === "--serve") {
     }
     const name = code.trim().split("\n").find((l) => l.trim() && !l.trim().startsWith("//"))?.trim().slice(0, 60) ?? "code";
     const job = start(name, fn);
-    current = job;
     if (await Promise.race([job.promise.then(() => true), Bun.sleep(waitS * 1000).then(() => false)])) return render(job);
     toBackground(job);
     return [...job.lines, `⏳ still running after ${waitS}s -> background job #${job.id} (result goes to the channel: brepl_poll)`].join("\n") + "\n";
@@ -283,19 +302,19 @@ if (args[0] === "--serve") {
 } else {
   if (args[0] === "--stop" || args[0] === "--restart") {
     // Normally the server is the brepl.service systemd unit (always on, restarted if it dies): restart that.
-    const svc = Bun.spawnSync(["systemctl", "--user", "is-enabled", "brepl"]).stdout.toString().trim() === "enabled";
+    const svc = Bun.spawnSync(["systemctl", "--user", "is-enabled", "brepl"]).stdout.toString().trim() === "enabled";  // sync-ok: CLI
     if (svc) {
-      Bun.spawnSync(["systemctl", "--user", args[0] === "--stop" ? "stop" : "restart", "brepl"]);
-      for (let i = 0; i < 60 && args[0] === "--restart" && !existsSync(SOCK); i++) await Bun.sleep(50);
+      Bun.spawnSync(["systemctl", "--user", args[0] === "--stop" ? "stop" : "restart", "brepl"]);  // sync-ok: CLI
+      for (let i = 0; i < 60 && args[0] === "--restart" && !existsSync(SOCK); i++) await Bun.sleep(50);  // sync-ok: CLI
     } else {
-      spawn("pkill", ["-f", "brepl --serv[e]"]).on("exit", () => { if (existsSync(SOCK)) unlinkSync(SOCK); });
+      spawn("pkill", ["-f", "brepl --serv[e]"]).on("exit", () => { if (existsSync(SOCK)) unlinkSync(SOCK); });  // sync-ok: CLI
       await Bun.sleep(300);
     }
     if (args[0] === "--stop") process.exit(0);
     args.shift();
   }
   if (args[0] === "--pipe") {  // stream stdin into the channel: some-command | brepl --pipe SOURCE
-    if (!existsSync(SOCK)) { spawn(process.execPath, [import.meta.path, "--serve"], { detached: true, stdio: "ignore" }).unref(); for (let i = 0; i < 50 && !existsSync(SOCK); i++) await Bun.sleep(50); }
+    if (!existsSync(SOCK)) await startServer();  // sync-ok: CLI
     const sock = await Bun.connect({ unix: SOCK, socket: { data() {}, error() {} } });
     sock.write(`\u0002PIPE ${args[1] ?? "pipe"}\n`);
     for await (const chunk of Bun.stdin.stream()) { process.stdout.write(chunk); sock.write(chunk); }
@@ -325,8 +344,7 @@ if (args[0] === "--serve") {
   try {
     res = await connect();
   } catch {
-    spawn(process.execPath, [import.meta.path, "--serve"], { detached: true, stdio: "ignore" }).unref();
-    for (let i = 0; i < 50 && !existsSync(SOCK); i++) await Bun.sleep(50);
+    await startServer();
     res = await connect();
   }
   if (process.env.BREPL_RAW !== "1") res = res.replace(/\u0001SHOW (.*)\n/, (_, j) => JSON.parse(j).map((p) => `[image: ${p}]`).join("\n") + "\n");
