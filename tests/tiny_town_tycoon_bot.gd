@@ -138,10 +138,7 @@ func _ready() -> void:
 	if not host:
 		kit.at(16.0, "a driver honks (A)", func() -> void: _press_driver("accept"))
 	if client:
-		# a machine that joined late (BOT_LATE) counts its clock from its own start: it still leaves before the host
-		kit.at(52.0 - minf(20.0, float(OS.get_environment("BOT_LATE")) if OS.has_environment("BOT_LATE") else 0.0), "finish", func() -> void:
-			_checks()
-			kit.finish())
+		kit.finish_at(52.0, _checks)  # (a machine that joined late leaves sooner, before the host)
 	elif host:
 		kit.at(50.0, "save + reload", _save_reload)
 		var end := float(OS.get_environment("TT_HOST_END")) if OS.has_environment("TT_HOST_END") else 62.0

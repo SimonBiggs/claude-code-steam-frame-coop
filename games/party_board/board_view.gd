@@ -771,7 +771,7 @@ func set_arrow_sel(sel: int) -> void:
 		var on := i == sel
 		a.scale = Vector3.ONE * (1.35 if on else 0.85)
 		var mi := a.get_node("Mesh") as MeshInstance3D
-		mi.transparency = 0.0 if on else 0.45
+		UiKit.fade3d(mi, 0.0 if on else 0.45)
 		(a.get_node("Label") as Label3D).modulate = Color(1, 0.9, 0.4) if on else Color(0.8, 0.8, 0.85, 0.7)
 
 
@@ -834,4 +834,4 @@ func _process(delta: float) -> void:
 			continue
 		var k2 := float(f[1]) / 0.8
 		mi.scale = Vector3.ONE * (1.0 + (1.0 - k2) * 0.6)
-		mi.transparency = 1.0 - k2
+		UiKit.fade3d(mi, 1.0 - k2)

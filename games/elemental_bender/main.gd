@@ -1957,8 +1957,6 @@ func _update_story(delta: float) -> void:
 	if not roots.is_empty():
 		StoryCard.show(roots, opts)
 	if vr_rig != null:
-		if vr_story != null and is_instance_valid(vr_story):
-			vr_story.queue_free()
 		vr_story = StoryCard.show_vr(self, vr_rig.camera, opts)
 	temple_story.cheer()  # Kiko bounces as she talks
 	print("Story: %s (%s)" % [b[0], b[1]])

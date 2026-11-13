@@ -9,6 +9,7 @@ extends Node3D
 const Defs := preload("res://games/tiny_town_tycoon/defs.gd")
 const Art := preload("res://games/tiny_town_tycoon/art.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const Town := preload("res://games/tiny_town_tycoon/town.gd")
 
 const KINDS: Array[String] = ["rain", "festival", "parade", "cow", "fire"]
@@ -414,7 +415,7 @@ func _show_rainbow() -> void:
 		add_child(rainbow)
 		rainbow.position = Vector3(0.0, Defs.GROUND_Y - 0.05, -0.35)
 	rainbow.visible = true
-	rainbow.transparency = 1.0
+	UiKit.fade3d(rainbow, 1.0)
 	rainbow_t = 14.0
 
 
@@ -478,7 +479,7 @@ func _process(delta: float) -> void:
 	_t += delta
 	if rainbow != null and rainbow.visible:
 		rainbow_t -= delta
-		rainbow.transparency = clampf(1.0 - minf(rainbow_t, 14.0 - rainbow_t) / 2.0, 0.0, 1.0)
+		UiKit.fade3d(rainbow, clampf(1.0 - minf(rainbow_t, 14.0 - rainbow_t) / 2.0, 0.0, 1.0))
 		if rainbow_t <= 0.0:
 			rainbow.visible = false
 	if cow_node != null and cow_node.visible:

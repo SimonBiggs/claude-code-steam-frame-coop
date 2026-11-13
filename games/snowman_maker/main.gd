@@ -1078,8 +1078,6 @@ func show_story(beat: Dictionary) -> void:
 	if split != null:
 		StoryCard.show(_all_huds(), opts)
 	if vr_rig != null:
-		if vr_story != null and is_instance_valid(vr_story):
-			vr_story.call("hide_card")
 		opts["vr_height"] = 0.18  # above the hints (they sit low)
 		vr_story = StoryCard.show_vr(self, vr_rig.camera, opts)
 

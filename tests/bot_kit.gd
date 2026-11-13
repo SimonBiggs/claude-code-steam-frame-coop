@@ -64,6 +64,9 @@ func _ready() -> void:
 	var real := Input.get_connected_joypads()
 	if not real.is_empty():
 		info("ignoring %d real controller(s): %s" % [real.size(), str(real)])
+	if OS.has_environment("DUO_JOIN"):
+		# (connected before the game's core/net.gd, so this runs before its "host gone: reload and reconnect")
+		multiplayer.server_disconnected.connect(_host_left)
 
 
 func _exit_tree() -> void:
@@ -258,7 +261,11 @@ func seated_want(want: int, host_p: int = 0) -> int:
 		var seats := 6
 		if main.get("party") != null:
 			seats = mini(int(main.party.max_slot), 6)
-		n = mini(want * joiners(), seats)
+		# machines connected NOW: a late joiner (multibot --late) leaves before the host's checks, by design
+		var machines := joiners()
+		if int(main.net.peer_count()) > 0:
+			machines = mini(machines, int(main.net.peer_count()))
+		n = mini(want * machines, seats)
 	return n + host_p
 
 
@@ -332,6 +339,41 @@ static func host_mode_problem(net: Node, mine: String, key := "mode") -> String:
 	return ""
 
 
+# --- Late joiners and the end of a joining machine ------------------------------------------
+
+## This machine joined a game already running (tools/multibot.ts --late S: started S s after the others, BOT_LATE=S).
+## Bots use it to skip checks of things that happened before it came. WHEN it leaves is the kit's job (finish_at,
+## tests/bot_end.gd within_deadline: S s sooner on its own clock, so it still leaves before the host): bots never read
+## BOT_LATE themselves (tests/bot_end_test.gd fails one that does; 13 bots had their own copies, 2026-11-13).
+static func joined_late() -> bool:
+	return OS.has_environment("DUO_JOIN") and OS.has_environment("BOT_LATE")
+
+
+## Finish at `time` on this machine's clock (running `checks` first): pulled in by tests/bot_end.gd within_deadline,
+## so a late joiner ends BOT_LATE s sooner (before the host) and nobody outlives the runner's deadline.
+func finish_at(time: float, checks: Callable = Callable(), label := "finish") -> void:
+	var end: float = preload("res://tests/bot_end.gd").within_deadline(time)
+	if joined_late():
+		label += " (joined %s s late: leaves before the host)" % OS.get_environment("BOT_LATE")
+	at(end, label, func() -> void:
+		if checks.is_valid():
+			checks.call()
+		finish())
+
+
+## A joining machine whose host went away before it finished: end here with what it checked so far, instead of the
+## game's "reload and reconnect" to a host that is gone (a late joiner then sat in an empty game until the runner
+## killed it: multibot -n 2 --late 12, 2026-11-13). Said out loud, never quiet.
+func _host_left() -> void:
+	if _finished or not is_inside_tree():
+		return
+	info("BOT: the host left before this machine finished (%s): ending with the checks so far" % ("it joined late" if joined_late() else "a joiner"))
+	var net: Node = main.get("net") if main != null and is_instance_valid(main) else null
+	if net != null:
+		net.set("mode", "local")  # core/net.gd _on_server_gone: not a client any more = left on purpose, no reload
+	finish(true, ", the host left first")
+
+
 ## Print the summary and quit (exit code 1 if anything failed).
 func finish(quit: bool = true, note := "") -> void:
 	if _finished:
@@ -340,6 +382,11 @@ func finish(quit: bool = true, note := "") -> void:
 	var vr_view := int(Engine.get_meta("vr_view_failures", 0))  # core/vr_view_watch.gd's problems count too
 	failures += vr_view
 	checks += vr_view
+	# A story card knocked off before it could be read (under StoryCard.SHORT_READ s, not opts.urgent): core/story_card.gd
+	# queues cards for MIN_READ s, so this is a game freeing / leaving one itself (Tower Stack, 2026-11-13).
+	var short := int(Engine.get_meta("story_card_short", 0))
+	if short > 0:
+		assert_true(false, "%d story card(s) knocked off before they could be read (see the STORY CARD lines: let core/story_card.gd replace them, or opts.urgent on purpose)" % short)
 	if failures == 0 and checks == 0:  # a run that checked nothing tested nothing (tests/bot_end.gd's shared rule)
 		printerr("SCRIPT ERROR: BOT RESULT: FAIL (0 checks%s: this bot counted nothing before it ended)" % note)
 	elif failures == 0:
@@ -454,6 +501,11 @@ func join_bot(party: Node) -> int:
 ## (it has no pads). The roster is back to what it was afterwards.
 func drop_in_out(party: Node, time: float, stay: float, seated: Callable) -> void:
 	var st := {"dev": -1, "slot": -1}
+	if joined_late():
+		# A machine that joined a game already running has the host's seat count: its drop-in waits on seats that
+		# never free (tower_stack, fruit_catch, snowman_maker had their own skips, 2026-11-13).
+		at(time, "(joined late: no drop-in test here, the machines there from the start do it)")
+		return
 	at(time, "a late player drops in", func() -> void:
 		if party.get_parent().get("net") != null and str(party.get_parent().net.mode) == "host":
 			return

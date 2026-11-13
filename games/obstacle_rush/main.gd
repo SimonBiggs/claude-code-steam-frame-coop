@@ -1168,8 +1168,6 @@ func show_story(beat: Dictionary) -> void:
 	if not huds.is_empty():
 		StoryCard.show(_all_huds(), beat)
 	if vr_rig != null:
-		if vr_story != null and is_instance_valid(vr_story):
-			vr_story.queue_free()
 		var vb := beat.duplicate()
 		vb["vr_height"] = VR_CARD_UP  # above the toy course: a step or a high floor right in front would hide it at eye level
 		vr_story = StoryCard.show_vr(self, vr_rig.camera, vb)

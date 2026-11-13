@@ -146,7 +146,7 @@ func _process(delta: float) -> void:
 		var dry := clampf((after - 0.45) / maxf(0.1, float(now.after) - 0.45), 0.0, 1.0)
 		var r := float(now.w) * 0.85 * maxf(0.01, grow)
 		puddle.scale = Vector3(r, 1.0, r)
-		puddle.transparency = 0.35 + 0.65 * dry
+		UiKit.fade3d(puddle, 0.35 + 0.65 * dry)
 	if streaks != null and is_instance_valid(streaks) and streaks.emitting and after > float(now.after) - 0.6:
 		streaks.emitting = false
 

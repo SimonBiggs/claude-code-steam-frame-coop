@@ -23,13 +23,13 @@ func _initialize() -> void:
 		n += 1
 		var src := FileAccess.get_file_as_string("res://tests/" + f)
 		# quit() alone is not enough (often only a BOT_COUNT-style side mode quits): it must come with a BOT RESULT line.
-		if not ("finish(" in src or "bot_end.gd" in src or ("quit(" in src and "BOT RESULT" in src)):
+		if not ("finish(" in src or "finish_at(" in src or "bot_end.gd" in src or ("quit(" in src and "BOT RESULT" in src)):
 			bad.append(f)
 		# ...and END WITH A VERDICT that counts checks, in local, host and joining runs (tools/multibot.ts FAILs a run
 		# without BOT RESULT: it tested nothing; penalty_shootout's networked runs did, 2026-11-11): bot_kit's
 		# finish(), its own BOT RESULT line (dragon_rider counts its checks), or tests/bot_end.gd check() (the shared
 		# tally prints the BOT RESULT; with 0 checks it says FAIL). The runners FAIL a run that printed none.
-		if not ("finish(" in src or "BotEnd.check(" in src or "BOT RESULT" in src):
+		if not ("finish(" in src or "finish_at(" in src or "BotEnd.check(" in src or "BOT RESULT" in src):
 			counted.append(f)
 		# Quitting straight away while a sound plays leaks its AudioStreamWAV + playback at exit: bots quit through
 		# tests/bot_end.gd quit_quietly (2026-10-29).
@@ -79,6 +79,14 @@ func _initialize() -> void:
 		# leaks ("RenderingServer::get_singleton() is null", RID leaks at exit: whack_a_mole_deep_test, 2026-11-11).
 		if code.begins_with("extends SceneTree") and "\nfunc _init(" in code:
 			flat.append(f + " (works in _init(): use _initialize(), the tree and RenderingServer exist by then)")
+	# A late joiner's end (multibot --late S: BOT_LATE=S) is the shared layer's job: BotKit.finish_at / bot_end.gd
+	# end_at / within_deadline pull it in, late_shift moves a shared-timeline step, BotKit.joined_late() skips checks of
+	# what came before it, and BotKit.drop_in_out skips the drop-in on it. 13 bots had their own BOT_LATE sums (two
+	# subtracted it twice), and a late joiner stayed on after the host and never ended (2026-11-13).
+	for f in DirAccess.get_files_at("res://tests"):
+		if f.ends_with(".gd") and not f in ["bot_kit.gd", "bot_end.gd", "bot_end_test.gd"]:
+			if "BOT_LATE" in FileAccess.get_file_as_string("res://tests/" + f):
+				flat.append(f + " (reads BOT_LATE itself: end with kit.finish_at(t, checks) or bot_end.gd end_at(), shift a step with bot_end.gd late_shift(t), skip a check with BotKit.joined_late())")
 	if not counted.is_empty():
 		flat.append("these bots count no checks (BotEnd.check() / bot_kit, so they end with a real BOT RESULT): " + ", ".join(counted))
 	_tally_lines(flat)

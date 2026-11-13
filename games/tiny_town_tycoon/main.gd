@@ -1712,8 +1712,6 @@ func _show_story(key: String) -> void:
 	var beat := {"who": Wishes.WHO, "line": String(l[0]), "pic": pic, "color": Wishes.WHO_COLOR, "duration": 4.0}
 	StoryCard.show(hud.call("all_roots"), beat)
 	if vr_rig != null:
-		if is_instance_valid(_vr_story):
-			_vr_story.queue_free()
 		_vr_story = StoryCard.show_vr(self, vr_rig.camera, beat)
 
 
@@ -2042,8 +2040,6 @@ func _show_beat(line: String, pic: String, color: Color) -> void:
 	var beat := {"who": Wishes.WHO, "line": line, "pic": pic, "color": color, "duration": 3.0}
 	StoryCard.show(hud.call("all_roots"), beat)
 	if vr_rig != null:
-		if is_instance_valid(_vr_story):
-			_vr_story.queue_free()
 		_vr_story = StoryCard.show_vr(self, vr_rig.camera, beat)
 
 

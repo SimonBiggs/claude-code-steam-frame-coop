@@ -73,19 +73,13 @@ func _ready() -> void:
 		kit.at(t0 + 7.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused, "Start again resumes everyone")
 			kit.allow_pause = false)
-	if not OS.has_environment("BOT_LATE"):  # (a late joiner's drop-in would still sit there at the host's seat count)
-		kit.drop_in_out(main.party, t0 + 9.0, 3.0, func(slot: int) -> bool:
-			return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot))
+	kit.drop_in_out(main.party, t0 + 9.0, 3.0, func(slot: int) -> bool:
+		return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot))
 	if host:
 		kit.at(64.0, "host checks", _checks)
 		kit.at(68.0, "finish", kit.finish)
 	else:
-		var end := 61.0 if client else (110.0 if lone else 58.0)
-		if OS.has_environment("BOT_LATE"):  # a machine joining a game already running leaves before the host does
-			end = maxf(t0 + 14.0, end - float(OS.get_environment("BOT_LATE")) - 2.0)
-		kit.at(end, "finish", func() -> void:
-			_checks()
-			kit.finish())
+		kit.finish_at(61.0 if client else (110.0 if lone else 58.0), _checks)  # (a late joiner: sooner, before the host)
 	if not OS.has_environment("DUO_JOIN"):
 		kit.at(14.0, "a quake warning (host / local sends it to every machine)", func() -> void:
 			main.weather_warn("quake")
@@ -373,15 +367,16 @@ func _checks() -> void:
 	kit.assert_eq(main.town.entries.size(), mini((main.net.state_get("town", []) as Array).size(), main.G.town_size()), "%s: the town shows every saved tower" % mode)
 	kit.assert_eq(main.districts.get_child_count(), main.Districts.reached(int(main.net.state_get("made", 0))), "%s: the town shows its districts" % mode)
 	kit.assert_true(orbs_seen >= 3, "%s: the pick orbs showed (%d)" % [mode, orbs_seen])
-	if not OS.has_environment("BOT_LATE"):  # (the host's forced quake at 14 s can come before a late joiner is in)
+	if not BotKit.joined_late():  # (the host's forced quake at 14 s can come before a late joiner is in)
 		kit.assert_true(rings_seen > 0, "%s: a weather warning ring showed" % mode)
 	for id in main.blocks:
 		kit.assert_true(main.bkind.has(id), "%s: block %d knows its kind" % [mode, int(id)])
 		break
 	# Third pass: Rolo's told balls, the neighbours' green, the season.
 	kit.assert_true(kit.seen_values("rolls").size() >= 1, "%s: Rolo rolled a ball (%s)" % [mode, str(kit.seen_values("rolls"))])
-	kit.assert_true(lanes_seen > 0, "%s: a ball's lane was told on the grass" % mode)
-	kit.assert_true(balls_seen > 0, "%s: a ball rolled" % mode)
+	if not BotKit.joined_late():  # (Rolo rolls early in a job: a machine joining mid-job may only see the count)
+		kit.assert_true(lanes_seen > 0, "%s: a ball's lane was told on the grass" % mode)
+		kit.assert_true(balls_seen > 0, "%s: a ball rolled" % mode)
 	kit.assert_eq(main.unwarned_hits, 0, "%s: nobody was bowled over by a ball that wasn't told (%d bowled over)" % [mode, main.roll_hits])
 	kit.info("%s: %d bowled over by Rolo's balls, season %s" % [mode, main.roll_hits, main.season])
 	kit.assert_true(main.roll_hits <= 1, "%s: builders who step out of a told lane are never bowled over (%d)" % [mode, main.roll_hits])
