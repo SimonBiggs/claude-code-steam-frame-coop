@@ -239,7 +239,7 @@ class Runner extends Node:
 				(sv[0] as Label).text = sv[1]
 				(sv[0] as Label).modulate.a = sv[2]
 		if card != null and is_instance_valid(card):
-			card.leave()
+			card.leave(0.3, true)  # the bot's own test card goes on purpose (not a story card knocked off)
 		await frames(20)
 
 	## Pattern guard (one ant -> the whole nest): every split-screen (classic) game goes through core/classic_seats.gd's
