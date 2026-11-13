@@ -127,12 +127,22 @@ static func build(main: Node3D, radius: float, vr: bool) -> void:
 	_add_village_square(main, radius, rng)
 
 
+## Is p clear of the frozen pond at its biggest (rink.gd grows it outward with Bobo's skating friends) + margin?
+## Trees, cottages and snow piles keep off it (2026-11-13: a cottage and a tree stood in the grown pond).
+static func pond_clear(p: Vector3, radius: float, margin: float) -> bool:
+	var Rink := preload("res://games/snowball_blitz/rink.gd")
+	var c := Vector3(radius + 6.5 + Rink.POND_MAX - Rink.POND_R, 0.0, radius * 0.25)
+	return Vector2(p.x - c.x, p.z - c.z).length() > Rink.POND_MAX + margin
+
+
 static func _add_trees(main: Node3D, radius: float, rng: RandomNumberGenerator) -> void:
 	var spots: Array[Transform3D] = []
 	for i in 46:
 		var a := rng.randf() * TAU
 		var d := rng.randf_range(radius + 2.5, radius + 16.0)
 		var s := rng.randf_range(0.8, 1.6)
+		if not pond_clear(Vector3(cos(a) * d, 0, sin(a) * d), radius, 2.0 * s):
+			d = radius + 18.0 + s  # (behind the pond instead)
 		spots.append(Transform3D(Basis().scaled(Vector3.ONE * s).rotated(Vector3.UP, rng.randf() * TAU), Vector3(cos(a) * d, 0, sin(a) * d)))
 	var cone := CylinderMesh.new()
 	cone.top_radius = 0.0
@@ -165,6 +175,8 @@ static func _add_cottages(main: Node3D, radius: float, rng: RandomNumberGenerato
 	for i in count:
 		var a := TAU * (i + 0.5) / count + rng.randf_range(-0.12, 0.12)
 		var d := radius + rng.randf_range(9.0, 13.0)
+		while not pond_clear(Vector3(cos(a) * d, 0, sin(a) * d), radius, 4.5):
+			d += 1.0  # (a cottage never stands in the pond)
 		var house := Node3D.new()
 		house.position = Vector3(cos(a) * d, 0, sin(a) * d)
 		main.add_child(house)
@@ -430,6 +442,7 @@ static func _add_village_square(main: Node3D, radius: float, rng: RandomNumberGe
 	ice.roughness = 0.05
 	pond.material_override = ice
 	pond.position = pond_at
+	pond.name = "Pond"  # (rink.gd grows it with Bobo's skating friends)
 	main.add_child(pond)
 	var family: Array[Transform3D] = []
 	for i in 3:
@@ -453,6 +466,8 @@ static func _add_village_square(main: Node3D, radius: float, rng: RandomNumberGe
 		var a := rng.randf() * TAU
 		var d := rng.randf_range(radius + 1.0, radius + 9.0)
 		var s := rng.randf_range(0.5, 1.2)
+		if not pond_clear(Vector3(cos(a) * d, 0, sin(a) * d), radius, 1.5 * s):
+			continue  # (no snow pile on the ice)
 		piles.append(Transform3D(Basis().scaled(Vector3(s * 1.4, s * 0.5, s)), Vector3(cos(a) * d, 0.0, sin(a) * d)))
 	main.add_child(_mm_instance(ball, main.make_material(Color(0.9, 0.94, 1.0), 0.0), piles, []))
 
