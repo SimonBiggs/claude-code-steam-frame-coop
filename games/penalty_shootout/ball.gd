@@ -6,6 +6,8 @@ extends Node3D
 ## A FIREBALL (set_fire) burns orange with a long flaming trail; it is visual only (the speed comes
 ## from the kick).
 
+const UiKit := preload("res://core/ui_kit.gd")
+
 ## The ball: white with black patches (always some in view).
 const WHITE := Color(1, 1, 1)
 const PATCH := Color(0.08, 0.08, 0.1)
@@ -83,7 +85,7 @@ func _ready() -> void:
 	shadow.mesh = cm
 	var sh := StandardMaterial3D.new()
 	sh.albedo_color = Color(0, 0, 0, 0.45)
-	sh.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(sh)
 	sh.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	shadow.material_override = sh
 	shadow.top_level = true
@@ -105,7 +107,7 @@ func _ready() -> void:
 	trail.mesh = tm
 	var trm := StandardMaterial3D.new()
 	trm.albedo_color = Color(1.0, 0.95, 0.6, 0.5)
-	trm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(trm)
 	trm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	trail.material_override = trm
 	trail_mat = trm

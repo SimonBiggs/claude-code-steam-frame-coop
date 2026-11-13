@@ -93,10 +93,9 @@ func announce(e: Dictionary, warn: float, shield: bool) -> void:
 			bub.mesh = sm
 			var m := StandardMaterial3D.new()
 			m.albedo_color = Color(Deep.gift("shield").color, 0.22)
-			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			UiKit.see_through(m)
 			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 			m.cull_mode = BaseMaterial3D.CULL_DISABLED
-			m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: never over a VR card
 			bub.material_override = m
 			bub.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 			add_child(bub)

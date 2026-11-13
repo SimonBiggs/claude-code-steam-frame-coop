@@ -28,6 +28,7 @@ const KINDS := {
 	"puffling": {"color": Color(1.0, 0.97, 0.75), "radius": 0.3, "speed": 1.3, "tough": 0.45, "points": 60},
 }
 const HouseGen := preload("res://games/ghost_lantern/housegen.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const PRACTICE := ["sleepy", "glowy"]
 const LIFE := 50.0  # simple mode: an uncaught ghost giggles and floats away through the ceiling after this
 const STEALERS := ["thief", "shy"]
@@ -445,7 +446,7 @@ func _build_peeker() -> void:
 	if kind == "snoozy":
 		var bub := StandardMaterial3D.new()
 		bub.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		bub.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(bub)
 		bub.albedo_color = Color(0.75, 0.88, 1.0, 0.75)
 		for i in 3:
 			var b := MeshInstance3D.new()

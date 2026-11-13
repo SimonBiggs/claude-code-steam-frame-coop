@@ -86,10 +86,9 @@ func set_season(s: String) -> void:
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.albedo_color = Color(0.75, 0.9, 1.0, 0.07)
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		m.rim_enabled = false
-		m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards
 		dome.material_override = m
 		dome.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(dome)

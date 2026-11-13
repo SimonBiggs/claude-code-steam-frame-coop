@@ -2,6 +2,7 @@ extends Area3D
 ## Pickups dropped by enemies: health, spread shot, rapid fire, shield bubble and the mega bomb.
 
 const Looks := preload("res://games/duo_arena/looks.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 var kind := "health"
 var main
@@ -81,8 +82,7 @@ func _ready() -> void:
 	cyl.height = 6.0
 	beam.mesh = cyl
 	var bm: StandardMaterial3D = main.make_material(color, 2.0)
-	bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	bm.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
+	UiKit.see_through(bm)
 	bm.albedo_color.a = 0.35
 	bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	beam.material_override = bm

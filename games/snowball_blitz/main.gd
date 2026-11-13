@@ -352,11 +352,11 @@ func mat(mat_name: String) -> StandardMaterial3D:
 			m = make_material(Looks.ENEMY_BALL, 1.4)
 		"ice":
 			m = make_material(Color(0.6, 0.85, 1.0, 0.45), 0.6)
-			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			UiKit.see_through(m)
 			m.roughness = 0.1
 		"thaw":
 			m = make_material(Color(1.0, 0.65, 0.3, 0.35), 1.0)
-			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			UiKit.see_through(m)
 		"skin":
 			m = make_material(Color(1.0, 0.8, 0.65), 0.0)
 		"lid":
@@ -371,7 +371,7 @@ func mat(mat_name: String) -> StandardMaterial3D:
 			m = make_material(Color(1.0, 0.65, 0.3), 2.0)
 		"steam":
 			m = make_material(Color(1, 1, 1, 0.35), 0.0)
-			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			UiKit.see_through(m)
 			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		_:
 			if mat_name.begins_with("scarf"):
@@ -2418,7 +2418,7 @@ func _update_vr_hurt(delta: float) -> void:
 		shell.mesh = sphere
 		vr_hurt_mat = StandardMaterial3D.new()
 		vr_hurt_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		vr_hurt_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		vr_hurt_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA  # see-through-ok: the hurt flash round the head tints the whole view
 		vr_hurt_mat.cull_mode = BaseMaterial3D.CULL_FRONT
 		vr_hurt_mat.no_depth_test = false
 		vr_hurt_mat.render_priority = 20

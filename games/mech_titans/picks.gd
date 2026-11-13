@@ -15,6 +15,7 @@ const Data := preload("res://games/mech_titans/data.gd")
 const Upgrades := preload("res://games/mech_titans/upgrades.gd")
 const Frames := preload("res://games/mech_titans/frames.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const WAIT := 20.0
 const TOUCH_TITAN := 7.0  ## m from the pod's middle to the Titan's middle
@@ -157,7 +158,7 @@ func _pod_body(e: Dictionary, is_default: bool) -> Node3D:
 	column.mesh = cm
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(m)
 	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	m.albedo_color = Color(col.r, col.g, col.b, 0.5 if is_default else 0.32)

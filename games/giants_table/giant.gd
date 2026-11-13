@@ -193,7 +193,7 @@ func _make_hand(left: bool) -> Hand:
 	h.marker.mesh = W.cyl(0.8, 0.8, 0.02, 20)
 	h.marker_mat = StandardMaterial3D.new()
 	h.marker_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	h.marker_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(h.marker_mat)
 	h.marker_mat.albedo_color = Color(0.1, 0.05, 0.0, 0.35)
 	h.marker.material_override = h.marker_mat
 	h.marker.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

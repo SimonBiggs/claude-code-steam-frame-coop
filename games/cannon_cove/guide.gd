@@ -4,6 +4,7 @@ extends Node3D
 ## Call point(world_pos) every frame, or hide_arrow().
 
 const World := preload("res://games/cannon_cove/world.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 var color := Color(1.0, 0.85, 0.2)
 var size := 1.0
@@ -37,9 +38,9 @@ func _ready() -> void:
 	ring.mesh = tm
 	var rm := World.mat(color, 2.0)
 	rm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	rm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(rm)
 	rm.no_depth_test = false
-	rm.render_priority = 5
+	rm.render_priority = UiKit.VR_PRIO_UNDER_UI + 2  # over other see-through scenery, still under VR cards
 	ring.material_override = rm
 	add_child(ring)
 	_set_layers(self)

@@ -144,7 +144,7 @@ func _ready() -> void:
 	shadow.mesh = Art.cyl(0.3, 0.3, 0.01, 12)
 	var shm := StandardMaterial3D.new()
 	shm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	shm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(shm)
 	shm.albedo_color = Color(0.0, 0.0, 0.05, 0.35)
 	shadow.material_override = shm
 	shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

@@ -21,7 +21,7 @@ func _ready() -> void:
 	top_level = true
 	_mat = StandardMaterial3D.new()
 	_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(_mat)
 	_mat.albedo_color = Color(0.75, 1.0, 0.95, 0.5)
 	_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	var hb := MeshKit.Builder.new()

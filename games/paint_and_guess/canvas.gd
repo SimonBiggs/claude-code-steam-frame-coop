@@ -14,6 +14,7 @@ const MeshKit := preload("res://games/paint_and_guess/mesh_kit.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const PaintGen := preload("res://games/paint_and_guess/paintgen.gd")
 const VrViewCheck := preload("res://core/vr_view_check.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const PROMPT_SIZE := 0.3  # the artist's picture of what to paint (m)
 const PIC_COLOR := Color(1.0, 0.62, 0.3)  # the colour the picture cards are drawn in (answers, balloons, prompt)
 
@@ -301,7 +302,7 @@ func _bubble(text: String, col: Color, pos: Vector3) -> MeshInstance3D:
 	b.mesh = main.sphere_mesh(0.07)
 	var m := StandardMaterial3D.new()
 	m.albedo_color = Color(col.r, col.g, col.b, 0.55)
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(m)
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	b.material_override = m
 	b.position = pos

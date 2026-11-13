@@ -6,6 +6,7 @@ extends Node3D
 ## The host simulates; the TV draws ghosts from snapshots.
 
 const W := preload("res://games/bee_garden/world.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 ## The wasp's yellow body and its dark stripe / head; the aphid's body.
 const WASP := Color(1.0, 0.8, 0.1)
 const WASP_DARK := Color(0.1, 0.08, 0.05)
@@ -50,7 +51,7 @@ func _ready() -> void:
 		for s in [-1.0, 1.0]:
 			W.mesh_node(body, W.sphere(0.018, 6), W.cmat(Color(0.1, 0.1, 0.1)), Vector3(s * 0.03, 0.05, -0.16))
 	var wing_mat := W.mat(Color(0.95, 0.98, 1.0, 0.6))
-	wing_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(wing_mat)
 	for s in [-1.0, 1.0]:
 		var wm := W.mesh_node(body, W.sphere(0.09, 8), wing_mat, Vector3(s * 0.1, 0.1, 0.0), Vector3(1.2, 0.15, 0.6))
 		wm.set_meta("side", s)

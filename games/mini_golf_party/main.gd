@@ -295,7 +295,7 @@ func _make_fade() -> void:
 	fade.mesh = s
 	fade_mat = StandardMaterial3D.new()
 	fade_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	fade_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	fade_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA  # see-through-ok: the fade sphere round the head covers everything, cards too
 	fade_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	fade_mat.albedo_color = Color(0.0, 0.0, 0.0, 0.0)
 	fade_mat.render_priority = 10

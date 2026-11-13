@@ -5,6 +5,7 @@ extends RefCounted
 const L := preload("res://games/kitchen_rush/layout.gd")
 const ItemScript := preload("res://games/kitchen_rush/item.gd")
 const Looks := preload("res://games/kitchen_rush/looks.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const FLOOR_SHADER := """
 shader_type spatial;
@@ -355,7 +356,7 @@ static func _decorate(main: Node3D, out: Dictionary) -> void:
 	stm.rings = 3
 	var steam_mat := StandardMaterial3D.new()
 	steam_mat.albedo_color = Color(1, 1, 1, 0.35)
-	steam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(steam_mat)
 	steam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	stm.material = steam_mat
 	steam.mesh = stm

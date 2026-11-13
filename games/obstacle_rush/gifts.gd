@@ -134,9 +134,8 @@ static func _bubble_mesh() -> Mesh:
 		sm.rings = 10
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		m.albedo_color = Color(0.6, 1.0, 0.95, 0.22)
 		m.cull_mode = BaseMaterial3D.CULL_BACK
-		m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under the VR cards
 		sm.material = m
 		return sm) as Mesh

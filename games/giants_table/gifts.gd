@@ -67,10 +67,9 @@ func set_gift(id: String) -> void:
 		dome.mesh = sm
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		m.albedo_color = Color(0.35, 0.85, 1.0, 0.22)
-		m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards
 		dome.material_override = m
 		dome.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(dome)

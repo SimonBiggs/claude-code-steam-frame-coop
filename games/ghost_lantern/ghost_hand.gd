@@ -19,7 +19,7 @@ func _ready() -> void:
 	top_level = true
 	mat = StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(mat)
 	mat.albedo_color = Color(0.75, 1.0, 0.85, 0.5)
 	mat.no_depth_test = false
 	cone_mat = mat.duplicate()

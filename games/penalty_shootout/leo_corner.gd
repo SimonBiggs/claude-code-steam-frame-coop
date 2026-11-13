@@ -11,6 +11,7 @@ extends Node3D
 
 const MeshKit := preload("res://games/penalty_shootout/mesh_kit.gd")
 const MatchGen := preload("res://games/penalty_shootout/matchgen.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const GOLD := Color(1.0, 0.82, 0.2)
 const CUB_SCALE := 1.3
 const SCARVES: Array[Color] = [Color(0.9, 0.2, 0.2), Color(0.2, 0.5, 1.0), Color(0.2, 0.85, 0.4), Color(1.0, 0.85, 0.15),
@@ -44,7 +45,7 @@ func build() -> void:
 	star_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	dim_mat = StandardMaterial3D.new()
 	dim_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	dim_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(dim_mat)
 	dim_mat.albedo_color = Color(1.0, 1.0, 1.0, 0.35)
 	dim_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	goal_star = _star_node(star_mat)
@@ -60,7 +61,7 @@ func build() -> void:
 	goal_star_glow.mesh = halo
 	var hm := StandardMaterial3D.new()
 	hm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(hm)
 	hm.albedo_color = Color(1.0, 0.97, 0.75, 0.4)
 	goal_star_glow.material_override = hm
 	goal_star_glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

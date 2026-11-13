@@ -133,8 +133,7 @@ func _mat(col: Color, alpha: float) -> StandardMaterial3D:
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.albedo_color = Color(col.r, col.g, col.b, alpha)
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards
+	UiKit.see_through(m)
 	return m
 
 

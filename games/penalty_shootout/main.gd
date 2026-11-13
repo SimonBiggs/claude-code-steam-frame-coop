@@ -2053,7 +2053,7 @@ func _update_aim_visuals() -> void:
 		var dm := StandardMaterial3D.new()
 		dm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		dm.albedo_color = Color(1, 1, 1, 0.7)
-		dm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(dm)
 		for i in 9:
 			var d := MeshInstance3D.new()
 			d.mesh = sphere_mesh(0.045)

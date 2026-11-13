@@ -8,6 +8,7 @@ extends Node3D
 
 const World := preload("res://games/cannon_cove/world.gd")
 const Looks := preload("res://games/cannon_cove/looks.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const KINDS := {
 	# hp, speed, orbit radius, fire interval, gold, half-size (x, z), sail colour
@@ -106,8 +107,7 @@ func _ready() -> void:
 	q.size = Vector2(3.0, 0.4)
 	bg.mesh = q
 	var bg_mat := World.mat(Color(0, 0, 0, 0.6))
-	bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	bg_mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(bg_mat)
 	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	bg_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	bg_mat.billboard_keep_scale = true
@@ -140,8 +140,7 @@ func _ready() -> void:
 	wake.scale_amount_max = 1.6
 	var fm := World.sphere_mesh(0.35, 6)
 	var foam := World.mat(Color(0.95, 0.98, 1.0, 0.7), 0.3)
-	foam.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	foam.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(foam)
 	fm.material = foam
 	wake.mesh = fm
 	add_child(wake)
@@ -315,8 +314,7 @@ func _animate_details(delta: float) -> void:
 		smoke_fx.scale_amount_max = 2.2
 		var sm := World.sphere_mesh(0.35, 6)
 		var smat := World.mat(Color(0.2, 0.18, 0.18, 0.75), 0.0)
-		smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		smat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+		UiKit.see_through(smat)
 		sm.material = smat
 		smoke_fx.mesh = sm
 		model.add_child(smoke_fx)

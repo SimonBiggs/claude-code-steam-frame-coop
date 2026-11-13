@@ -1955,7 +1955,7 @@ func _build_beam() -> void:
 	cm.cap_bottom = false
 	beam_mat = StandardMaterial3D.new()
 	beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(beam_mat)
 	beam_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	beam_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	beam_mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
@@ -1985,7 +1985,7 @@ func _build_blink() -> void:
 	sm.flip_faces = true
 	blink_mat = StandardMaterial3D.new()
 	blink_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	blink_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	blink_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA  # see-through-ok: the blink sphere round the head covers everything, cards too
 	blink_mat.render_priority = 100
 	blink_mat.albedo_color = Color(0, 0, 0, 0)
 	var mi := MeshInstance3D.new()

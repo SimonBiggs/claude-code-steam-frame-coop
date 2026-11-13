@@ -18,6 +18,7 @@ extends RefCounted
 
 const ResCache := preload("res://core/res_cache.gd")
 const Me := preload("res://core/mesh_kit.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 ## Default segment count for round shapes (keep <= 20 for the Steam Frame's phone-class GPU).
 const SEGMENTS := 12
@@ -74,7 +75,7 @@ static func material(color: Color, glow: float = 0.0) -> StandardMaterial3D:
 	m.albedo_color = color
 	m.roughness = 0.8
 	if color.a < 0.999:
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 	if glow > 0.0:
 		m.emission_enabled = true
 		m.emission = color
@@ -205,7 +206,7 @@ class Lib:
 		if unshaded:
 			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		if transparent:
-			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_DEPTH_PRE_PASS
+			UiKit.see_through(m, true)
 		ResCache.put(key, m)
 		return m
 
@@ -229,7 +230,7 @@ class Lib:
 		m.vertex_color_use_as_albedo = true
 		m.vertex_color_is_srgb = true
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		m.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED

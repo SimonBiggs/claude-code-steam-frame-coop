@@ -11,6 +11,7 @@ extends Node3D
 
 const MeshKit := preload("res://core/mesh_kit.gd")
 const WarnRings := preload("res://core/warn_rings.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const POOL := 6
 const DEBRIS_MAX := 180
@@ -80,7 +81,7 @@ func _glow_mat(c: Color) -> StandardMaterial3D:
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.albedo_color = c
 	if c.a < 0.99:
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	_mats[key] = m
@@ -291,7 +292,7 @@ func _make(kind: String) -> CPUParticles3D:
 	mat.vertex_color_is_srgb = true
 	mat.albedo_color = col
 	if col.a < 0.99:
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(mat)
 	if glow > 0.0:
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		mat.albedo_color = Color(col.r * 1.3, col.g * 1.3, col.b * 1.3, col.a)

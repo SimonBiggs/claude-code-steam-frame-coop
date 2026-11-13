@@ -386,7 +386,7 @@ func bubble_material() -> StandardMaterial3D:
 		return mats["bubble"]
 	var m := StandardMaterial3D.new()
 	m.albedo_color = Color(0.5, 0.9, 1.0, 0.3)
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(m)
 	m.emission_enabled = true
 	m.emission = Color(0.4, 0.8, 1.0)
 	m.emission_energy_multiplier = 0.5
@@ -2196,7 +2196,7 @@ func _set_ghost(path: Array) -> void:
 		add_child(ghost_node)
 		var mat := StandardMaterial3D.new()
 		mat.albedo_color = Color(0.75, 0.9, 1.0, 0.38)
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(mat)
 		mat.emission_enabled = true
 		mat.emission = Color(0.4, 0.7, 1.0)
 		mat.emission_energy_multiplier = 0.6

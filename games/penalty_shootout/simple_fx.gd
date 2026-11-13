@@ -13,6 +13,7 @@ extends Node3D
 ## draws the same from the snapshot. Cheap: a few meshes plus two MultiMeshes for the tally.
 
 const MeshKit := preload("res://games/penalty_shootout/mesh_kit.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const TALLY_MAX := 15
 const BOARDS: Array = [
 	# centre, facing yaw (the board's +z looks at its viewers), icon size
@@ -45,7 +46,7 @@ func build() -> void:
 	add_child(spot)
 	spot_mat = StandardMaterial3D.new()
 	spot_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	spot_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(spot_mat)
 	spot_mat.albedo_color = Color(0.4, 1.0, 0.55, 0.45)
 	var glove := MeshInstance3D.new()
 	glove.mesh = main.sphere_mesh(0.12)
@@ -84,7 +85,7 @@ func build() -> void:
 	disc.rotation.x = PI * 0.5
 	var dmat := StandardMaterial3D.new()
 	dmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	dmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(dmat)
 	dmat.albedo_color = Color(1.0, 0.9, 0.3, 0.22)
 	disc.material_override = dmat
 	disc.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -92,7 +93,7 @@ func build() -> void:
 	target.visible = false
 	arrow_mat = StandardMaterial3D.new()
 	arrow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	arrow_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(arrow_mat)
 	arrow_mat.albedo_color = Color(1.0, 0.92, 0.35, 0.9)
 	ring_arrow = _arrow(2)  # layer 2: the strikers' views only (it would fill the keeper's view)
 	glove_arrow = _arrow(1)

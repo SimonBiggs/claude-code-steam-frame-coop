@@ -9,6 +9,7 @@ const LIFTOFF := 3.0
 const P := preload("res://games/rocket_workshop/puzzles.gd")
 const G := preload("res://games/rocket_workshop/rocketgen.gd")
 const Museum := preload("res://games/rocket_workshop/museum.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const LEVEL_SCALE: Array[float] = [1.0, 1.0, 1.12, 1.24]  # by level: a bigger puzzle is a bigger rocket
 
 var main
@@ -139,7 +140,7 @@ func _particles(amount: int, lifetime: float, color: Color, size: float) -> CPUP
 	m.vertex_color_use_as_albedo = true
 	m.vertex_color_is_srgb = true
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(m)
 	sm.material = m
 	p.mesh = sm
 	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

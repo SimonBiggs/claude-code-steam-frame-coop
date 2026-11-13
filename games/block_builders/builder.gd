@@ -131,7 +131,7 @@ func _ensure_visuals() -> void:
 	main.add_child(held_vis)
 	preview = MeshInstance3D.new()
 	preview_mat = StandardMaterial3D.new()
-	preview_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(preview_mat)
 	preview_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	preview_mat.albedo_color = Color(0.3, 1.0, 0.4, 0.45)
 	preview.material_override = preview_mat

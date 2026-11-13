@@ -105,7 +105,7 @@ func _ready() -> void:
 	crown = W.mesh_node(pivot, W.cyl(0.06, 0.05, 0.06, 6), W.cmat(Color(1.0, 0.85, 0.2), 1.4), Vector3(0, 0.12, -0.15))
 	crown.visible = false
 	var wing_mat := W.mat(Color(0.92, 0.97, 1.0, 0.55), 0.2)
-	wing_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(wing_mat)
 	for s in [-1.0, 1.0]:
 		var wm := W.mesh_node(pivot, W.sphere(0.12, 10), wing_mat, Vector3(s * 0.13, 0.12, 0.0), Vector3(1.2, 0.12, 0.7))
 		wm.set_meta("side", s)

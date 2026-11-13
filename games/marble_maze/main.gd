@@ -621,7 +621,7 @@ func _build_jar() -> void:
 	glass.mesh = cyl_mesh(0.1, 0.1, 0.26, 16)
 	var gm := StandardMaterial3D.new()
 	gm.albedo_color = Color(0.8, 0.95, 1.0, 0.25)
-	gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(gm)
 	gm.roughness = 0.1
 	gm.metallic = 0.3
 	glass.material_override = gm

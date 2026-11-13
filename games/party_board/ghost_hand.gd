@@ -7,6 +7,8 @@ extends Node3D
 ##  - hide_demo(): fades away.
 ## Cheap: six low-poly spheres and one box, one unshaded material.
 
+const UiKit := preload("res://core/ui_kit.gd")
+
 const CYCLE := 3.2
 
 var mode := ""  # "", "throw", "tap"
@@ -24,7 +26,7 @@ var die_mat: StandardMaterial3D
 func _ready() -> void:
 	mat = StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(mat)
 	mat.albedo_color = Color(0.75, 1.0, 0.95, 0.5)
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	var sm := SphereMesh.new()

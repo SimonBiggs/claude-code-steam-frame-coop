@@ -14,6 +14,7 @@ const Sanctuary := preload("res://games/mech_titans/sanctuary.gd")
 const Picks := preload("res://games/mech_titans/picks.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 var main: Node
 var haz_t := 0.0
@@ -351,7 +352,7 @@ func visual_tick(delta: float) -> void:
 		dome.mesh = sm
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		var c: Color = Upgrades.info("dome")["color"]

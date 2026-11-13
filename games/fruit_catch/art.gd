@@ -3,6 +3,7 @@ extends RefCounted
 
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const ROTTEN := 4  ## fruit kind index of the rotten apple
 const FRUIT_COLORS: Array[Color] = [Color(0.95, 0.12, 0.12), Color(1.0, 0.55, 0.05), Color(0.75, 0.9, 0.15),
@@ -111,7 +112,7 @@ static func shadow_mesh() -> Mesh:
 		m.rings = 1
 		var mat := StandardMaterial3D.new()
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(mat)
 		mat.albedo_color = Color(0.05, 0.1, 0.0, 0.4)
 		m.material = mat
 		return m)

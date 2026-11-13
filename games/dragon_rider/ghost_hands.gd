@@ -5,6 +5,8 @@ extends Node3D
 ## their head, never from a calibrated rest pose), loops the move, and hides while the rider steers.
 ## A child of the dragon (dragon-local, the steady saddle frame). Only the rider's headset builds it.
 
+const UiKit := preload("res://core/ui_kit.gd")
+
 const LOOP := 2.4
 
 var main
@@ -19,8 +21,7 @@ var alpha := 0.0
 func _ready() -> void:
 	mat = StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(mat)
 	mat.albedo_color = Color(0.75, 0.95, 1.0, 0.5)
 	mat.no_depth_test = false
 	for s in [-1.0, 1.0]:

@@ -3,6 +3,7 @@ extends Node3D
 ## deckhands keep it loaded. Shows its ammo above it and, while manned, a faint trajectory arc.
 
 const World := preload("res://games/cannon_cove/world.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const MAX_AMMO := 4
 const MUZZLE_SPEED := 30.0
@@ -81,14 +82,12 @@ func _ready() -> void:
 	# A soft glowing halo around the handle that pulses while it's the gunner's cannon.
 	handle_halo = World.sphere(handle, 0.17, Vector3.ZERO, World.mat(Color(1.0, 0.75, 0.3, 0.25), 2.0), 12)
 	var hm := handle_halo.material_override as StandardMaterial3D
-	hm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	hm.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(hm)
 	hm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	handle_halo.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	# Muzzle flash.
 	flash_mat = World.mat(Color(1.0, 0.8, 0.35, 1.0), 6.0)
-	flash_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	flash_mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(flash_mat)
 	flash_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	flash = World.sphere(barrel_root, 0.45, Vector3(0, 0, -1.6), flash_mat, 10)
 	flash.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -97,8 +96,7 @@ func _ready() -> void:
 	iron_mat = World.mat(Color(0.1, 0.1, 0.12), 0.0, 0.35)
 	gold_mat = World.mat(Color(1.0, 0.8, 0.2), 2.5, 0.2)
 	empty_mat = World.mat(Color(1.0, 0.25, 0.2), 2.0)
-	empty_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	empty_mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(empty_mat)
 	empty_mat.albedo_color.a = 0.6
 	for i in MAX_AMMO:
 		rack_balls.append(World.sphere(self, 0.13, Vector3(0.75, -0.65, 0.9 - i * 0.3), iron_mat, 8))
@@ -118,8 +116,7 @@ func _ready() -> void:
 	arc.top_level = true
 	arc_mat = StandardMaterial3D.new()
 	arc_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	arc_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	arc_mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(arc_mat)
 	arc_mat.albedo_color = Color(1.0, 0.95, 0.6, 0.55)
 	add_child(arc)
 	land_ring = MeshInstance3D.new()

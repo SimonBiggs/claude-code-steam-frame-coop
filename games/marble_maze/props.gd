@@ -8,6 +8,8 @@ extends Node3D
 ## Cheap: one merged mesh for the stools, the rim toys share a few meshes, the spare marbles are one
 ## MultiMesh. Only the host simulates the toys; touches are sent to the TV machine as "prop" events.
 
+const UiKit := preload("res://core/ui_kit.gd")
+
 const SPARE := 5
 const SPARE_R := 0.022
 const TOUCH := 0.07
@@ -142,7 +144,7 @@ func _build_stools() -> void:
 	lamp = _part(stools_root, main.sphere_mesh(0.016), lamp_mat, lh + Vector3(0, 0.158, 0))
 	var bm := StandardMaterial3D.new()
 	bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(bm)
 	bm.albedo_color = Color(1.0, 0.95, 0.5, 0.3)
 	bm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	var cone := CylinderMesh.new()

@@ -16,6 +16,7 @@ const MeshKit := preload("res://core/mesh_kit.gd")
 const Seeded := preload("res://core/seeded.gd")
 const HouseGen := preload("res://games/hide_and_seek/housegen.gd")
 const HouseScript := preload("res://games/hide_and_seek/map_house.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 var main
 var orbs: PickOrbs
@@ -589,7 +590,7 @@ func _update_bubbles() -> void:
 		sm.rings = 8
 		mi.mesh = sm
 		var m := MeshKit.material(Color(0.6, 0.9, 1.0), 0.6).duplicate() as StandardMaterial3D
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		m.albedo_color.a = 0.22
 		mi.material_override = m
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

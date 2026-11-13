@@ -225,6 +225,7 @@ func _build_goal() -> void:
 		m.mesh = q
 		var sm := ShaderMaterial.new()
 		sm.shader = shader
+		UiKit.see_through(sm)  # the see-through goal net, under VR cards
 		sm.set_shader_parameter("cells", pa[3])
 		m.material_override = sm
 		m.position = pa[1]

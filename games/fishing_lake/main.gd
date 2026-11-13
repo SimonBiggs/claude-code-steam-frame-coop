@@ -493,8 +493,7 @@ func ripple(pos: Vector3, size: float, broadcast: bool = true) -> void:
 	r.mesh = tm
 	var m := StandardMaterial3D.new()
 	m.albedo_color = Color(1, 1, 1, 0.7)
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(m)
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	r.material_override = m
 	r.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -3386,8 +3385,7 @@ func _update_vr_text() -> void:
 func _glow_mat(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(m)
 	m.albedo_color = c
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	return m

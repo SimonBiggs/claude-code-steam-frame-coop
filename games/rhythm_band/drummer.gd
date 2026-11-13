@@ -260,7 +260,7 @@ func _build_rig() -> void:
 		guide.mesh = main.cyl_mesh(0.025, 0.025, NOTE_TRAVEL, 6)
 		var gm := StandardMaterial3D.new()
 		gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(gm)
 		gm.albedo_color = Color(PAD_COLORS[i].r, PAD_COLORS[i].g, PAD_COLORS[i].b, 0.18)
 		guide.material_override = gm
 		guide.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -351,7 +351,7 @@ func _build_demo() -> void:
 	rig.add_child(demo)
 	demo_mat = StandardMaterial3D.new()
 	demo_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	demo_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(demo_mat)
 	demo_mat.albedo_color = Color(0.8, 0.95, 1.0, 0.35)
 	var stick := MeshInstance3D.new()
 	stick.mesh = main.cyl_mesh(0.009, 0.013, 0.26, 6)
@@ -795,7 +795,7 @@ func _build_cue_arrow() -> void:
 	rig.add_child(cue_arrow)
 	cue_arrow_mat = StandardMaterial3D.new()
 	cue_arrow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	cue_arrow_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(cue_arrow_mat)
 	var head := MeshInstance3D.new()
 	head.mesh = main.cyl_mesh(0.045, 0.0, 0.07, 12)
 	head.position = Vector3(0.0, 0.035, 0.0)

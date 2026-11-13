@@ -11,6 +11,7 @@ extends Node3D
 
 const MeshKit := preload("res://games/paint_and_guess/mesh_kit.gd")
 const PaintGen := preload("res://games/paint_and_guess/paintgen.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const FAMILY_SCALE := 0.44
 
 const BACK_Z := -3.2
@@ -324,7 +325,7 @@ func _build_dust() -> void:
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(m)
 	m.albedo_color = Color(1.0, 0.95, 0.75, 0.55)
 	p.material_override = m
 	add_child(p)

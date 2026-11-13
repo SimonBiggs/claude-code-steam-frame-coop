@@ -5,6 +5,8 @@ extends Node3D
 ## Dragon-local space: forward is -Z, the saddle is at the origin, the gunners' deck is behind it.
 ## The host flies it (fly); the TV machine follows the host's snapshots (net_follow).
 
+const UiKit := preload("res://core/ui_kit.gd")
+
 const MAX_YAW_RATE := 0.55  # rad/s at full rein: gentle, wide turns
 const BASE_SPEED := 13.0
 const MAX_SPEED := 21.0
@@ -134,8 +136,7 @@ func _build() -> void:
 	sm.rings = 3
 	var smat := StandardMaterial3D.new()
 	smat.albedo_color = Color(0.95, 0.92, 0.95, 0.6)
-	smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	smat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(smat)
 	smat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	sm.material = smat
 	smoke.mesh = sm
@@ -288,8 +289,7 @@ func smoke_ring() -> void:
 	r.mesh = tm
 	var m := StandardMaterial3D.new()
 	m.albedo_color = Color(0.95, 0.93, 0.97, 0.7)
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	m.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(m)
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	r.material_override = m
 	r.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

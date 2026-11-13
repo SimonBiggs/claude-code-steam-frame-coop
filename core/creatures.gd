@@ -24,6 +24,7 @@ extends RefCounted
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const Me := preload("res://core/creatures.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const VERSION := "v1"
 
@@ -1894,7 +1895,7 @@ class Anim extends Node:
 		if _overlay == null:
 			_overlay = StandardMaterial3D.new()
 			_overlay.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-			_overlay.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			UiKit.see_through(_overlay)
 			_overlay.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 		for m in _meshes:
 			if is_instance_valid(m):

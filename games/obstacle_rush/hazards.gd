@@ -175,9 +175,8 @@ func _build_water(at: Vector3, w: float) -> void:
 		bm.size = Vector3.ONE
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		m.albedo_color = Color(Deep.WATER_COLOR.r, Deep.WATER_COLOR.g, Deep.WATER_COLOR.b, 0.5)
-		m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under the VR cards
 		bm.material = m
 		return bm) as Mesh
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

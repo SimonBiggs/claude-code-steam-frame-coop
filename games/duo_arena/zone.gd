@@ -24,6 +24,7 @@ const PickOrbs := preload("res://core/pick_orbs.gd")
 const WarnRings := preload("res://core/warn_rings.gd")
 
 const SPRING_COLOR := preload("res://games/duo_arena/looks.gd").SPRING_COLOR  # NOVA'S SPRING (palette.gd)
+const UiKit := preload("res://core/ui_kit.gd")
 const ORB_Z := -3.5  # (arenagen.gd SAFE_SPOTS keeps this row clear)
 const ORB_Y := 1.4
 const ORB_GAP := 2.6
@@ -204,8 +205,7 @@ func burst_fx(i: int) -> void:
 	cyl.radial_segments = 16
 	plume.mesh = cyl
 	var mat := MeshKit.material(col, 3.0).duplicate() as StandardMaterial3D
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
+	UiKit.see_through(mat)
 	plume.material_override = mat
 	plume.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	plume.position = (d.p as Vector3)

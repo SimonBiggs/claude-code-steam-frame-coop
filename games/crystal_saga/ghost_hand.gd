@@ -9,6 +9,7 @@ extends Node3D
 
 const VrRig := preload("res://core/vr_rig.gd")
 const VrHands := preload("res://games/crystal_saga/vr_hands.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const CYCLE := 2.4
 
 var right: Node3D  ## glove + sword
@@ -21,9 +22,8 @@ var shown := {}  ## bots: mode -> true once on screen
 func _ready() -> void:
 	mat = StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(mat)
 	mat.albedo_color = Color(0.75, 1.0, 0.95, 0.5)
-	mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	right = _part([VrRig.glove_mesh(false, Color.WHITE, Color.WHITE), VrHands.sword_mesh()])
 	left = _part([VrRig.glove_mesh(true, Color.WHITE, Color.WHITE), VrHands.flame_mesh()])
 	visible = false

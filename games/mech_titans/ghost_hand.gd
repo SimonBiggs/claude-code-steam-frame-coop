@@ -24,7 +24,7 @@ var shown := false  ## bots: the demo has been on screen
 func _ready() -> void:
 	mat = StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(mat)
 	mat.albedo_color = Color(0.6, 0.95, 1.0, 0.5)
 	hand = Node3D.new()
 	add_child(hand)

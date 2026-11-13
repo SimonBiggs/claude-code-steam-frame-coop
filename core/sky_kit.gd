@@ -572,16 +572,16 @@ class SkyRig extends Node3D:
 		match kind:
 			"rain":
 				b.box(Vector3(0.018, 0.55, 0.018), Transform3D.IDENTITY, Color(0.75, 0.82, 0.95, 0.45))
-				mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				UiKit.see_through(mat)
 			"snow":
 				b.sphere(0.05, Transform3D.IDENTITY, Color(1, 1, 1), 5)
 			"bubble":
 				b.sphere(0.06, Transform3D.IDENTITY, Color(0.75, 0.95, 1.0, 0.45), 6)
 				b.sphere(0.018, MeshKit.at(Vector3(-0.025, 0.025, 0.045)), Color(1, 1, 1, 0.9), 4)
-				mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				UiKit.see_through(mat)
 			"dust":
 				b.sphere(0.012, Transform3D.IDENTITY, Color(1.0, 0.92, 0.75, 0.6), 4)
-				mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+				UiKit.see_through(mat)
 			"firefly":
 				b.sphere(0.035, Transform3D.IDENTITY, Color(0.75, 1.0, 0.45), 5)
 				mat.albedo_color = Color(1.6, 1.6, 1.6)

@@ -18,6 +18,7 @@ extends Node3D
 ## shown. glow_key makes one real button glow (the practice), demo_path() feeds the ghost hand.
 
 const P := preload("res://games/rocket_workshop/puzzles.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const TILT := -1.0471976  # surface pitched 30 degrees towards the pilot
 const AREAS := {
 	"symbols": [Vector2(-0.55, 0.185), Vector2(0.5, 0.31), "SHAPES", Color(0.42, 0.35, 0.62)],
@@ -220,7 +221,7 @@ func _build_wing_controls() -> void:
 			alien_beam = MeshInstance3D.new()
 			alien_beam.mesh = main.cyl_mesh(0.085, 0.035, 0.18, 14)
 			var bm: StandardMaterial3D = main.make_material(Color(0.4, 0.95, 1.0, 0.18), 1.2)
-			bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			UiKit.see_through(bm)
 			bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 			bm.cull_mode = BaseMaterial3D.CULL_DISABLED
 			alien_beam.material_override = bm

@@ -6,6 +6,8 @@ extends Node3D
 ## An empty path hides it. Only the pilot sees it (main puts it on PANEL_LAYER).
 ## Cheap: six small unshaded meshes, one material.
 
+const UiKit := preload("res://core/ui_kit.gd")
+
 const MOVE := 0.55  # seconds per path step
 const HOLD := 0.2
 const REST := 0.9  # pause between loops
@@ -21,7 +23,7 @@ func _ready() -> void:
 	top_level = true
 	mat = StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(mat)
 	mat.albedo_color = Color(0.7, 1.0, 1.0, 0.5)
 	mat.no_depth_test = false
 	hand = Node3D.new()

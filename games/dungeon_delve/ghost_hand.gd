@@ -5,6 +5,7 @@ extends Node3D
 
 const VrRig := preload("res://core/vr_rig.gd")
 const VrHands := preload("res://games/dungeon_delve/vr_hands.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const CYCLE := 2.4
 
 var hand: Node3D
@@ -16,7 +17,7 @@ var shown := false  ## bots: the demo has been on screen
 func _ready() -> void:
 	mat = StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(mat)
 	mat.albedo_color = Color(0.75, 1.0, 0.95, 0.5)
 	hand = Node3D.new()
 	add_child(hand)

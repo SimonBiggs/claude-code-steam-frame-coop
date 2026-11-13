@@ -12,6 +12,7 @@ const BALL_COLORS: Array[Color] = [Color(1.0, 0.35, 0.4), Color(1.0, 0.75, 0.2),
 	Color(0.35, 0.65, 1.0), Color(0.85, 0.45, 1.0), Color(1.0, 0.55, 0.85)]
 ## Every ball has an ink outline (Contrast.outline): the gold ball on the sandy court, the blue one in the sky.
 const Contrast := preload("res://core/contrast.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const BALL_OUTLINE := Contrast.OUTLINE
 const LAWN := Color(0.45, 0.75, 0.38)
 const COURT := Color(0.98, 0.85, 0.6)
@@ -124,7 +125,7 @@ func make_blob(r: float) -> MeshInstance3D:
 	mi.mesh = c
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(m)
 	m.albedo_color = Color(0.0, 0.0, 0.0, 0.3)
 	mi.material_override = m
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

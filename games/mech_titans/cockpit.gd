@@ -203,7 +203,7 @@ func _flat(c: Color, prio: int) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.albedo_color = c
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA  # see-through-ok: the cockpit's own VR-only gauge bars (UI, stacked by prio over their dials)
 	m.render_priority = prio  # depth-tested: hands in front of the dials must stay in front
 	return m
 
@@ -379,7 +379,7 @@ func attach_vignette(cam: Node3D) -> void:
 	sm.radial_segments = 24
 	sm.rings = 12
 	vignette.mesh = sm
-	var sh := Shader.new()
+	var sh := Shader.new()  # see-through-ok: the vignette round the head is an overlay meant to tint the whole view (priority 100)
 	sh.code = """
 shader_type spatial;
 render_mode unshaded, cull_disabled, depth_test_disabled, blend_mix, shadows_disabled;

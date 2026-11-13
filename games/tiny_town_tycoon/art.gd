@@ -10,6 +10,7 @@ const Defs := preload("res://games/tiny_town_tycoon/defs.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const Creatures := preload("res://core/creatures.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const VER := "v3"
 
 const WALLS: Array[Color] = [Color(1.0, 0.93, 0.8), Color(1.0, 0.8, 0.68), Color(0.76, 0.93, 0.82), Color(0.76, 0.86, 1.0),
@@ -63,7 +64,7 @@ static func ghost_mat(c: Color) -> StandardMaterial3D:
 	return ResCache.get_or_make(key, func() -> Resource:
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		m.albedo_color = c
 		m.cull_mode = BaseMaterial3D.CULL_BACK
 		m.no_depth_test = false

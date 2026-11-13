@@ -1149,7 +1149,7 @@ func _pad_ghost_update() -> void:
 		pad_ghost = MeshInstance3D.new()
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		pad_ghost.material_override = m
 		park.add_child(pad_ghost)
 	pad_ghost.visible = show

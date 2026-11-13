@@ -255,11 +255,10 @@ static func _puff_mesh() -> Mesh:
 		sm.rings = 5
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		m.vertex_color_use_as_albedo = true
 		m.vertex_color_is_srgb = true
 		m.albedo_color = Color(0.92, 0.9, 1.0, 1.0)
-		m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under the VR cards
 		sm.material = m
 		return sm) as Mesh
 

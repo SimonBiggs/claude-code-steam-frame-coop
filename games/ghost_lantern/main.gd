@@ -370,7 +370,7 @@ func ghost_material() -> ShaderMaterial:
 		_ghost_mat = ShaderMaterial.new()
 		_ghost_mat.shader = Shader.new()
 		_ghost_mat.shader.code = GHOST_SHADER
-		_ghost_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through ghosts never wash out a VR card
+		UiKit.see_through(_ghost_mat)  # see-through ghosts never wash out a VR card
 	return _ghost_mat
 
 
@@ -444,7 +444,7 @@ func ring_fx(pos: Vector3, radius: float, color: Color) -> void:
 	tm.ring_segments = 4
 	ring.mesh = tm
 	var mat := make_material(color, 3.0)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(mat)
 	ring.material_override = mat
 	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(ring)
@@ -466,7 +466,7 @@ func capture_fx(pos: Vector3, nozzle: Vector3, color: Color) -> void:
 	sm.rings = 6
 	orb.mesh = sm
 	var mat := make_material(color, 4.0)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(mat)
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	orb.material_override = mat
 	orb.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -2186,7 +2186,7 @@ func _update_practice_arrow() -> void:
 		shaft.position = Vector3(0, -0.28, 0)
 		practice_arrow.add_child(shaft)
 		var m := make_material(Color(1.0, 0.9, 0.45), 2.5)
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		m.albedo_color.a = 0.85
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		practice_arrow.material_override = m

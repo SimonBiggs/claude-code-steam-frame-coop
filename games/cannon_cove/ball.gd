@@ -5,6 +5,7 @@ extends Node3D
 const World := preload("res://games/cannon_cove/world.gd")
 const Contrast := preload("res://core/contrast.gd")
 const Looks := preload("res://games/cannon_cove/looks.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 var main
 var vel := Vector3.ZERO
@@ -46,8 +47,7 @@ func _ready() -> void:
 	if mega:
 		smoke = World.mat(Looks.MEGA_SMOKE, 3.0)
 		trail.amount = 16
-	smoke.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	smoke.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(smoke)
 	smoke.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	tm.material = smoke
 	trail.mesh = tm

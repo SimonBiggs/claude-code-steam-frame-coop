@@ -204,8 +204,7 @@ func _ready() -> void:
 	disc.height = 0.02
 	revive_fill.mesh = disc
 	var fm: StandardMaterial3D = main.make_material(color, 1.0)
-	fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	fm.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
+	UiKit.see_through(fm)
 	fm.albedo_color.a = 0.35
 	revive_fill.material_override = fm
 	revive_fill.position.y = 0.03
@@ -231,8 +230,7 @@ func _update_bubble() -> void:
 		sm.rings = 8
 		bubble.mesh = sm
 		var m: StandardMaterial3D = main.make_material(Color(0.45, 0.65, 1.0), 1.5)
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
+		UiKit.see_through(m)
 		m.albedo_color.a = 0.25
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		m.rim_enabled = true
@@ -281,10 +279,9 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	lm.size = Vector3(0.004, 0.004, 12.0)
 	laser.mesh = lm
 	var laser_mat: StandardMaterial3D = main.make_material(color, 2.0)
-	laser_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(laser_mat)
 	laser_mat.albedo_color.a = 0.35
 	laser_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	laser_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # 12 m long: passes behind VR cards, must not draw over them
 	laser.material_override = laser_mat
 	laser.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	laser.position = Vector3(0, 0, -6.2)
@@ -911,7 +908,7 @@ func _update_vr_hurt(delta: float) -> void:
 		shell.mesh = sphere
 		vr_hurt_mat = StandardMaterial3D.new()
 		vr_hurt_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		vr_hurt_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		vr_hurt_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA  # see-through-ok: the hurt flash round the head tints the whole view
 		vr_hurt_mat.cull_mode = BaseMaterial3D.CULL_FRONT  # seen from inside
 		vr_hurt_mat.no_depth_test = false
 		vr_hurt_mat.render_priority = 20
@@ -944,8 +941,7 @@ func _ensure_shield() -> void:
 	cyl.radial_segments = 24
 	disc.mesh = cyl
 	var mat: StandardMaterial3D = main.make_material(color, 1.5)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
+	UiKit.see_through(mat)
 	mat.albedo_color.a = 0.35
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	disc.material_override = mat
@@ -1136,8 +1132,7 @@ func _ensure_wrist_radar() -> void:
 	var mat := StandardMaterial3D.new()
 	mat.albedo_texture = vp.get_texture()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
+	UiKit.see_through(mat)
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	wrist_radar.material_override = mat
 	wrist_radar.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -1246,8 +1241,7 @@ func _build_sword_demo() -> Node3D:
 	main.add_child(demo)
 	var ghost_mat := StandardMaterial3D.new()
 	ghost_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	ghost_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	ghost_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
+	UiKit.see_through(ghost_mat)
 	ghost_mat.albedo_color = Color(0.6, 0.9, 1.0, 0.25)
 	var head := MeshInstance3D.new()
 	var hm := SphereMesh.new()

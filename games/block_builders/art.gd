@@ -10,6 +10,7 @@ const MESH_VERSION := "v4"
 ## Placed blocks wear the ink outline (course.gd add_block): the wooden plank vanished on the canyon / beach / autumn
 ## grounds, the green speed pad on the meadow, the blue stairs on the rainbow (palette.gd).
 const BLOCK_OUTLINE := preload("res://core/contrast.gd").OUTLINE
+const UiKit := preload("res://core/ui_kit.gd")
 ## The builder (P1) and the runners (main.gd).
 const PLAYER_COLORS: Array[Color] = [Color(1.0, 0.82, 0.25), Color(1.0, 0.45, 0.3), Color(0.3, 0.75, 1.0),
 	Color(0.45, 0.95, 0.4), Color(1.0, 0.5, 0.85), Color(0.7, 0.5, 1.0), Color(0.3, 0.95, 0.9)]
@@ -335,7 +336,7 @@ static func rainbow_mesh(radius: float, band: float) -> ArrayMesh:
 	mt.vertex_color_is_srgb = true
 	mt.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mt.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mt.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(mt)
 	mt.albedo_color = Color(1, 1, 1, 0.75)
 	m.surface_set_material(0, mt)
 	Engine.set_meta(key, m)

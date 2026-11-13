@@ -20,7 +20,7 @@ extends RefCounted
 ## - not washed out: no see-through scenery (water, glass, mist, laser sights / pointer beams) behind a panel draws after it. VR panels sit at
 ##   UiKit.VR_PRIO_PANEL (-4, under their own text), so a blended surface at the default priority 0 behind a card
 ##   is blended OVER it (Fishing Lake 2026-11-11: the lake's water made Ollie's cards a faint, far-looking ghost).
-##   Give such surfaces UiKit.VR_PRIO_UNDER_UI.
+##   Make such surfaces with UiKit.see_through(mat) (VR_PRIO_UNDER_UI; tests/see_through_prio_test.gd guards it).
 ## - every pick orb near the VR player (picture and words) in plain sight: nothing solid in front of any part of its
 ##   name (pick_hidden; Rhythm Band 2026-11-12: HARD half behind the green cymbal).
 ## - never over a pick: no panel covers (seen from the eyes) anything in the KEEP_CLEAR group (core/pick_orbs.gd puts
@@ -137,7 +137,7 @@ static func problems(root: Node) -> Array[String]:
 			out.append("%s: %s" % [name, tp])
 		var wash := washer(cam, c, p)
 		if wash != "":
-			out.append("%s: washed out by %s drawn over it (give it UiKit.VR_PRIO_UNDER_UI)" % [name, wash])
+			out.append("%s: washed out by %s drawn over it (make its material with UiKit.see_through(mat): VR_PRIO_UNDER_UI)" % [name, wash])
 		var hit := blocker(cam, c, p)
 		if hit != "":
 			out.append("%s: hidden behind %s, it is %.1f m away%s" % [name, hit, d, " " + str(c.get_meta("vr_spot")) if OS.has_environment("VR_VIEW_DEBUG") and c.has_meta("vr_spot") else ""])

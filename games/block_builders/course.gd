@@ -165,7 +165,7 @@ func load_level(i: int) -> void:
 		fx.gravity = Vector3.ZERO
 		var sm := Art.box(Vector3(0.05, 0.05, 0.9))
 		var wm := Art.mat(Color(0.9, 0.97, 1.0, 0.7), 1.0)
-		wm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(wm)
 		sm.material = wm
 		fx.mesh = sm
 		fx.particle_flag_align_y = false
@@ -235,7 +235,7 @@ func _build_water() -> void:
 	pm.size = Vector2(30, 14)
 	water_node.mesh = pm
 	water_mat = Art.mat(Color(0.2, 0.55, 1.0, 0.6), 0.3, 0.1)
-	water_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(water_mat)
 	water_node.material_override = water_mat
 	water_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	water_node.position = Vector3(-1.0, -50.0, 0.0)
@@ -554,7 +554,7 @@ func set_hint(kind: String, cell: Vector3i, rot: int) -> void:
 		hint_node.name = "Hint"
 		if hint_mat == null:
 			hint_mat = StandardMaterial3D.new()
-			hint_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			UiKit.see_through(hint_mat)
 			hint_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 			hint_mat.albedo_color = Color(0.4, 0.95, 1.0, 0.35)
 		hint_node.material_override = hint_mat
@@ -614,7 +614,7 @@ func add_block(kind: String, cell: Vector3i, rot: int, pop: bool = true) -> void
 		air.gravity = Vector3.ZERO
 		var am := Art.box(Vector3(0.04, 0.4, 0.04))
 		var amat := Art.mat(Color(0.85, 0.9, 1.0, 0.6), 1.2)
-		amat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(amat)
 		am.material = amat
 		air.mesh = am
 		air.position.y = FAN_TOP + 0.1

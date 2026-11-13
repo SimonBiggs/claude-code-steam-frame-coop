@@ -2409,7 +2409,7 @@ func _update_cue_arrow(k, target) -> void:
 		add_child(arrow)
 		var m := W.mat(k.color.lightened(0.35), 3.0)
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		m.albedo_color.a = 0.9
 		var head := MeshInstance3D.new()
 		head.mesh = W.cyl(0.32, 0.0, 0.45, 10)  # wide end up: points down at the goblin
