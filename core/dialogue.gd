@@ -799,7 +799,7 @@ class VrBox extends Node3D:
 		for c in get_children():
 			var g := c as GeometryInstance3D
 			if g != null:
-				tw.tween_property(g, "transparency", 0.0 if on else 1.0, 0.2)
+				tw.tween_property(g, "transparency", 0.0 if on else 1.0, 0.2)  # see-through-ok: a VR dialogue card fading itself
 
 	func hide_box() -> void:
 		_fade(false)

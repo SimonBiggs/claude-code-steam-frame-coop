@@ -728,6 +728,44 @@ static func see_through(mat: Material, depth_pre_pass: bool = false) -> void:
 	mat.render_priority = VR_PRIO_UNDER_UI
 
 
+## Fade world scenery by its NODE (GeometryInstance3D.transparency, 0 = solid .. 1 = gone) without washing out VR cards.
+## A node's transparency float sends the mesh into the blended pass at its material's priority (usually 0), so a faded
+## mesh behind a card drew OVER it (core/vr_view_check.gd "washed out"). This sets the float AND drops the node's
+## materials (override, surfaces, next passes) to VR_PRIO_UNDER_UI. In place on purpose: priority changes nothing
+## visible for opaque materials, and shared see-through ones belong under the cards anyway (see_through). Cheap enough
+## to call every frame. Use it instead of `.transparency =` / tween_property(node, "transparency") on scenery
+## (tests/see_through_prio_test.gd); VR UI fading itself (cards, menus) marks the line `# see-through-ok: why`.
+## Tweens: tw.tween_method(func(v: float) -> void: UiKit.fade3d(node, v), 0.0, 1.0, secs).
+static func fade3d(g: GeometryInstance3D, amount: float) -> void:
+	if g == null or not is_instance_valid(g):
+		return
+	if amount > 0.0 and not g is Label3D:
+		var found := false
+		if g.material_override != null:
+			_under_ui(g.material_override)
+			found = true
+		elif g is MeshInstance3D and (g as MeshInstance3D).mesh != null:
+			var mi := g as MeshInstance3D
+			for i in mi.mesh.get_surface_count():
+				var m := mi.get_active_material(i)
+				if m != null:
+					_under_ui(m)
+					found = true
+		if not found and not g.has_meta("ui_kit_fade_warned"):
+			g.set_meta("ui_kit_fade_warned", true)
+			push_warning("UiKit.fade3d: %s has no material to put under the VR cards (engine default material, priority 0): give it a material" % g.name)
+	g.transparency = amount  # see-through-ok: the helper itself
+
+
+static func _under_ui(m: Material) -> void:
+	var guard := 0
+	while m != null and guard < 8:
+		if m.render_priority > VR_PRIO_UNDER_UI:
+			m.render_priority = VR_PRIO_UNDER_UI
+		m = m.next_pass
+		guard += 1
+
+
 ## Render layer for world-space UI only the VR player sees (TV / Deck cameras never draw it; core/vr_layer.gd).
 const VR_LAYER := VrLayer.LAYER
 

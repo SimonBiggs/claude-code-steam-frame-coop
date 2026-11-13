@@ -511,8 +511,8 @@ func _appear(on: bool) -> void:
 			nodes.append(c)
 	for g in nodes:
 		if on:
-			g.transparency = 1.0
-		t.tween_property(g, "transparency", 0.0 if on else 1.0, 0.18 if on else 0.15)
+			g.transparency = 1.0  # see-through-ok: the VR menu itself fading in over the scene
+		t.tween_property(g, "transparency", 0.0 if on else 1.0, 0.18 if on else 0.15)  # see-through-ok: the VR menu itself fading
 	if on:
 		var sc := scale
 		scale = sc * 0.92
@@ -582,7 +582,7 @@ func _update_pointer() -> void:
 	if _laser.visible:
 		var b := UiKit.aim(d, Vector3.UP if absf(d.y) < 0.99 else Vector3.RIGHT) * Basis.from_scale(Vector3(1, 1, length))
 		_laser.global_transform = Transform3D(b, o + d * length * 0.5)
-		_laser.transparency = 0.0 if hit_ok else 0.7
+		_laser.transparency = 0.0 if hit_ok else 0.7  # see-through-ok: the menu pointer laser, part of the VR menu
 	_dot.visible = hit_ok
 	if hit_ok:
 		_dot.global_position = hit + n * 0.004

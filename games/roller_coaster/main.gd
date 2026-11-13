@@ -584,7 +584,7 @@ func _process(delta: float) -> void:
 	_spin_stars(delta)
 	_update_story(delta)
 	if outline_mi.visible:
-		outline_mi.transparency = 0.35 * absf(sin(cam_t * 2.5))
+		UiKit.fade3d(outline_mi, 0.35 * absf(sin(cam_t * 2.5)))
 	_update_cameras(delta)
 	_update_giant()
 	_animate_guests(delta)

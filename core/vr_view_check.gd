@@ -361,14 +361,20 @@ static func washer(cam: Camera3D, card: Node3D, p: Vector3) -> String:
 		# pointer beam held in one does (Duo Arena's 12 m sight, Party Board's branch laser: UiKit.VR_PRIO_UNDER_UI).
 		if (g.layers & cam.cull_mask) == 0 or card.is_ancestor_of(g) or g == card or _ignored(g) or _placed(g):
 			continue
+		# A node faded by its own transparency float (0 < t <= 0.65) is blended whatever its material says, at its
+		# material's priority (no material = the engine default, 0): UiKit.fade3d puts it under the cards.
 		var mat := _material(g)
-		if mat == null or mat.render_priority < prio or not _blended(mat):
+		var node_faded := g.transparency > 0.0 and not _additive(mat)
+		if mat == null and not node_faded:
+			continue
+		var mprio := mat.render_priority if mat != null else 0
+		if mprio < prio or not (node_faded or _blended(mat)):
 			continue
 		var box := g.global_transform * g.get_aabb()
 		if box.size.length() < 0.01 or box.has_point(head):
 			continue
 		if box.intersects_ray(p + dir * 0.02, dir) != null:
-			return "%s (see-through, priority %d)" % [_name(g), mat.render_priority]
+			return "%s (see-through%s, priority %d)" % [_name(g), " by its node transparency %.2f: use UiKit.fade3d" % g.transparency if node_faded else "", mprio]
 	return ""
 
 
@@ -387,6 +393,16 @@ static func _material(g: GeometryInstance3D) -> Material:
 	if g is MeshInstance3D and (g as MeshInstance3D).mesh != null and (g as MeshInstance3D).mesh.get_surface_count() > 0:
 		return (g as MeshInstance3D).get_active_material(0)
 	return null
+
+
+## Additive / subtractive / multiply: never washes a card out, even when its node is faded.
+static func _additive(mat: Material) -> bool:
+	if mat is BaseMaterial3D:
+		return (mat as BaseMaterial3D).blend_mode != BaseMaterial3D.BLEND_MODE_MIX
+	if mat is ShaderMaterial:
+		var sh := (mat as ShaderMaterial).shader
+		return sh != null and (sh.code.contains("blend_add") or sh.code.contains("blend_sub") or sh.code.contains("blend_mul"))
+	return false
 
 
 ## Alpha-blended (mixed over what's behind it; additive glows and alpha-scissor cut-outs don't wash a card out).

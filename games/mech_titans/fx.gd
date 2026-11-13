@@ -429,4 +429,4 @@ func _process(delta: float) -> void:
 			continue
 		var s := lerpf(1.0, float(r["r"]), t / dur)
 		n.scale = Vector3(s, 0.3 + s * 0.05, s)
-		n.transparency = t / dur
+		UiKit.fade3d(n, t / dur)

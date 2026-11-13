@@ -1484,10 +1484,10 @@ class VrCard extends Node3D:
 		if cam != null and is_instance_valid(cam):
 			UiKit.vr_place(self, cam, distance, height)
 		for c in get_children():
-			(c as GeometryInstance3D).transparency = 1.0
+			(c as GeometryInstance3D).transparency = 1.0  # see-through-ok: a VR HUD card fading in
 		var tw := create_tween().set_parallel()
 		for c in get_children():
-			tw.tween_property(c, "transparency", 0.0, 0.22)
+			tw.tween_property(c, "transparency", 0.0, 0.22)  # see-through-ok: a VR HUD card fading in
 
 	## Change the text (resizes the panel).
 	func set_text(title: String, body: String = "") -> void:
@@ -1544,7 +1544,7 @@ class VrCard extends Node3D:
 		_hiding = true
 		var tw := create_tween().set_parallel()
 		for c in get_children():
-			tw.tween_property(c, "transparency", 1.0, 0.2)
+			tw.tween_property(c, "transparency", 1.0, 0.2)  # see-through-ok: a VR HUD card fading out
 		if free_after:
 			tw.chain().tween_callback(queue_free)
 

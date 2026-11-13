@@ -9,6 +9,9 @@ extends SceneTree
 ##   - a spatial shader in a script that blends by ALPHA (blend_mix, not blend_add / ALPHA_SCISSOR) whose material
 ##     never goes through UiKit.see_through (the functions using the shader, or a helper they call, must call it);
 ##   - a StandardMaterial3D / ORMMaterial3D in a .tscn / .tres with alpha transparency and no priority under the UI;
+##   - a NODE faded by its own transparency float (`node.transparency = x`, `tween_property(node, "transparency", ...)`,
+##     `set_transparency(`) outside UiKit.fade3d: the float sends the mesh into the blended pass at its material's priority
+##     (usually 0), over the cards, whatever the material says (Party Board's arrows, Tiny Town's rainbow, 2026-11-13);
 ##   - `# see-through-ok` without a reason.
 ## Opt out a real overlay (a fade or hurt sphere round the head, the VR card panel itself) with
 ## `# see-through-ok: why` on that line or the line above (for a shader: above the line that opens its """).
@@ -19,12 +22,14 @@ const UiKit := preload("res://core/ui_kit.gd")
 const VrViewCheck := preload("res://core/vr_view_check.gd")
 const ROOTS := ["res://games", "res://core", "res://arcade"]
 const USE := "use UiKit.see_through(mat) (core/ui_kit.gd: alpha + UiKit.VR_PRIO_UNDER_UI, so it never washes out a VR card)"
+const USE_FADE := "use UiKit.fade3d(node, amount) (core/ui_kit.gd: sets the float AND drops the node's materials to UiKit.VR_PRIO_UNDER_UI; tweens: tween_method(func(v): UiKit.fade3d(node, v), ...))"
 const OPT_OUT := "or, for a real overlay meant to cover the cards too, mark it `# see-through-ok: why`"
 ## .tscn / .tres materials allowed to stay over the UI ("res://path::sub_resource id"), with the reason.
 const RESOURCE_OK := {}
 
 var fails: Array[String] = []
 var raw_re := RegEx.create_from_string("\\.transparency\\s*=(?!=)\\s*(.*\\bTRANSPARENCY_ALPHA(_DEPTH_PRE_PASS)?\\b|[14]\\s*(#|$))|set\\(\\s*\"transparency\"")
+var node_re := RegEx.create_from_string("(\\.|^\\s*)transparency\\s*[-+*/]?=(?!=)|\\btween_property\\([^,]+,\\s*\"transparency\"|\\bset_transparency\\(")
 var alpha_re := RegEx.create_from_string("\\bALPHA\\s*[-+*/]?=[^=]")
 var func_re := RegEx.create_from_string("^\\s*(static\\s+)?func\\s+(\\w+)")
 var const_re := RegEx.create_from_string("^\\s*(const|var)\\s+(\\w+)[^=]*=\\s*\"\"\"")
@@ -97,6 +102,9 @@ func _check_script(path: String, text: String) -> Array[String]:
 				var mark := _ok_mark(lines, i)
 				if mark != "ok":
 					out.append("%s:%d sets a see-through material by hand (`%s`): %s, %s" % [path, i + 1, l.strip_edges(), USE, OPT_OUT])
+			elif node_re.search(probe) != null and not probe.contains("TRANSPARENCY_"):
+				if _ok_mark(lines, i) != "ok":
+					out.append("%s:%d fades a node by its transparency float by hand (`%s`): it draws over VR cards at its material's priority; %s, %s" % [path, i + 1, l.strip_edges(), USE_FADE, OPT_OUT])
 			if l.find("see-through-ok") >= 0 and _ok_mark(lines, i) == "bad":
 				out.append("%s:%d `see-through-ok` needs a reason: `# see-through-ok: why it must draw over VR cards`" % [path, i + 1])
 		else:
@@ -219,6 +227,14 @@ func _runtime() -> void:
 	UiKit.see_through(s)
 	if s.render_priority != UiKit.VR_PRIO_UNDER_UI:
 		fails.append("UiKit.see_through(shader_material) must set VR_PRIO_UNDER_UI")
+	var fm := StandardMaterial3D.new()  # opaque, priority 0
+	var mi := MeshInstance3D.new()
+	mi.mesh = BoxMesh.new()
+	mi.material_override = fm
+	UiKit.fade3d(mi, 0.4)
+	if not is_equal_approx(mi.transparency, 0.4) or fm.render_priority > UiKit.VR_PRIO_UNDER_UI:
+		fails.append("UiKit.fade3d(node, 0.4) must set the node's transparency AND drop its materials to VR_PRIO_UNDER_UI (got %.2f / %d)" % [mi.transparency, fm.render_priority])
+	mi.free()
 	if UiKit.VR_PRIO_UNDER_UI >= UiKit.VR_PRIO_PANEL:
 		fails.append("UiKit.VR_PRIO_UNDER_UI (%d) must be under UiKit.VR_PRIO_PANEL (%d)" % [UiKit.VR_PRIO_UNDER_UI, UiKit.VR_PRIO_PANEL])
 
@@ -240,6 +256,16 @@ func _self_test() -> void:
 		["const S := \"\"\"\nshader_type spatial;\nrender_mode blend_mix;\nvoid fragment() { ALPHA = 0.5; }\n\"\"\"\nfunc f():\n\tvar sm := ShaderMaterial.new()\n\tsm.shader = Shader.new()\n\tsm.shader.code = S\n\tUiKit.see_through(sm)\n", 0],
 		["const S := \"\"\"\nshader_type spatial;\nrender_mode blend_add;\nvoid fragment() { ALPHA = 0.5; }\n\"\"\"\nfunc f():\n\tmk(S)\n", 0],
 		["const S := \"\"\"\nshader_type spatial;\nvoid fragment() { ALPHA = 0.5; }\n\"\"\"\nfunc f():\n\tmk(S)\nfunc mk(c):\n\tvar sm := ShaderMaterial.new()\n\tUiKit.see_through(sm)\n", 0],
+		["\tmi.transparency = 0.45\n", 1],
+		["\tmi.transparency = 0.0 if on else 0.45\n", 1],
+		["\ttransparency = 0.5\n", 1],
+		["\ttw.tween_property(g, \"transparency\", 1.0, 0.2)\n", 1],
+		["\tg.set_transparency(0.3)\n", 1],
+		["\ttw.tween_property(g, \"transparency\", 1.0, 0.2)  # see-through-ok: a VR card fading itself\n", 0],
+		["\tUiKit.fade3d(mi, 0.45)\n", 0],
+		["\tif mi.transparency == 0.0:\n", 0],
+		["\tvar transparency := 0.5\n", 0],
+		["\tm.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED\n", 0],
 		["const S := \"\"\"\nshader_type canvas_item;\nvoid fragment() { COLOR.a = 0.5; }\n\"\"\"\n", 0],
 	]
 	for c in cases:
