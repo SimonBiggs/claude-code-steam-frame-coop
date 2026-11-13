@@ -1,4 +1,4 @@
-extends Node
+extends "res://core/pick_flow.gd"
 ## PARTY BOARD PICKS on the shared pick orbs (core/pick_orbs.gd), picture first (deep.gd):
 ##   "mode"  GENTLE / BRAVE / HARD once a session (the family's last mode in the middle), before the first party: any
 ##           person playing may take it (the first one decides).
@@ -13,32 +13,15 @@ extends Node
 ## machine joining mid-pick sees the orbs and the dots too; cur_state on every machine) and the "pick_take" effect
 ## [orb, slot].
 
-const PickOrbs := preload("res://core/pick_orbs.gd")
 const Deep := preload("res://games/party_board/deep.gd")
 
-const AFTER := 1.1  # seconds the taken orb shows its dot before the orbs go
-const OPEN := 0.8  # seconds after the orbs pop up before they can be taken
-const RESTING := 99  # inside[id]: a hand that was already at an orb when they opened
 const STICK := 0.55  # a stick this far over moves the dot one orb
 
-var main
-var orbs: PickOrbs
-var stage := ""  # host: "" | "mode" | "gift"
-var options: Array = []
 var entries: Array = []
-var spots: Array = []  # every machine: the orbs' middles (board units)
 var row := ""  # every machine: "vr" | "board"
 var allowed: Array = []  # host: pids who may take one ([] = every person playing)
 var cpu_pid := -1  # host: a CPU's gift: it takes cpu_choice by itself
 var cpu_choice := -1
-var t := 0.0
-var chosen := -1
-var chosen_by := -1
-var done_t := 0.0
-var on_done: Callable  # host: (stage, option, slot)
-var history: Array = []  # [stage, option, by] (telemetry, bots)
-var inside := {}  # hand id -> orb index it is at now (-1 none)
-var dwell := {}  # hand id -> seconds at that orb
 var hover := {}  # host: slot -> the orb a TV player's dot is on
 var stick_ready := {}  # host: slot -> the stick came back to the middle since the dot last moved
 var row_head := Transform3D()  # host, VR row: the head the row was put in front of
@@ -48,37 +31,25 @@ var shown_stage := ""
 var cur_state := {}  # every machine: the orbs showing now ({} none; bots read it)
 
 
-func _ready() -> void:
-	name = "Picks"
-	orbs = PickOrbs.new()
-	orbs.collision_layer = 0
-	main.stage.add_child(orbs)
+func _init() -> void:
+	after = 1.1
+	hand_r = Deep.HAND_R
+	hand_dwell = Deep.DWELL
 
 
-func active() -> bool:
-	return stage != ""
+## The orbs live on the scaled board stage (spots in board units).
+func orbs_parent() -> Node:
+	return main.stage
 
 
-func showing() -> bool:
-	return not orbs.orbs.is_empty()
-
-
-## Host / local: put up the orbs. entries: [{id, name, pic, color}], opts: what each orb means; who: pids that may
-## take one ([] = every person); cpu: a CPU pid that takes cpu_pick (an index) by itself (-1 none).
+## Host / local: put up the orbs (VR: in front of the giant's head; else over the board). who: the pids who may take
+## one ([] = everyone playing); cpu / cpu_pick: a CPU's gift it takes by itself.
 func begin(new_stage: String, new_entries: Array, opts: Array, done: Callable, who: Array = [], cpu: int = -1, cpu_pick: int = -1) -> void:
-	stage = new_stage
-	options = opts
+	start(new_stage, opts, done)
 	entries = new_entries.duplicate(true)
-	on_done = done
 	allowed = who.duplicate()
 	cpu_pid = cpu
 	cpu_choice = cpu_pick
-	t = 0.0
-	chosen = -1
-	chosen_by = -1
-	done_t = 0.0
-	inside = {}
-	dwell = {}
 	hover = {}
 	stick_ready = {}
 	if _vr_head() != null:
@@ -91,7 +62,6 @@ func begin(new_stage: String, new_entries: Array, opts: Array, done: Callable, w
 	for pid in _tv_pickers():
 		hover[pid] = entries.size() / 2
 	_publish()
-	print("PICKS %s: %s (%s row, %s)" % [new_stage, opts, row, "anyone" if who.is_empty() else str(who)])
 
 
 func _vr_head() -> Node3D:
@@ -107,12 +77,21 @@ func _vr_row(head: Transform3D) -> Array:
 	return out
 
 
+## The whole pick state (orbs, places, every TV player's dot) as one fx every machine shows (show_state).
 func _publish() -> void:
-	main.fx("orbs", [{"stage": stage, "entries": entries, "spots": spots.duplicate(), "row": row,
+	publish([{"stage": stage, "entries": entries, "spots": spots.duplicate(), "row": row,
 		"hover": hover.duplicate(), "allowed": allowed.duplicate()}])
 
 
-## Every machine: the "orbs" event.
+func publish(payload: Array) -> void:
+	main.fx("orbs", payload)
+
+
+func orbs_off() -> Array:
+	return [{}]
+
+
+## Every machine: the orbs (and the TV players' dots) from the published state.
 func show_state(v: Variant) -> void:
 	var st: Dictionary = v if v is Dictionary else {}
 	cur_state = st.duplicate()
@@ -158,15 +137,6 @@ func _build(new_stage: String, es: Array, sp: Array) -> void:
 		main.pick_banner(new_stage)
 
 
-## Orb i's middle in the world (bots aim there), INF if none.
-func orb_position(i: int) -> Vector3:
-	if i < 0 or i >= orbs.orbs.size() or not is_instance_valid(orbs.orbs[i]) or not (orbs.orbs[i] as Node3D).is_inside_tree():
-		return Vector3.INF
-	var o = orbs.orbs[i]
-	return o.icon.global_position if o.icon != null and o.icon.is_inside_tree() else (o as Node3D).global_position
-
-
-## The people who may pick with a stick here (TV / Deck seats, a flat host's slot 0).
 func _tv_pickers() -> Array:
 	var out: Array = []
 	for pid in main.pids():
@@ -181,85 +151,48 @@ func _vr_may() -> bool:
 	return main.vr_rig != null and not main.is_cpu(0) and (allowed.is_empty() or allowed.has(0))
 
 
-## Nobody here who could take one (the middle one comes sooner).
 func nobody() -> bool:
 	return _tv_pickers().is_empty() and not _vr_may() and cpu_pid < 0
 
 
-## Seconds left to pick.
-func left() -> float:
-	return maxf(0.0, Deep.wait_for(stage, nobody()) - t) if stage != "" and chosen < 0 else 0.0
+func wait_for() -> float:
+	return Deep.wait_for(stage, nobody())
 
 
-## Host / local, every frame while the orbs are up (before main.consume_presses).
-func tick(delta: float) -> void:
-	if stage == "":
-		return
-	if chosen >= 0:
-		done_t += delta
-		if done_t >= AFTER:
-			_finish()
-		return
-	t += minf(delta, 0.1)  # (a loading hitch never eats the wait)
-	_follow_head()
-	var got := _vr_pick(delta)
-	if got.is_empty():
-		got = _tv_pick()
-	if got.is_empty() and cpu_pid >= 0 and cpu_choice >= 0 and t >= OPEN + Deep.CPU_PICK:
-		got = [cpu_choice, cpu_pid]
-	if got.size() == 2:
-		take(int(got[0]), int(got[1]))
-		return
-	if t > Deep.wait_for(stage, nobody()):
-		take(options.size() / 2, -1)  # nobody took one: the middle one (it glows brightest)
-
-
-## Host, VR row: the giant walked or turned a lot since the orbs popped up: the row moves to stay in front.
-func _follow_head() -> void:
+## VR row: the orbs follow the giant's head when they step away or turn (and everyone moves in again).
+func follow(_delta: float) -> void:
 	if row != "vr" or _vr_head() == null:
 		return
 	var h: Transform3D = _vr_head().global_transform
-	var f_now := (-h.basis.z).slide(Vector3.UP)
-	var f_was := (-row_head.basis.z).slide(Vector3.UP)
-	var turned := f_now.length() > 0.2 and f_was.length() > 0.2 and f_now.normalized().dot(f_was.normalized()) < 0.9
-	if h.origin.distance_to(row_head.origin) < 0.3 and not turned:
+	if not head_moved(row_head, h):
 		return
 	row_head = h
 	spots = _vr_row(h)
-	inside = {}
-	dwell = {}
+	reset_dwell()
 	_publish()
 
 
-## The VR hands: [orb, 0] once a hand has stayed in one DWELL s.
-func _vr_pick(delta: float) -> Array:
+## The VR giant's hands reaching into an orb (when they may pick).
+func takers() -> Dictionary:
 	if not _vr_may() or row != "vr":
-		return []
+		return {}
+	var points := {}
 	var rig = main.vr_rig
-	var got: Array = []
 	for hid in ["l", "r"]:
 		var hand: Node3D = rig.hand_l if hid == "l" else rig.hand_r
-		if hand == null or not hand.is_inside_tree():
-			continue
-		var i := orbs.nearest_hit(hand.global_position, Deep.HAND_R)
-		if not inside.has(hid):  # where it was when the orbs came up: resting at one is never a pick until it leaves
-			inside[hid] = RESTING if i >= 0 else -1
-		var before := int(inside[hid])
-		if before == RESTING:
-			inside[hid] = RESTING if i >= 0 else -1
-			dwell[hid] = 0.0
-			continue
-		if i != before:
-			dwell[hid] = 0.0
-		inside[hid] = i
-		if i >= 0 and t >= OPEN:
-			dwell[hid] = float(dwell.get(hid, 0.0)) + delta
-			if float(dwell[hid]) >= Deep.DWELL and got.is_empty():
-				got = [i, 0]
+		if hand != null and hand.is_inside_tree():
+			points[hid] = [hand.global_position, 0, "hand"]
+	return points
+
+
+## TV players move their dot along the row with the stick and press to take; a CPU's gift takes its own choice.
+func extra_pick() -> Array:
+	var got := _tv_pick()
+	if got.is_empty() and cpu_pid >= 0 and cpu_choice >= 0 and t >= open + Deep.CPU_PICK:
+		got = [cpu_choice, cpu_pid]
 	return got
 
 
-## TV players: the stick moves their dot, A takes the orb it is on.
 func _tv_pick() -> Array:
 	var order := Deep.tv_order(spots)
 	var changed := false
@@ -281,31 +214,31 @@ func _tv_pick() -> Array:
 		if not hover.has(pid):
 			hover[pid] = cur
 			changed = true
-		if bool(inp.pressed) and t >= OPEN and got.is_empty():
+		if bool(inp.pressed) and t >= open and got.is_empty():
 			got = [int(hover[pid]), pid]
 	if changed:
 		_publish()
 	return got
 
 
-## Host / local: orb i taken by slot (-1: nobody chose, the middle one).
-func take(i: int, slot: int) -> void:
-	if stage == "" or chosen >= 0 or i < 0 or i >= options.size():
-		return
-	chosen = i
-	chosen_by = slot
+## Host: the take goes out as fx (every machine runs take_fx from it), the TV players' dots go.
+func send_take(i: int, slot: int) -> void:
 	hover = {}
 	_publish()
 	main.fx("pick_take", [i, slot])
-	print("PICK %s: %s took %d (%s)" % [stage, "nobody" if slot < 0 else "P%d" % (slot + 1), i, str(options[i])])
 
 
-## Every machine: a dot in the taker's colour circles orb i, a happy sound and a puff.
 func take_fx(i: int, slot: int) -> void:
-	var col: Color = main.color_of(slot) if slot >= 0 else Color(1, 1, 1)
 	orbs.show_takers({}, {})
 	shown_hover = "{}"
-	var at := orbs.take(i, col)
+	super(i, slot)
+
+
+func slot_color(slot: int) -> Color:
+	return main.color_of(slot)
+
+
+func fx(i: int, slot: int, at: Vector3, col: Color) -> void:
 	if at != Vector3.INF:
 		main.sfx.play("correct", -4.0, 1.0 + 0.1 * i)
 		main.burst(main.to_board(at), col, 18)
@@ -313,15 +246,7 @@ func take_fx(i: int, slot: int) -> void:
 		main.vr_rig.pulse(1, 0.5, 0.08)
 
 
-func _finish() -> void:
-	var st := stage
-	var opt: Variant = options[chosen]
-	history.append([st, str(opt), chosen_by])
-	stage = ""
-	options = []
+## (The orbs go on every machine with the published empty state: show_state.)
+func closed() -> void:
 	entries = []
-	spots = []
 	hover = {}
-	main.fx("orbs", [{}])
-	if on_done.is_valid():
-		on_done.call(st, opt, chosen_by)

@@ -187,7 +187,7 @@ func _deep_checks() -> void:
 			deep["hand_pick"] = true
 		for h in main.picks.history:
 			deep["picked_" + String(h[0])] = true
-			if bool(h[2]):
+			if int(h[2]) >= 0:
 				deep["player_pick"] = true
 		# Round 2: a wasp visit and a storm cloud now (each told by its warning ring first).
 		# (Early in the round: the bees can fill day 2's jars before a storm at +4 s, and it never came, 2026-11-11.)
@@ -281,7 +281,7 @@ func _drive_bee(b) -> void:
 	# Picks between rounds: P2 flies into an orb (the mode's first, the gift's last).
 	if b.index == _picker() and main.picks.orbs.showing() and not _orbs_taken() and not (main.gardener != null and main.gardener.fake_vr):
 		var want: int = 0 if String(main.picks.orbs.stage) == "mode" else main.picks.orbs.orbs.size() - 1
-		var op: Vector3 = main.picks.orb_pos(want)
+		var op: Vector3 = main.picks.orb_position(want)
 		if op != Vector3.INF:
 			goal = op
 			have_goal = true
@@ -363,7 +363,7 @@ func _drive_gardener(delta: float) -> void:
 	# Picks with no bee to fly into an orb (a lone gardener on a Deck): the glove holds its grab over the orb.
 	if _picker() == 0 and main.net.mode != "client" and main.picks.orbs.showing() and not _orbs_taken():
 		var want: int = 0 if String(main.picks.orbs.stage) == "mode" else main.picks.orbs.orbs.size() - 1
-		var op: Vector3 = main.picks.orb_pos(want)
+		var op: Vector3 = main.picks.orb_position(want)
 		if op != Vector3.INF:
 			g.bot_target = op
 			g.bot_grip = _near(hp, op, 0.3) and h.held == ""
@@ -628,7 +628,7 @@ func _drive_vr(delta: float) -> void:
 	# Picks between rounds: the VR gardener's hand reaches out and touches an orb (the bees leave it to the hand).
 	if main.picks.orbs.showing() and not _orbs_taken():
 		var want: int = 0 if String(main.picks.orbs.stage) == "mode" else main.picks.orbs.orbs.size() - 1
-		var op: Vector3 = main.picks.orb_pos(want)
+		var op: Vector3 = main.picks.orb_position(want)
 		if op != Vector3.INF:
 			vr_pos = vr_pos.move_toward(op, 3.0 * delta)
 			var hb := Basis(Vector3.RIGHT, vr_pitch)

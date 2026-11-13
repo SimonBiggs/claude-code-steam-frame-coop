@@ -796,7 +796,7 @@ func _process(delta: float) -> void:
 	cockpit.animate(delta)
 	space.animate(delta)
 	if picks != null:
-		picks.follow()
+		picks.follow_space()
 	cockpit.set_progress(int(net.state_get("stars", 0)), int(net.state_get("missions", 0)))
 	if String(net.state_get("phase", "")) == "play":
 		space.planet_near = float(net.state_get("stars", 0)) / float(NEED)

@@ -313,8 +313,12 @@ func _second_pass(_delta: float) -> void:
 			_check_host_mode()
 		return
 	var p1 = main.players[0]
-	# Take an orb a second after it's up: the VR lantern-bearer with a hand, else P2 walks under one.
-	if main.picks.active() and main.picks.chosen < 0 and main.picks.t < float(main.picks.WAIT.get(main.picks.stage, 10.0)) - 1.2:
+	# Take an orb a second after it's up: the VR lantern-bearer with a hand, else P2 walks under one. (Standing under
+	# one already when they pop up is never a pick (core/pick_flow.gd RESTING): P2 first steps back to the lantern-bearer.)
+	if main.picks.active() and main.picks.chosen < 0 and main.picks.t < 0.6 and not p1.vr and main.players.size() > 1 \
+			and main.players[1].active:
+		main.players[1].global_position = Vector3(p1.global_position.x, 0.0, p1.global_position.z)
+	if main.picks.active() and main.picks.chosen < 0 and main.picks.t > 1.2:
 		var row: Array = main.picks.orbs.orbs
 		if not row.is_empty():
 			var o: Node3D = row[row.size() - 1] if main.picks.stage == "mode" else row[0]
@@ -347,7 +351,7 @@ func _second_pass(_delta: float) -> void:
 			errs.append("no mode pick (%s)" % str(hist))
 		if not hist.has("lantern"):
 			errs.append("no lantern gift pick (%s)" % str(hist))
-		if main.picks.history.any(func(h: Array) -> bool: return not bool(h[2])) and not OS.has_environment("BOT_NIGHT"):
+		if main.picks.history.any(func(h: Array) -> bool: return int(h[2]) < 0) and not OS.has_environment("BOT_NIGHT"):
 			errs.append("nobody took an orb (%s)" % str(main.picks.history))
 		if main.upgrades.is_empty():
 			errs.append("no lantern gift taken")

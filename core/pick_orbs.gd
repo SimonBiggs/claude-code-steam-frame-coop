@@ -22,6 +22,8 @@ extends Node3D
 ##   pop (the picks grow in one after another), punch (picture pops this much on a take)
 ##   for_others (true: only other players can take these, never the VR player - Obstacle Rush's runners' orbs over
 ##   the start while the giant watches; VrViewCheck.pick_hidden doesn't ask the VR head to see them)
+## THE TEAM PICK FLOW (mode once a session, gifts between rounds: open, dwell, take, the middle one for nobody, finish)
+## is core/pick_flow.gd: a game's picks.gd extends it (tests/shared_picks_test.gd fails a game's own copy).
 ## MODES: the GENTLE / BRAVE / HARD team pick every game uses (one place: names, pictures, colours, lines). Games
 ## that had their own ids keep them in saves and net state; ALIASES maps them (mega / heroic -> hard, zoom -> brave).
 

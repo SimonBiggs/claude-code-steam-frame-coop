@@ -1,4 +1,4 @@
-extends Node
+extends "res://core/pick_flow.gd"
 ## TOWER STACK PICKS on the shared pick orbs (core/pick_orbs.gd), picture first, team choices:
 ##   "mode"   GENTLE / BRAVE / HARD before the first job of a visit (the family's last mode in the middle).
 ##   "build"  WREN'S NEXT JOB between jobs: three buildings (castle, lighthouse, windmill, ...) to build next, each a
@@ -9,55 +9,33 @@ extends Node
 ## Host / local decide; the host keeps the "orbs" state [stage, entries] (sticky: a machine joining mid-pick sees the
 ## orbs too) and sends "take" [i, slot] events; every machine draws.
 
-const PickOrbs := preload("res://core/pick_orbs.gd")
-
 const WAIT := {"mode": 12.0, "build": 10.0}
-const AFTER := 1.0  # seconds the taken orb shows its dot before the orbs go
-## The row floats at the giant's chest height a little past the stage (the giant's eyes are ~3.7 m up at z 1.7), and
-## a TV player touches an orb by standing under it (flat distance), so it can be up there for both.
 const ROW := Vector3(0.0, 0.0, -0.6)
 const GAP := 2.4
 const Y := 2.4
 const AVATAR_R := 0.25  # + PickOrbs.HIT_R: how close (flat) a TV player's feet must be under an orb
 const HAND_R := 0.2
 
-var main: Node
-var orbs: PickOrbs
-var stage := ""  # host: "" | "mode" | "build"
-var options: Array = []  # host: what each orb means (mode ids / job descriptions)
-var t := 0.0
-var chosen := -1
-var chosen_by := -1
-var done_t := 0.0
-var on_done: Callable  # host: (stage, option)
-var history: Array = []  # host: what was chosen this round (telemetry)
+
+func _init() -> void:
+	after = 1.0
+	waits = WAIT
+	wait_default = 10.0
+	hand_r = HAND_R
+	sync = "state"
 
 
-func _ready() -> void:
-	name = "Picks"
-	orbs = PickOrbs.new()
-	main.add_child(orbs)
-
-
-func active() -> bool:
-	return stage != ""
-
-
-## Host / local: put up the orbs. entries: [{id, name, pic, color}], options: what each one means.
+## Host / local: put up the orbs over the build site. entries: [{id, name, pic, color}], opts: what each orb means.
 func begin(new_stage: String, entries: Array, opts: Array, done: Callable) -> void:
-	stage = new_stage
-	options = opts
-	on_done = done
-	t = float(WAIT.get(new_stage, 10.0))
-	chosen = -1
-	chosen_by = -1
-	done_t = 0.0
+	start(new_stage, opts, done)
 	show_row(new_stage, entries)
-	if main.net.mode == "host":
-		main.net.state_set("orbs", [new_stage, entries])
+	publish([new_stage, entries])
 
 
-## Every machine: the row of orbs ("" stage: none).
+func orbs_off() -> Array:
+	return ["", []]
+
+
 func show_row(new_stage: String, entries: Array) -> void:
 	if new_stage == "" or entries.is_empty():
 		orbs.clear()
@@ -65,61 +43,28 @@ func show_row(new_stage: String, entries: Array) -> void:
 	orbs.show_orbs(new_stage, entries, ROW, GAP, Y)
 
 
-## Host / local, every frame while the orbs are up.
-func tick(delta: float) -> void:
-	if stage == "":
-		return
-	if chosen >= 0:
-		done_t += delta
-		if done_t >= AFTER:
-			_finish()
-		return
-	t -= delta
+## The TV players standing under an orb, the VR player's hands reaching into one.
+func takers() -> Dictionary:
+	var points := {}
 	for slot in main.avatars:
 		var a: Node3D = main.avatars[slot]
-		var i := orbs.nearest_hit(Vector3(a.position.x, ROW.y + Y, a.position.z), AVATAR_R)
-		if i >= 0:
-			take(i, int(slot))
-			return
+		points["p%d" % int(slot)] = [Vector3(a.position.x, ROW.y + Y, a.position.z), int(slot), "walk"]
 	if main.vr_rig != null:
 		for w in 2:
-			var i2 := orbs.nearest_hit(main.vr_rig.hand_point(w), HAND_R)
-			if i2 >= 0:
-				main.vr_rig.pulse(w, 0.6, 0.08)
-				take(i2, 0)
-				return
-	if t <= 0.0:
-		take(options.size() / 2, -1)  # the middle one (it glows brightest)
+			points["h%d" % w] = [main.vr_rig.hand_point(w), 0, "hand"]
+	return points
 
 
-## Host / local: orb i taken by slot (-1: nobody chose, the middle one).
-func take(i: int, slot: int) -> void:
-	if chosen >= 0 or i < 0 or i >= options.size():
-		return
-	chosen = i
-	chosen_by = slot
-	take_fx(i, slot)
-	if main.net.mode == "host":
-		main.net.event("take", [i, slot])
-	print("PICK %s: %s took %d (%s)" % [stage, "nobody" if slot < 0 else "P%d" % (slot + 1), i, str(options[i])])
+func orb_at(kind: String, point: Variant) -> int:
+	return orbs.nearest_hit(point, hand_r if kind == "hand" else AVATAR_R)
 
 
-## Every machine: a dot in the taker's colour circles orb i, a happy sound.
-func take_fx(i: int, slot: int) -> void:
-	var col: Color = main.party.color_of(slot) if slot >= 0 else Color(1, 1, 1)
-	var at := orbs.take(i, col)
+func slot_color(slot: int) -> Color:
+	return main.party.color_of(slot)
+
+
+func fx(i: int, slot: int, at: Vector3, _col: Color) -> void:
 	if at != Vector3.INF:
 		main.sfx.play_at("ding", at, -2.0, 1.0 + 0.1 * i)
-
-
-func _finish() -> void:
-	var st := stage
-	var opt: Variant = options[chosen]
-	history.append([st, opt if opt is String else str(opt), chosen_by >= 0])
-	stage = ""
-	options = []
-	orbs.clear()
-	if main.net.mode == "host":
-		main.net.state_set("orbs", ["", []])
-	if on_done.is_valid():
-		on_done.call(st, opt)
+	if slot == 0 and main.vr_rig != null and taker.begins_with("h"):
+		main.vr_rig.pulse(int(taker.substr(1)), 0.6, 0.08)
