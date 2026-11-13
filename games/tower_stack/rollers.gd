@@ -112,9 +112,11 @@ static func _lane(r: RandomNumberGenerator) -> Array:
 			var sw := a
 			a = b
 			b = sw
-		if _seg_dist(a, b, PAD) < PAD_CLEAR or _seg_dist(a, b, GREEN) < GREEN_CLEAR:
+		a = a.snapped(Vector2(0.01, 0.01)) * 0.999  # (checked as it is sent; a hair inside the edge after rounding)
+		b = b.snapped(Vector2(0.01, 0.01)) * 0.999
+		if _seg_dist(a, b, Vector2.ZERO) < STAGE_CLEAR or _seg_dist(a, b, PAD) < PAD_CLEAR or _seg_dist(a, b, GREEN) < GREEN_CLEAR:
 			continue
-		return [snappedf(a.x, 0.01), snappedf(a.y, 0.01), snappedf(b.x, 0.01), snappedf(b.y, 0.01)]
+		return [a.x, a.y, b.x, b.y]
 	return []
 
 

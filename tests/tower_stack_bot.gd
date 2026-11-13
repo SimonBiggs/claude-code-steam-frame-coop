@@ -72,13 +72,17 @@ func _ready() -> void:
 		kit.at(t0 + 7.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused, "Start again resumes everyone")
 			kit.allow_pause = false)
-	kit.drop_in_out(main.party, t0 + 9.0, 3.0, func(slot: int) -> bool:
-		return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot))
+	if not OS.has_environment("BOT_LATE"):  # (a late joiner's drop-in would still sit there at the host's seat count)
+		kit.drop_in_out(main.party, t0 + 9.0, 3.0, func(slot: int) -> bool:
+			return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot))
 	if host:
 		kit.at(64.0, "host checks", _checks)
 		kit.at(68.0, "finish", kit.finish)
 	else:
-		kit.at(61.0 if client else (110.0 if lone else 58.0), "finish", func() -> void:
+		var end := 61.0 if client else (110.0 if lone else 58.0)
+		if OS.has_environment("BOT_LATE"):  # a machine joining a game already running leaves before the host does
+			end = maxf(t0 + 14.0, end - float(OS.get_environment("BOT_LATE")) - 2.0)
+		kit.at(end, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	if not OS.has_environment("DUO_JOIN"):
@@ -368,7 +372,8 @@ func _checks() -> void:
 	kit.assert_eq(main.town.entries.size(), mini((main.net.state_get("town", []) as Array).size(), main.G.town_size()), "%s: the town shows every saved tower" % mode)
 	kit.assert_eq(main.districts.get_child_count(), main.Districts.reached(int(main.net.state_get("made", 0))), "%s: the town shows its districts" % mode)
 	kit.assert_true(orbs_seen >= 3, "%s: the pick orbs showed (%d)" % [mode, orbs_seen])
-	kit.assert_true(rings_seen > 0, "%s: a weather warning ring showed" % mode)
+	if not OS.has_environment("BOT_LATE"):  # (the host's forced quake at 14 s can come before a late joiner is in)
+		kit.assert_true(rings_seen > 0, "%s: a weather warning ring showed" % mode)
 	for id in main.blocks:
 		kit.assert_true(main.bkind.has(id), "%s: block %d knows its kind" % [mode, int(id)])
 		break
