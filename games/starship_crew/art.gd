@@ -5,6 +5,7 @@ extends RefCounted
 
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const VERSION := "v1"
 const HULL := Color(0.95, 0.96, 1.0)
@@ -51,7 +52,7 @@ static func canopy() -> ArrayMesh:
 		var b := MeshKit.Builder.new()
 		b.dome(1.55, MeshKit.at(Vector3(0, 0.02, -0.2), Vector3(1.0, 1.15, 1.25)), Color(0.6, 0.9, 1.0), 20, false, false)
 		var m := StandardMaterial3D.new()
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		m.albedo_color = Color(0.6, 0.9, 1.0, 0.18)
 		m.cull_mode = BaseMaterial3D.CULL_BACK
 		m.metallic_specular = 1.0

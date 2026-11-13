@@ -67,8 +67,7 @@ func _ready() -> void:
 			_part(head, BoxMesh.new(), neon, Vector3(side * 0.7, -0.05, 0.25 + g * 0.18), Vector3(0.04, 0.6, 0.05))
 		# Big see-through wing fins, like a real flying fish.
 		var wing_mat: StandardMaterial3D = main.make_material(Color(0.5, 0.9, 1.0), 2.0)
-		wing_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		wing_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
+		UiKit.see_through(wing_mat)
 		wing_mat.albedo_color.a = 0.55
 		wing_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 		var wing := _part(segments[1], PrismMesh.new(), wing_mat, Vector3(side * 2.3, 0.15, 0.1), Vector3(3.6, 0.08, 2.4))

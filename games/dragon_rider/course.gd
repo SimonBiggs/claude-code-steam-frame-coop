@@ -44,6 +44,7 @@ void fragment() {
 const RouteGen := preload("res://games/dragon_rider/routegen.gd")
 const Deep := preload("res://games/dragon_rider/deep.gd")
 const Contrast := preload("res://core/contrast.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 var main
 var route := {}  # routegen.gd's data for this level
@@ -193,8 +194,7 @@ func _rainbow(pts: Array) -> void:
 	mt.vertex_color_is_srgb = true
 	mt.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	mt.cull_mode = BaseMaterial3D.CULL_DISABLED
-	mt.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mt.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(mt)
 	mt.albedo_color = Color(1, 1, 1, 0.6)
 	m.surface_set_material(0, mt)
 	var mi := MeshInstance3D.new()
@@ -240,8 +240,7 @@ func _critter(at: Vector3) -> void:
 	cage.mesh = main.sphere_mesh(1.0)
 	var cm := StandardMaterial3D.new()
 	cm.albedo_color = Color(0.7, 0.95, 1.0, 0.35)
-	cm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	cm.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(cm)
 	cm.emission_enabled = true
 	cm.emission = Color(0.5, 0.85, 1.0)
 	cm.emission_energy_multiplier = 0.8
@@ -258,8 +257,7 @@ func _critter(at: Vector3) -> void:
 	beacon.mesh = main.cyl_mesh(0.35, 0.8, 30.0, 8)
 	var bmat := StandardMaterial3D.new()
 	bmat.albedo_color = Color(1.0, 0.9, 0.4, 0.35)
-	bmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	bmat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(bmat)
 	bmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	beacon.material_override = bmat
 	beacon.position = Vector3(0, 15.0, 0)
@@ -382,7 +380,7 @@ func _waterfall_mat() -> ShaderMaterial:
 		var sm := ShaderMaterial.new()
 		sm.shader = Shader.new()
 		sm.shader.code = WATERFALL_SHADER
-		sm.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+		UiKit.see_through(sm)
 		main.mats["waterfall"] = sm
 	return main.mats["waterfall"]
 

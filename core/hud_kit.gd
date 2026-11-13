@@ -1042,11 +1042,11 @@ class Bar3D extends Node3D:
 			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 			m.vertex_color_use_as_albedo = true
 			m.vertex_color_is_srgb = true
-			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+			UiKit.see_through(m)
 			m.billboard_mode = BaseMaterial3D.BILLBOARD_FIXED_Y
 			m.billboard_keep_scale = true
 			m.cull_mode = BaseMaterial3D.CULL_DISABLED
-			m.render_priority = 6
+			m.render_priority = UiKit.VR_PRIO_UNDER_UI + 3  # over see-through scenery (UiKit.see_through), still under VR cards
 			return m)
 
 	func _color() -> Color:

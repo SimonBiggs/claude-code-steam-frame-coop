@@ -182,15 +182,13 @@ func _build_jars() -> void:
 	jar_ghosts.clear()
 	var glass := StandardMaterial3D.new()
 	glass.albedo_color = Color(0.75, 0.9, 1.0, 0.22)
-	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	glass.render_priority = UiKit.VR_PRIO_UNDER_UI
+	UiKit.see_through(glass)
 	glass.roughness = 0.1
 	glass.metallic_specular = 0.9
 	var lid := World.mat(Color(0.75, 0.55, 0.25), 0.3, 0.4)
 	var empty_glass := StandardMaterial3D.new()
 	empty_glass.albedo_color = Color(0.3, 0.3, 0.4, 0.35)
-	empty_glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	empty_glass.render_priority = UiKit.VR_PRIO_UNDER_UI
+	UiKit.see_through(empty_glass)
 	var cols := KIND_ORDER.size()
 	var step := (SHELF_W - 0.3) / float(cols)
 	for c in cols:

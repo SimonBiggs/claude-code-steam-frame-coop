@@ -5,6 +5,7 @@ extends Node3D
 ## Host: simulated here (host_update). TV machine: a ghost following the host's snapshots.
 
 const Course := preload("res://games/dragon_rider/course.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const HITS_TO_WRAP := 3
 const WRAP_TIME := 3.0
 
@@ -79,8 +80,7 @@ func _ready() -> void:
 	wrap.mesh = main.sphere_mesh(1.0)
 	var bm := StandardMaterial3D.new()
 	bm.albedo_color = Color(0.7, 0.95, 1.0, 0.35)
-	bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	bm.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(bm)
 	bm.emission_enabled = true
 	bm.emission = Color(0.5, 0.85, 1.0)
 	bm.emission_energy_multiplier = 0.7

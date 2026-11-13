@@ -2,6 +2,7 @@ extends Node3D
 ## A hole in the deck spraying water. Deckhands hold the use button next to it to hammer a plank over it.
 
 const World := preload("res://games/cannon_cove/world.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const PATCH_TIME := 1.8
 const RANGE := 1.7
@@ -45,8 +46,7 @@ func _ready() -> void:
 	spray.mesh = drop
 	add_child(spray)
 	fill = World.cyl(self, 0.6, 0.6, 0.03, Vector3(0, 0.05, 0), World.mat(Color(0.3, 1.0, 0.4, 0.7), 1.5), 16)
-	(fill.material_override as StandardMaterial3D).transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	(fill.material_override as StandardMaterial3D).render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(fill.material_override)
 	fill.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	fill.visible = false
 	label = Label3D.new()
@@ -73,8 +73,7 @@ func _process(delta: float) -> void:
 		if glow == null:
 			glow = World.cyl(self, 0.75, 0.75, 0.02, Vector3(0, 0.03, 0), World.mat(Color(0.4, 0.85, 1.0, 0.5), 2.5), 16)
 			var gm := glow.material_override as StandardMaterial3D
-			gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			gm.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+			UiKit.see_through(gm)
 			gm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 			glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var k := 0.5 + 0.5 * sin(t * 6.0)

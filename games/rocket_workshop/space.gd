@@ -388,7 +388,7 @@ func _build_diorama() -> void:
 	fmat.vertex_color_use_as_albedo = true
 	fmat.vertex_color_is_srgb = true
 	fmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	fmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(fmat)
 	fsm.material = fmat
 	dio_flame.mesh = fsm
 	var g := Gradient.new()

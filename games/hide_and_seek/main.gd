@@ -606,7 +606,7 @@ func ring_fx(pos: Vector3, radius: float, color: Color) -> void:
 	tm.ring_segments = 4
 	ring.mesh = tm
 	var mat := make_material(color, 3.0)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(mat)
 	ring.material_override = mat
 	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(ring)

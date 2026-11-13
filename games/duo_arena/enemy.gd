@@ -7,6 +7,7 @@ extends CharacterBody3D
 const EnemyShotScript := preload("res://games/duo_arena/enemy_shot.gd")
 const Bosses := preload("res://games/duo_arena/bosses.gd")
 const Looks := preload("res://games/duo_arena/looks.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const KINDS := {
 	"grunt": {"hp": 3.0, "speed": 3.6, "radius": 0.55, "color": Color(0.95, 0.25, 0.3), "dps": 30.0, "points": 100, "drop": 0.06},
 	"runner": {"hp": 1.0, "speed": 6.8, "radius": 0.4, "color": Color(1.0, 0.55, 0.1), "dps": 20.0, "points": 150, "drop": 0.05},
@@ -416,8 +417,7 @@ func _build_ptero() -> void:
 	shadow.mesh = disc
 	var sm := StandardMaterial3D.new()
 	sm.albedo_color = Color(0.0, 0.0, 0.0, 0.45)
-	sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	sm.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
+	UiKit.see_through(sm)
 	sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	shadow.material_override = sm
 	shadow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

@@ -227,7 +227,7 @@ func _update_bubble(delta: float) -> void:
 		mi.mesh = main.sphere_mesh(0.13)
 		bubble_mat = StandardMaterial3D.new()
 		bubble_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		bubble_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(bubble_mat)
 		mi.material_override = bubble_mat
 		bubble_node.add_child(mi)
 		var core := MeshInstance3D.new()

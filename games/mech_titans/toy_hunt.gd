@@ -14,6 +14,7 @@ const Data := preload("res://games/mech_titans/data.gd")
 const Tales := preload("res://games/mech_titans/tales.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const SeasonKit := preload("res://core/season_kit.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 ## Season props stand on the corners of these open squares (the plaza, the start squares, the shelters).
 const PROP_SQUARES: Array[Vector3] = [Vector3(0, 0, 0), Vector3(0, 0, 26), Vector3(-26, 0, 52), Vector3(26, 0, 52)]
@@ -230,7 +231,7 @@ func _make_toy(id: String, at: Vector3) -> void:
 	_toy_beam.mesh = cm
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(m)
 	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	var c: Color = Tales.info(id)["color"]

@@ -3,6 +3,8 @@ extends RefCounted
 ## Everything is deterministic (fixed layout + seeded RNG) so the host and the TV build the same world.
 ## World units: a knight is about 1 unit tall. The VR giant sees it at world_scale S (20 units = 1 m).
 
+const UiKit := preload("res://core/ui_kit.gd")
+
 ## The table's ground (_ground_color): the wooden rim, the river bed, its sandy banks, the trodden earth round the
 ## fire, the ring path and the two grass tones (lightened up to GRASS_LIFT on the hills). palette.gd reads them.
 const GROUND := {"wood": Color(0.55, 0.34, 0.18), "river": Color(0.35, 0.42, 0.45), "bank": Color(0.86, 0.76, 0.5),
@@ -412,7 +414,7 @@ static func _build_terrain(main: Node3D) -> void:
 	water.mesh = cyl(R - 0.05, R - 0.05, 0.02, 64)
 	var wm := StandardMaterial3D.new()
 	wm.albedo_color = Color(0.35, 0.7, 0.95, 0.75)
-	wm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(wm)
 	wm.roughness = 0.1
 	wm.metallic = 0.2
 	wm.emission_enabled = true

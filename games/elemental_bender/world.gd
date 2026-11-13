@@ -11,6 +11,7 @@ const E := preload("res://games/elemental_bender/elem.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const Arenas := preload("res://games/elemental_bender/arenas.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const ISLAND_R := 36.0
 const DAIS_TOP := 1.0
@@ -104,8 +105,7 @@ func build(vr: bool, arena: String = "temple", temple_seed: int = 0) -> void:
 		sm.roughness = 0.9
 		sm.metallic = 0.0
 	elif not vr:
-		sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		sm.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # under VR cards (core/vr_view_check.gd "washed out")
+		UiKit.see_through(sm)
 	if float(info.sea_glow) <= 0.0:
 		sm.roughness = 0.08
 		sm.metallic = 0.3

@@ -148,6 +148,7 @@ const PRACTICE_MOVES: Array[String] = ["left", "right", "up"]
 const PRACTICE_RING_R := 6.0
 const NEW_THING := {2: "STARS!", 3: "GOLDEN BALLOON!", 4: "SKY BUNNIES!", 5: "RACE GOLDIE!", 6: "STORM SPRITES!",
 	7: "STORM KING!"}
+# see-through-ok: the vignette round the head is an overlay meant to tint the whole view (priority 100)
 const VIGNETTE_SHADER := """
 shader_type spatial;
 render_mode unshaded, cull_front, depth_draw_never, depth_test_disabled, blend_mix;
@@ -310,8 +311,7 @@ func _ready() -> void:
 		dragon.add_child(props)
 	bubble_mat = StandardMaterial3D.new()
 	bubble_mat.albedo_color = Color(0.75, 0.95, 1.0, 0.5)
-	bubble_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	bubble_mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(bubble_mat)
 	bubble_mat.emission_enabled = true
 	bubble_mat.emission = Color(0.55, 0.85, 1.0)
 	bubble_mat.emission_energy_multiplier = 0.9
@@ -3187,11 +3187,10 @@ func _deep_animate(delta: float) -> void:
 		sm.rings = 12
 		shield_node.mesh = sm
 		var mat := StandardMaterial3D.new()
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(mat)
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		mat.cull_mode = BaseMaterial3D.CULL_FRONT  # (only its far side: never a film over the rider's eyes)
 		mat.albedo_color = Color(0.55, 0.85, 1.0, 0.12)
-		mat.render_priority = UiKitDr.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 		shield_node.material_override = mat
 		shield_node.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		shield_node.position = Vector3(0, -0.5, -0.5)

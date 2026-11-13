@@ -391,8 +391,7 @@ func explosion(pos: Vector3, color: Color, radius: float) -> void:
 		sm.rings = 8
 		ball.mesh = sm
 		var mat := make_material(layer[0], layer[2])
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
+		UiKit.see_through(mat)
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		ball.material_override = mat
 		ball.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -454,8 +453,7 @@ func _ring(pos: Vector3, radius: float, color: Color) -> void:
 	tm.outer_radius = 1.0
 	ring.mesh = tm
 	var mat := make_material(color, 3.0)
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
+	UiKit.see_through(mat)
 	ring.material_override = mat
 	ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(ring)

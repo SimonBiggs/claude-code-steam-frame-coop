@@ -328,7 +328,7 @@ func _build_beams() -> void:
 		beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		var c := BEAM_COLORS[i]

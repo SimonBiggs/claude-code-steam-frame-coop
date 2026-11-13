@@ -5,6 +5,7 @@ extends Node3D
 ## whenever they haven't thrown anything for a while. Host only (the VR player is the one who needs it).
 
 const VrRig := preload("res://core/vr_rig.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const CYCLE := 3.6
 
 var giant: Node
@@ -19,7 +20,7 @@ var shown := false  ## bots: the demo has been on screen
 func _ready() -> void:
 	mat = StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(mat)
 	mat.albedo_color = Color(0.75, 1.0, 0.95, 0.5)
 	glove = MeshInstance3D.new()
 	glove.mesh = VrRig.glove_mesh(false, Color.WHITE, Color.WHITE)

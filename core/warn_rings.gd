@@ -20,6 +20,7 @@ extends Node3D
 
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const KINDS: Array[String] = ["circle", "ring", "line", "sector"]
 const STYLES: Array[String] = ["rings", "disc", "flash"]
@@ -92,10 +93,9 @@ static func fill_material(col: Color, alpha: float) -> StandardMaterial3D:
 	return ResCache.get_or_make("warn_fill_%s_v2" % c.to_html(true), func() -> Resource:
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		m.albedo_color = c
-		m.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 		return m) as StandardMaterial3D
 
 

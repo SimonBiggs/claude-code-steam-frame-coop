@@ -429,7 +429,7 @@ func _build_blizzard() -> void:
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
 	m.albedo_color = Color(1, 1, 1, 0.85)
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(m)
 	q.material = m
 	blizzard_fx.mesh = q
 	blizzard_fx.position = Vector3(-6, 9, 0)

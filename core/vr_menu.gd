@@ -344,7 +344,7 @@ func _glow_material(c: Color) -> StandardMaterial3D:
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.albedo_color = Color(c.r, c.g, c.b, 0.85)
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA  # see-through-ok: the VR menu's pointer laser, drawn over the menu it points at
 		m.no_depth_test = false
 		m.render_priority = UiKit.VR_PRIO_TEXT + 1
 		return m)

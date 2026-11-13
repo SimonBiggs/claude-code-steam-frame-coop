@@ -9,6 +9,7 @@ extends Node3D
 
 const Story := preload("res://games/marble_maze/story.gd")
 const Worlds := preload("res://games/marble_maze/worlds.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const RADIUS := 1.85
 const JAR_POS := Vector3(-1.2, 0.0, -0.35)
@@ -314,7 +315,7 @@ func _build_jar() -> void:
 	glass.mesh = main.cyl_mesh(JAR_R, JAR_R, JAR_H, 18)
 	var gm := StandardMaterial3D.new()
 	gm.albedo_color = Color(0.8, 0.95, 1.0, 0.22)
-	gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(gm)
 	gm.roughness = 0.1
 	gm.metallic = 0.3
 	glass.material_override = gm

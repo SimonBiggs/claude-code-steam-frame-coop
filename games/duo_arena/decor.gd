@@ -234,8 +234,7 @@ static func _add_sky(main: Node3D) -> void:
 	tm.ring_segments = 4
 	ring.mesh = tm
 	var rm: StandardMaterial3D = main.make_material(Color(1.0, 0.55, 0.8), 1.6)
-	rm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	rm.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
+	UiKit.see_through(rm)
 	rm.albedo_color.a = 0.55
 	rm.set("disable_fog", true)
 	ring.material_override = rm
@@ -260,8 +259,7 @@ static func _add_holo_rings(main: Node3D) -> void:
 		tm.ring_segments = 4
 		ring.mesh = tm
 		var mat: StandardMaterial3D = main.make_material(spec[2], 2.5)
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (VrViewCheck "washed out")
+		UiKit.see_through(mat)
 		mat.albedo_color.a = 0.6
 		ring.material_override = mat
 		ring.rotation.x = 0.12

@@ -60,8 +60,7 @@ func _ready() -> void:
 	rain.gravity = Vector3(0, -4.0, 0)
 	var dm := W.box(Vector3(0.025, 0.22, 0.025))
 	var dmat := W.mat(Color(0.6, 0.8, 1.0, 0.7), 0.6)
-	dmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	dmat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(dmat)
 	dm.material = dmat
 	rain.mesh = dm
 	rain.emitting = false
@@ -91,9 +90,8 @@ func _ready() -> void:
 	rmat.vertex_color_is_srgb = true
 	rmat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	rmat.cull_mode = BaseMaterial3D.CULL_DISABLED
-	rmat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(rmat)
 	rmat.albedo_color = Color(1, 1, 1, 0.65)
-	rmat.render_priority = UiKit.VR_PRIO_UNDER_UI
 	rm.surface_set_material(0, rmat)
 	rainbow = W._mesh_of(rm)
 	rainbow.position = Vector3(0, -3.0, -14.0)
@@ -203,7 +201,7 @@ func _build_queen() -> void:
 	W.vsphere(st, Vector3(0, 0.0, -0.2), Vector3(0.31, 0.06, 0.08), Color(0.6, 0.35, 0.95))
 	queen.add_child(W._mesh_of(W.vmesh(st, 0.15)))
 	var wing_mat := W.mat(Color(0.92, 0.97, 1.0, 0.55), 0.3)
-	wing_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(wing_mat)
 	for s in [-1.0, 1.0]:
 		var wm := W.mesh_node(queen, W.sphere(0.26, 10), wing_mat, Vector3(s * 0.28, 0.24, 0.02), Vector3(1.2, 0.12, 0.7))
 		wm.set_meta("side", s)

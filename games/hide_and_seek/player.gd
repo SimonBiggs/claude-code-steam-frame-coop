@@ -370,7 +370,7 @@ func attach_xr(origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right:
 	var bm := StandardMaterial3D.new()
 	bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	bm.albedo_color = Color(0.03, 0.02, 0.06, 0.97)
-	bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(bm)
 	bm.no_depth_test = false
 	bm.render_priority = -10
 	blindfold.material_override = bm

@@ -26,7 +26,9 @@ const HOLD_DEPTH := 0.22
 const FULL_LOCK := 1.5  # radians of wheel turn for full steering
 const FRAME_VY := 3.0  # m/s: the most the seat frame moves up or down (ramps and bumps stay gentle)
 const CoveGhostHand := preload("res://games/cannon_cove/ghost_hand.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const PANEL_OFF := Vector3(0.78, -0.6, -2.3)  # text panels, relative to the eyes
+# see-through-ok: the vignette round the head is an overlay meant to tint the whole view (priority 100)
 const VIGNETTE_SHADER := """
 shader_type spatial;
 render_mode unshaded, cull_front, depth_draw_never, depth_test_disabled, blend_mix;
@@ -545,7 +547,7 @@ func _update_wrong_arrow() -> void:
 		seat.add_child(wrong_arrow)
 		wrong_mat = StandardMaterial3D.new()
 		wrong_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		wrong_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(wrong_mat)
 		wrong_mat.albedo_color = Color(1.0, 0.3, 0.25, 0.9)
 		var head := MeshInstance3D.new()
 		head.mesh = main.cyl_mesh(0.0, 0.07, 0.12, 12)  # points along +Y of the arrow

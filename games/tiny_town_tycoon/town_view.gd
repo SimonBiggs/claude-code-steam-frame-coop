@@ -14,6 +14,7 @@ const Art := preload("res://games/tiny_town_tycoon/art.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const Town := preload("res://games/tiny_town_tycoon/town.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const ROAD_SHAPES: Array[String] = ["dot", "end", "straight", "curve", "tee", "cross"]
 const ICONS: Array[String] = ["fire", "road", "power", "water", "jobs", "workers", "stock", "shop", "fun", "build"]
@@ -548,7 +549,7 @@ func _refresh_status() -> void:
 		var mat := StandardMaterial3D.new()
 		mat.vertex_color_use_as_albedo = true
 		mat.vertex_color_is_srgb = true
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(mat)
 		mat.roughness = 1.0
 		_smoke = _mm(sm.build(mat))
 		_smoke.multimesh.instance_count = 0
@@ -656,8 +657,8 @@ func _icon_mesh(ic: String) -> ArrayMesh:
 		mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 		mat.billboard_keep_scale = true
 		mat.no_depth_test = false
-		mat.render_priority = 3
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(mat)
+		mat.render_priority = UiKit.VR_PRIO_UNDER_UI + 2  # over the town's other see-through bits, still under VR cards
 		return b.build(mat)) as ArrayMesh
 
 

@@ -8,6 +8,7 @@ extends Node3D
 
 const World := preload("res://games/cannon_cove/world.gd")
 const Looks := preload("res://games/cannon_cove/looks.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const RISE_TIME := 2.5
 const GUARD_MAX := 32.0  # it opens its eyes anyway after this long (so a small crew can't get stuck)
@@ -86,8 +87,7 @@ func _ready() -> void:
 	tm.ring_segments = 4
 	foam.mesh = tm
 	var fm := World.mat(Color(0.95, 0.98, 1.0, 0.6), 0.4)
-	fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	fm.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(fm)
 	foam.material_override = fm
 	foam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	foam.scale = Vector3(1.0, 0.15, 1.0)
@@ -108,8 +108,7 @@ func _ready() -> void:
 	q.size = Vector2(7.0, 0.6)
 	bg.mesh = q
 	var bg_mat := World.mat(Color(0, 0, 0, 0.6))
-	bg_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	bg_mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(bg_mat)
 	bg_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	bg_mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 	bg_mat.billboard_keep_scale = true

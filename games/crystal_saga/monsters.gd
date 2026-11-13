@@ -27,6 +27,7 @@ const GIANT_SCALE := 2.3
 const STOMP_R := 3.4
 const WIND_TIME := 1.3
 const Realm := preload("res://games/crystal_saga/realm.gd")  # (monster colours live there: palette.gd reads them)
+const UiKit := preload("res://core/ui_kit.gd")
 const BAT_COLOR := Realm.BAT_COLOR
 const MUSHY_COLOR := Realm.MUSHY_COLOR
 const SLIME_COLORS: Array[Color] = Realm.SLIME_COLORS
@@ -140,9 +141,8 @@ func _aura_mesh() -> MeshInstance3D:
 	sm.rings = 7
 	var mat := StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(mat)
 	mat.albedo_color = Color(0.35, 0.1, 0.5, 0.35)
-	mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mat.depth_draw_mode = BaseMaterial3D.DEPTH_DRAW_DISABLED
 	var mi := MeshInstance3D.new()

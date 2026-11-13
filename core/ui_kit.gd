@@ -716,6 +716,18 @@ const VR_PRIO_TEXT := 23
 ## See-through SCENERY (water, glass, mist, ghosts) that VR cards can float in front of: below the panels, or it is
 ## blended over them and washes them out (core/vr_view_check.gd "washed out"; Fishing Lake's water, 2026-11-11).
 const VR_PRIO_UNDER_UI := -8
+## See-through scenery in ONE call: alpha-blended (depth_pre_pass: TRANSPARENCY_ALPHA_DEPTH_PRE_PASS, for ghosts and glass
+## that should sort like solids) and drawn under VR cards (VR_PRIO_UNDER_UI). Use it for EVERY see-through material
+## in games and core instead of setting `transparency` by hand (tests/see_through_prio_test.gd fails a raw
+## TRANSPARENCY_ALPHA). A ShaderMaterial whose shader blends by ALPHA just gets the priority. Something that really
+## must draw over VR cards (a fade sphere round the head) sets transparency itself, marked `# see-through-ok: why`.
+static func see_through(mat: Material, depth_pre_pass: bool = false) -> void:
+	if mat is BaseMaterial3D:
+		var b := mat as BaseMaterial3D
+		b.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA_DEPTH_PRE_PASS if depth_pre_pass else BaseMaterial3D.TRANSPARENCY_ALPHA  # see-through-ok: the helper itself
+	mat.render_priority = VR_PRIO_UNDER_UI
+
+
 ## Render layer for world-space UI only the VR player sees (TV / Deck cameras never draw it; core/vr_layer.gd).
 const VR_LAYER := VrLayer.LAYER
 
@@ -801,7 +813,7 @@ static func vr_panel_material(priority: int = VR_PRIO_PANEL, depth_test: bool = 
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.vertex_color_use_as_albedo = true
 		m.vertex_color_is_srgb = true
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA  # see-through-ok: the VR card panel itself
 		m.cull_mode = BaseMaterial3D.CULL_DISABLED
 		m.no_depth_test = not depth_test
 		m.render_priority = priority

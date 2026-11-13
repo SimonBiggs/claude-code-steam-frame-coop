@@ -85,8 +85,7 @@ func build(w: Dictionary) -> void:
 				World.box(root, Vector3(x1 - x0, 0.012, 0.03), Vector3(cx, 0.008, -7.0 + i * 1.75), World.mat(Color(0.85, 0.95, 0.85)), false)
 			var glass := StandardMaterial3D.new()
 			glass.albedo_color = Color(0.7, 1.0, 0.8, 0.25)
-			glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			glass.render_priority = UiKit.VR_PRIO_UNDER_UI
+			UiKit.see_through(glass)
 			glass.emission_enabled = true
 			glass.emission = Color(0.4, 0.7, 0.5)
 			glass.emission_energy_multiplier = 0.4

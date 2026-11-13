@@ -10,6 +10,7 @@ extends Node3D
 
 const Cups := preload("res://games/kart_race/cups.gd")
 const Props := preload("res://games/kart_race/track_props.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const WIDTH := 11.0  # road width
 const CURB := 0.8  # coloured curb outside the road, then the wall
@@ -795,7 +796,7 @@ func _build_boxes() -> void:
 	box_mat.emission = Color(1, 0.5, 0.2)
 	box_mat.emission_energy_multiplier = 0.6
 	box_mat.roughness = 0.3
-	box_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(box_mat)
 	box_mat.albedo_color.a = 0.75
 	var core_mat := StandardMaterial3D.new()
 	core_mat.albedo_color = Color(1, 1, 1)

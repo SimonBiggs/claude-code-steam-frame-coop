@@ -6,6 +6,8 @@ extends Node3D
 ## Only the chef's headset sees it (main puts it on the chef's view-model layer). main calls show_demo()
 ## every frame; it fades in after the chef has been idle for a moment.
 
+const UiKit := preload("res://core/ui_kit.gd")
+
 const CHOP_LOOP := 2.2
 const STACK_LOOP := 2.8
 
@@ -23,7 +25,7 @@ func _ready() -> void:
 	top_level = true
 	mat = StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(mat)
 	mat.albedo_color = Color(0.75, 0.95, 1.0, 0.5)
 	mat.no_depth_test = false
 	hand = Node3D.new()

@@ -11,6 +11,7 @@ extends Node3D
 const Defs := preload("res://games/tiny_town_tycoon/defs.gd")
 const Art := preload("res://games/tiny_town_tycoon/art.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const CYCLE := 5.0
 
 var main: Node
@@ -28,7 +29,7 @@ var shown := false  ## bots: the hand has been on screen
 func _ready() -> void:
 	mat = StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(mat)
 	mat.albedo_color = Color(0.75, 1.0, 0.95, 0.5)
 	mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	hand = Node3D.new()

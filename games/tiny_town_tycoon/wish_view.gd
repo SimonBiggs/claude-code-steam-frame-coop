@@ -10,6 +10,7 @@ const Defs := preload("res://games/tiny_town_tycoon/defs.gd")
 const Art := preload("res://games/tiny_town_tycoon/art.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Town := preload("res://games/tiny_town_tycoon/town.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const BUBBLE_R := 0.038
 const BUBBLE_UP := 0.095
@@ -35,7 +36,7 @@ func setup(p_main: Node, p_town: Town) -> void:
 	main = p_main
 	town = p_town
 	_bubble_mat = StandardMaterial3D.new()
-	_bubble_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(_bubble_mat)
 	_bubble_mat.albedo_color = Color(0.92, 0.97, 1.0, 0.42)
 	_bubble_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_bubble_mat.rim_enabled = false

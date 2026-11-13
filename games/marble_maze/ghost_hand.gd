@@ -6,6 +6,8 @@ extends Node3D
 ## The hands only show for a VR giant; the ghost marble shows on every screen (it teaches the TV players
 ## too). main calls show_demo() every frame.
 
+const UiKit := preload("res://core/ui_kit.gd")
+
 const CYCLE := 3.6
 
 var main
@@ -23,7 +25,7 @@ func _ready() -> void:
 	top_level = true
 	mat = StandardMaterial3D.new()
 	mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(mat)
 	mat.albedo_color = Color(0.75, 1.0, 0.9, 0.5)
 	for side in 2:
 		var h := Node3D.new()

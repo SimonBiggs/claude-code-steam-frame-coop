@@ -2,6 +2,8 @@ extends Node3D
 ## A bouncing, glowing arrow pointing down at "the next thing to do" for ONE player: it lives on a
 ## render layer only that player's camera (or headset) sees. Call point(pos, scale) every frame, or hide_arrow().
 
+const UiKit := preload("res://core/ui_kit.gd")
+
 var color := Color(1.0, 0.85, 0.2)
 var layer := 1
 var t := 0.0
@@ -53,7 +55,7 @@ func _ready() -> void:
 	tm.ring_segments = 4
 	ring.mesh = tm
 	ring_mat = mat.duplicate()
-	ring_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(ring_mat)
 	ring.material_override = ring_mat
 	add_child(ring)
 	_set_layers(self)

@@ -7,6 +7,7 @@ extends Node3D
 ## Everything repeated is a MultiMesh, so the whole village costs a handful of draw calls.
 
 const W := preload("res://games/giants_table/world.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const VILLAGERS := 8
 const SHEEP := 5
@@ -93,7 +94,7 @@ func _ready() -> void:
 	smoke.scale_amount_curve = curve
 	var sm := W.sphere(0.16, 6)
 	var smat := W.mat(Color(0.85, 0.82, 0.8, 0.45))
-	smat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(smat)
 	smat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	sm.material = smat
 	smoke.mesh = sm

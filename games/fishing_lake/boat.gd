@@ -153,8 +153,7 @@ func _ready() -> void:
 	mesh_bag.scale = Vector3(1.0, 1.0, 0.9)
 	var nm := StandardMaterial3D.new()
 	nm.albedo_color = Color(1, 1, 1, 0.35)
-	nm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	nm.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(nm)
 	mesh_bag.material_override = nm
 	mesh_bag.position = Vector3(0, -0.15, -1.6)
 	net_pivot.add_child(mesh_bag)

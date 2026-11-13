@@ -689,7 +689,7 @@ func _build_star() -> void:
 	sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	sm.albedo_color = Color(1.0, 0.95, 0.5)
 	sm.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
-	sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(sm)
 	qm.material = sm
 	sparkle.mesh = qm
 	sparkle.amount = 10

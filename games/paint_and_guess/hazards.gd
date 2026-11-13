@@ -179,9 +179,8 @@ func _drip_fx() -> void:
 	puddle.mesh = cm
 	var pm := StandardMaterial3D.new()
 	pm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	pm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(pm)
 	pm.albedo_color = Color(Deep.DRIP_COLOR.r, Deep.DRIP_COLOR.g, Deep.DRIP_COLOR.b, 0.6)
-	pm.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under the VR cards
 	puddle.material_override = pm
 	puddle.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	puddle.scale = Vector3(0.01, 1.0, 0.01)
@@ -208,10 +207,9 @@ func _wind_fx() -> void:
 	q.size = Vector2(0.09, 0.008)
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(m)
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	m.albedo_color = Color(0.9, 0.97, 1.0, 0.8)
-	m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under the VR cards
 	q.material = m
 	p.mesh = q
 	p.local_coords = true

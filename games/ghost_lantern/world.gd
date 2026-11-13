@@ -189,7 +189,7 @@ static func shader_mat(code: String) -> ShaderMaterial:
 	sm.shader = Shader.new()
 	sm.shader.code = code
 	if code.contains("blend_") or code.contains("ALPHA"):
-		sm.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through scenery (moonbeams, cobwebs, flames, bats) draws under VR cards
+		UiKit.see_through(sm)  # see-through scenery (moonbeams, cobwebs, flames, bats) draws under VR cards
 	return sm
 
 

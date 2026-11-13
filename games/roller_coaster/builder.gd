@@ -15,6 +15,7 @@ extends Node3D
 const MeshKit := preload("res://core/mesh_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
 const Track := preload("res://games/roller_coaster/track.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const WS := 18.0  # the giant: 1 real metre = 18 park metres
 const TABLE_H := 0.75  # real table height
@@ -178,7 +179,7 @@ func _build_ghosts() -> void:
 	vs.radial_segments = 16
 	vs.rings = 8
 	vignette.mesh = vs
-	var sh := Shader.new()
+	var sh := Shader.new()  # see-through-ok: the vignette round the head is an overlay meant to tint the whole view (priority 100)
 	sh.code = """shader_type spatial;
 render_mode unshaded, cull_front, depth_test_disabled, blend_mix;
 uniform float strength = 0.0;
@@ -198,7 +199,7 @@ void fragment() { ALBEDO = vec3(0.0); ALPHA = strength * smoothstep(0.75, 0.35, 
 func _glow_mat(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(m)
 	m.albedo_color = c
 	return m
 

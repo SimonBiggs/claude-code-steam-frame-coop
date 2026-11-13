@@ -26,16 +26,14 @@ func _ready() -> void:
 	rings = WarnRings.new()
 	add_child(rings)
 	_smoke_mat = StandardMaterial3D.new()
-	_smoke_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(_smoke_mat)
 	_smoke_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	_smoke_mat.albedo_color = Color(0.82, 0.82, 0.86, 0.55)
-	_smoke_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through smoke never washes out a VR card
 	_spill_mat = StandardMaterial3D.new()
-	_spill_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(_spill_mat)
 	_spill_mat.albedo_color = Color(0.45, 0.75, 1.0, 0.7)
 	_spill_mat.metallic_specular = 1.0
 	_spill_mat.roughness = 0.05
-	_spill_mat.render_priority = UiKit.VR_PRIO_UNDER_UI
 
 
 ## Host: a new round's events.

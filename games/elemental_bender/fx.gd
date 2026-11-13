@@ -9,6 +9,7 @@ extends Node3D
 const E := preload("res://games/elemental_bender/elem.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 var capacity := 640
 var mm: MultiMesh
@@ -43,7 +44,7 @@ func _ready() -> void:
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.vertex_color_use_as_albedo = true
 		m.vertex_color_is_srgb = true
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		s.material = m
 		return s)
 	mm.instance_count = capacity

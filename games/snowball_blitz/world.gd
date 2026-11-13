@@ -224,7 +224,7 @@ static func _chimney_smoke() -> CPUParticles3D:
 	q.rings = 3
 	var qm := StandardMaterial3D.new()
 	qm.albedo_color = Color(0.85, 0.85, 0.9, 0.35)
-	qm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(qm)
 	qm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	q.material = qm
 	smoke.mesh = q
@@ -334,7 +334,7 @@ static func _add_snowfall(main: Node3D, vr: bool) -> void:
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
 	m.albedo_color = Color(1, 1, 1, 0.9)
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(m)
 	q.material = m
 	p.mesh = q
 	p.position = Vector3(0, 14, 0)

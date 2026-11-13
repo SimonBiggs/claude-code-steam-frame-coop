@@ -12,6 +12,7 @@ const Data := preload("res://games/mech_titans/data.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const CockpitScript := preload("res://games/mech_titans/cockpit.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const HIP_Y := 4.3
 const HIP_X := 1.15
@@ -398,7 +399,7 @@ func _fist_mesh() -> ArrayMesh:
 func _additive(c: Color) -> StandardMaterial3D:
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(m)
 	m.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	m.albedo_color = c
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED

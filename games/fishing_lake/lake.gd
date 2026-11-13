@@ -242,7 +242,7 @@ func _build_water() -> void:
 	water_mat.shader.code = WATER_SHADER
 	water_mat.set_shader_parameter("water_alpha", WATER_ALPHA)
 	water_mat.set_shader_parameter("sky_mix", WATER_SKY_MIX)
-	water_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # under VR cards, or the water is blended over them (core/vr_view_check.gd)
+	UiKit.see_through(water_mat)  # under VR cards, or the water is blended over them (core/vr_view_check.gd)
 	w.material_override = water_mat
 	w.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	w.position = LAKE_C
@@ -485,8 +485,7 @@ func _build_landmarks() -> void:
 	beam.mesh = main.cyl_mesh(0.25, 2.2, 16.0, 10)
 	beam_mat = StandardMaterial3D.new()
 	beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	beam_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(beam_mat)
 	beam_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	beam_mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 	beam_mat.albedo_color = Color(1.0, 0.9, 0.55, 0.0)
@@ -748,8 +747,7 @@ func _build_tank() -> void:
 	glass.mesh = main.box_mesh(Vector3(0.62, 0.4, 0.42))
 	var gm := StandardMaterial3D.new()
 	gm.albedo_color = Color(0.5, 0.85, 1.0, 0.3)
-	gm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	gm.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(gm)
 	gm.roughness = 0.1
 	gm.emission_enabled = true
 	gm.emission = Color(0.2, 0.45, 0.6)
@@ -809,8 +807,7 @@ func update_tank(catches: Array, delta: float) -> void:
 func _build_weather() -> void:
 	rain_mat = StandardMaterial3D.new()
 	rain_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	rain_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	rain_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(rain_mat)
 	rain_mat.albedo_color = Color(0.8, 0.88, 1.0, 0.0)
 	var drop: Mesh = main.box_mesh(Vector3(0.012, 0.32, 0.012))
 	rain_far = _rain_emitter(drop, 260, Vector3(24.0, 0.5, 24.0), 1.15)
@@ -974,8 +971,7 @@ func _build_markers() -> void:
 	map_beam.mesh = main.cyl_mesh(0.18, 0.3, 12.0, 8)
 	map_beam_mat = StandardMaterial3D.new()
 	map_beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	map_beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	map_beam_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(map_beam_mat)
 	map_beam_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 	map_beam_mat.albedo_color = Color(1.0, 0.3, 0.2, 0.45)
 	map_beam.material_override = map_beam_mat
@@ -1181,8 +1177,7 @@ func set_spots(spots: Array) -> void:
 				disc.mesh = main.cyl_mesh(r, r, 0.01, 24)
 				var dm := StandardMaterial3D.new()
 				dm.albedo_color = Color(0.02, 0.08, 0.2, 0.55)
-				dm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-				dm.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+				UiKit.see_through(dm)
 				dm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 				disc.material_override = dm
 				disc.position.y = 0.015
@@ -1215,8 +1210,7 @@ func set_spots(spots: Array) -> void:
 				sand.mesh = main.cyl_mesh(r, r, 0.01, 24)
 				var sm := StandardMaterial3D.new()
 				sm.albedo_color = Color(0.95, 0.88, 0.6, 0.45)
-				sm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-				sm.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+				UiKit.see_through(sm)
 				sm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 				sand.material_override = sm
 				sand.position.y = 0.012
@@ -1242,8 +1236,7 @@ func set_wish(kind: int, pos: Vector3) -> void:
 		beam.mesh = main.cyl_mesh(0.12, 0.5, 2.2, 10)
 		wish_beam_mat = StandardMaterial3D.new()
 		wish_beam_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		wish_beam_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		wish_beam_mat.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+		UiKit.see_through(wish_beam_mat)
 		wish_beam_mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 		beam.material_override = wish_beam_mat
 		beam.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
@@ -1474,8 +1467,7 @@ func _build_pond() -> void:
 	inner.mesh = disc
 	var wm := StandardMaterial3D.new()
 	wm.albedo_color = Color(0.35, 0.75, 0.9, 0.45)
-	wm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-	wm.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards (core/vr_view_check.gd "washed out")
+	UiKit.see_through(wm)
 	wm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	inner.material_override = wm
 	inner.position = Vector3(0, 0.025, 0)  # the fish swim half through it (the lake's own water hides deeper fish)

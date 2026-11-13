@@ -8,6 +8,7 @@ const ResCache := preload("res://core/res_cache.gd")
 
 const SNOW := Color(0.97, 0.98, 1.0)
 const Contrast := preload("res://core/contrast.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 ## A frosty blue line round every snowball (Contrast.outline): white balls on the white garden snow.
 const BALL_OUTLINE := Color(0.4, 0.5, 0.7)
 const BALL_OUTLINE_WIDTH := 0.1  # in ball units (the ball mesh is a unit sphere scaled by its radius)
@@ -94,7 +95,7 @@ static func snow_material() -> Material:
 static func ghost_material() -> StandardMaterial3D:
 	return ResCache.get_or_make("snowman_ghost_v1", func() -> Resource:
 		var m := StandardMaterial3D.new()
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.albedo_color = Color(0.6, 0.9, 1.0, 0.35)
 		m.cull_mode = BaseMaterial3D.CULL_BACK

@@ -160,10 +160,9 @@ func _wind_fx() -> void:
 	q.size = Vector2(0.05, 0.5)
 	var m := StandardMaterial3D.new()
 	m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(m)
 	m.albedo_color = Color(0.9, 0.97, 1.0, 0.7)
 	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
-	m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under the VR cards
 	q.material = m
 	p.mesh = q
 	p.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

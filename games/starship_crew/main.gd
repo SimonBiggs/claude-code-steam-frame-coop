@@ -1002,7 +1002,7 @@ func toy_fx(k: String) -> void:
 		sm.radial_segments = 10
 		sm.rings = 5
 		var m := StandardMaterial3D.new()
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(m)
 		m.albedo_color = Color(0.7, 0.9, 1.0, 0.45)
 		m.metallic_specular = 1.0
 		sm.material = m
@@ -1569,8 +1569,7 @@ func _glow_mat(col: Color, alpha: float) -> StandardMaterial3D:
 	m.albedo_color = Color(col.r, col.g, col.b, alpha)
 	m.cull_mode = BaseMaterial3D.CULL_DISABLED
 	if alpha < 1.0:
-		m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		m.render_priority = UiKit.VR_PRIO_UNDER_UI  # see-through: under VR cards
+		UiKit.see_through(m)
 	return m
 
 

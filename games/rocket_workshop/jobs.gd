@@ -7,6 +7,7 @@ extends Node3D
 
 const P := preload("res://games/rocket_workshop/puzzles.gd")
 const Looks := preload("res://games/rocket_workshop/looks.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 var main
 var canister: Node3D
@@ -65,7 +66,7 @@ func _ready() -> void:
 	beacon = MeshInstance3D.new()
 	beacon.mesh = main.cyl_mesh(0.35, 0.35, 6.0, 12)
 	var bm: StandardMaterial3D = main.make_material(Color(1.0, 0.7, 0.2, 0.25), 1.0)
-	bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(bm)
 	bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	bm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	beacon.material_override = bm
@@ -142,7 +143,7 @@ func _ready() -> void:
 
 func _beam_material(color: Color) -> StandardMaterial3D:
 	var bm: StandardMaterial3D = main.make_material(color, 1.0)
-	bm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(bm)
 	bm.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 	bm.cull_mode = BaseMaterial3D.CULL_DISABLED
 	return bm

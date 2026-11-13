@@ -13,6 +13,7 @@ extends Node3D
 const Data := preload("res://games/mech_titans/data.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const CELL := 26.0  ## grid pitch: 10 m road + 16 m block
 const ROAD := 10.0
@@ -555,7 +556,7 @@ func _build_shelters() -> void:
 		pillar.mesh = cm
 		var mat := StandardMaterial3D.new()
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(mat)
 		mat.blend_mode = BaseMaterial3D.BLEND_MODE_ADD
 		mat.albedo_color = Color(0.25, 0.9, 0.4, 0.22)
 		mat.cull_mode = BaseMaterial3D.CULL_DISABLED

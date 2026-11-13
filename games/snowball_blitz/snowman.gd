@@ -9,6 +9,7 @@ extends Node3D
 const Bosses := preload("res://games/snowball_blitz/bosses.gd")
 const Contrast := preload("res://core/contrast.gd")
 const Looks := preload("res://games/snowball_blitz/looks.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 const KINDS := {
 	"snowman": {"hp": 3.0, "speed": 1.8, "scale": 1.0, "wall_dps": 6.0, "throw_cd": 3.8, "ball_dmg": 8.0, "ball_r": 0.14, "points": 100, "cocoa": 0.08},
 	"sled": {"hp": 2.0, "speed": 5.0, "scale": 0.8, "crash": 24.0, "points": 150, "cocoa": 0.12},
@@ -589,7 +590,7 @@ func tell_glow(secs: float) -> void:
 		tell_node.mesh = sm
 		var mat := StandardMaterial3D.new()
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+		UiKit.see_through(mat)
 		mat.albedo_color = Color(Bosses.info(kind).color, 0.35)
 		mat.emission_enabled = true
 		mat.emission = Bosses.info(kind).color

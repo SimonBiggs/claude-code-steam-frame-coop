@@ -238,7 +238,7 @@ func _ready() -> void:
 	disc.height = 0.02
 	revive_fill.mesh = disc
 	var fm: StandardMaterial3D = main.make_material(color, 1.0)
-	fm.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	UiKit.see_through(fm)
 	fm.albedo_color.a = 0.35
 	revive_fill.material_override = fm
 	revive_fill.position.y = 0.03

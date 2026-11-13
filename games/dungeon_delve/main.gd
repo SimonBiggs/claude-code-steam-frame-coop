@@ -886,7 +886,7 @@ func _build_blink() -> void:
 	sm.flip_faces = true
 	blink_mat = StandardMaterial3D.new()
 	blink_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
-	blink_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	blink_mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA  # see-through-ok: the blink sphere round the head covers everything, cards too
 	blink_mat.render_priority = 100
 	blink_mat.albedo_color = Color(0, 0, 0, 0)
 	var mi := MeshInstance3D.new()
