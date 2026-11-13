@@ -5,13 +5,17 @@ extends RefCounted
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 ## (Toys also use "boat" from Treasure Dig, "starfish" from Cannon Cove and "fish" from Fishing Lake.)
 
-const NAMES: Array[String] = ["mamaduck", "duckling", "sponge", "bathtub", "beachball", "soapbar", "whale"]
+const NAMES: Array[String] = ["mamaduck", "duckling", "sponge", "bathtub", "beachball", "soapbar", "whale", "wally", "shower",
+	"ducktrain", "bigplug", "duckmagnet", "goldtap"]
 
 const YELLOW := Color(1.0, 0.86, 0.15)
 const ORANGE := Color(1.0, 0.5, 0.1)
 const PINK := Color(1.0, 0.6, 0.8)
 const BLUE := Color(0.35, 0.65, 1.0)
 const WHITE := Color(0.98, 0.98, 1.0)
+const PURPLE := Color(0.62, 0.32, 0.9)  # == deep.gd WHALE_COLOR
+const CHROME := Color(0.8, 0.85, 0.92)
+const GOLD := Color(1.0, 0.75, 0.1)
 
 
 static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
@@ -60,15 +64,54 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 			for k in 4:
 				var f := fmod(t * 0.5 + k * 0.25, 1.0)
 				pic._circle(0.55 + sin(f * 6.0 + k) * 0.1, 0.48 - f * 0.4, 0.04 + f * 0.05, Color(0.85, 0.92, 1.0, 1.0 - f * 0.7))
-		"whale":  # a blue squirty bath whale with a spout
-			pic._poly(_ellipse(0.48, 0.6 + bob, 0.32, 0.2, 18), BLUE)
-			pic._poly(_ellipse(0.5, 0.68 + bob, 0.24, 0.1, 14), Color(0.75, 0.88, 1.0))
-			pic._poly([[0.78, 0.58 + bob], [0.94, 0.44 + bob], [0.92, 0.66 + bob]], BLUE)  # tail
+		"whale", "wally":  # a blue squirty bath whale with a spout (WALLY: the purple one who pops up in the bath)
+			var wc := PURPLE if kind == "wally" else BLUE
+			pic._poly(_ellipse(0.48, 0.6 + bob, 0.32, 0.2, 18), wc)
+			pic._poly(_ellipse(0.5, 0.68 + bob, 0.24, 0.1, 14), wc.lerp(WHITE, 0.6))
+			pic._poly([[0.78, 0.58 + bob], [0.94, 0.44 + bob], [0.92, 0.66 + bob]], wc)  # tail
 			pic._eye(0.3, 0.56 + bob, 0.04)
 			var sp := 0.08 + absf(sin(t * 3.0)) * 0.06
 			for k in 3:
 				pic._circle(0.42 + (k - 1) * 0.06, 0.38 - sp - absf(k - 1) * 0.03 + bob, 0.035, Color(0.6, 0.85, 1.0))
 			pic._poly([[0.41, 0.42 + bob], [0.43, 0.42 + bob], [0.43, 0.32 - sp + bob], [0.41, 0.32 - sp + bob]], Color(0.6, 0.85, 1.0))
+
+		"shower":  # a shower head spraying drops
+			pic._poly([[0.2, 0.12], [0.5, 0.12], [0.5, 0.17], [0.25, 0.17], [0.25, 0.3], [0.2, 0.3]], CHROME)
+			pic._poly([[0.38, 0.28], [0.62, 0.28], [0.7, 0.36], [0.3, 0.36]], CHROME)
+			pic._poly([[0.45, 0.17], [0.5, 0.17], [0.5, 0.28], [0.45, 0.28]], CHROME)
+			for k in 9:
+				var f := fmod(t * 1.5 + k * 0.37, 1.0)
+				pic._circle(0.33 + (k % 5) * 0.085 + f * 0.04 * (k % 3 - 1), 0.42 + f * 0.45, 0.025, Color(0.55, 0.82, 1.0, 1.0 - f * 0.5))
+		"ducktrain":  # a little boat towing a long line of ducks
+			_waves(pic, 0.78, t)
+			for k in 4:
+				_duck(pic, 0.36 + k * 0.17, 0.66 + bob + sin(t * 4.0 + k) * 0.015, 0.4, YELLOW, 0.0)
+			pic._poly([[0.04, 0.62 + bob], [0.3, 0.62 + bob], [0.26, 0.74 + bob], [0.08, 0.74 + bob]], Color(0.95, 0.3, 0.25))
+			pic._poly([[0.12, 0.52 + bob], [0.22, 0.52 + bob], [0.22, 0.62 + bob], [0.12, 0.62 + bob]], WHITE)
+		"bigplug":  # a huge swirly plug-hole
+			for k in 5:
+				var rr := 0.36 - k * 0.065
+				pic._poly(_ellipse(0.5, 0.55, rr, rr * 0.6, 22), BLUE.darkened(0.1 * k) if k < 4 else Color(0.15, 0.2, 0.3))
+			for k in 3:
+				var a := t * 3.0 + TAU * k / 3.0
+				pic._circle(0.5 + cos(a) * 0.22, 0.55 + sin(a) * 0.13, 0.04, WHITE)
+			pic._poly([[0.42, 0.08 + bob], [0.58, 0.08 + bob], [0.58, 0.2 + bob], [0.66, 0.2 + bob], [0.5, 0.32 + bob], [0.34, 0.2 + bob], [0.42, 0.2 + bob]], Color(1.0, 0.85, 0.2))
+		"duckmagnet":  # a red horseshoe magnet pulling a duck
+			pic._poly([[0.1, 0.25], [0.22, 0.25], [0.22, 0.6], [0.4, 0.6], [0.4, 0.25], [0.52, 0.25], [0.52, 0.72], [0.1, 0.72]], Color(0.95, 0.25, 0.25))
+			pic._poly([[0.1, 0.2], [0.22, 0.2], [0.22, 0.27], [0.1, 0.27]], CHROME)
+			pic._poly([[0.4, 0.2], [0.52, 0.2], [0.52, 0.27], [0.4, 0.27]], CHROME)
+			var pull := sin(t * 3.0) * 0.04
+			_duck(pic, 0.72 + pull, 0.36 + bob, 0.5, YELLOW, 0.0)
+			for k in 3:
+				pic._circle(0.57 + k * 0.035 + pull * 0.5, 0.3, 0.012, Color(1, 1, 1, 0.8))
+		"goldtap":  # a golden tap with a golden duck dropping out
+			pic._poly([[0.12, 0.22], [0.58, 0.22], [0.58, 0.34], [0.24, 0.34], [0.24, 0.42], [0.12, 0.42]], GOLD)
+			pic._poly([[0.48, 0.34], [0.6, 0.34], [0.6, 0.42], [0.48, 0.42]], GOLD.darkened(0.15))
+			pic._circle(0.2, 0.16, 0.07, Color(0.95, 0.3, 0.25))
+			var drop := fmod(t * 0.8, 1.0)
+			_duck(pic, 0.58, 0.55 + drop * 0.25, 0.45, GOLD, 0.0)
+			for k in 3:
+				pic._circle(0.3 + k * 0.25, 0.85 - absf(sin(t * 2.0 + k)) * 0.05, 0.025, Color(1.0, 0.95, 0.6))
 
 
 ## A rubber duck facing left: body, head, beak, eye, wing. s = size.
