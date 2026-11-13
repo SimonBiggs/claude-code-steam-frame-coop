@@ -6,6 +6,7 @@ const Party := preload("res://core/party.gd")
 const Looks := preload("res://games/tower_stack/looks.gd")
 const TowerGen := preload("res://games/tower_stack/towergen.gd")
 const Weather := preload("res://games/tower_stack/weather.gd")
+const Rollers := preload("res://games/tower_stack/rollers.gd")
 
 
 static func key_colors() -> Dictionary:
@@ -28,4 +29,14 @@ static func groups() -> Array:
 			Looks.SPECIAL_COLORS)), Contrast.merge(Contrast.named("balloon", Looks.BALLOON_COLORS), {"stone": Looks.STONE})),
 			"bgs": Contrast.sky("day")},
 		{"keys": Contrast.named("warning", Weather.COLORS), "bgs": backgrounds()},
+		# Rolo's ball lanes on the grass, and his ink-outlined seasonal balls rolling over it (rollers.gd).
+		{"keys": {"ball lane": Rollers.COLOR}, "bgs": backgrounds()},
+		{"keys": _balls(), "bgs": backgrounds()},
 	]
+
+
+static func _balls() -> Dictionary:
+	var out := {}
+	for season in Rollers.BALLS:
+		out["%s ball" % season] = {"color": Rollers.BALLS[season][1], "rim": Contrast.OUTLINE}
+	return out

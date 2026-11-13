@@ -9,9 +9,13 @@ extends Node
 ## comes after the first tower. On the pick orbs the first TV player WALKS into one (the middle one for the mode,
 ## the first one for the next building), the fake VR giant TOUCHES one; the bot checks the team's choice is the job
 ## built next, and a weather warning reaches every machine (its ring on the TV too).
+## Third pass: Rolo rolls a ball early in every job (try_rolls): its lane is told on every machine before the ball
+## rolls, nobody is ever bowled over by a ball whose lane showed too briefly, the green shows Wren's neighbours, and
+## every machine dresses for the host's season.
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
+const WarnRings := preload("res://core/warn_rings.gd")
 
 var kit: BotKit
 var main: Node
@@ -31,6 +35,8 @@ var job_seen := -1
 var cheers_done := 0  # towers whose CHEER ended during play (the round did not run out first): each opens a build pick
 var cheer_was := -1.0
 var cheer_round := 0
+var lanes_seen := 0  # most of Rolo's lane tells seen at once (every machine)
+var balls_seen := 0  # most balls rolling at once
 
 
 func _ready() -> void:
@@ -47,6 +53,7 @@ func _ready() -> void:
 	main.set("round_time", 95.0 if lone else 50.0)
 	main.set("daily_ok", false)
 	main.set("try_open", 7)  # towergen OPEN_ALL: special blocks from job 2 on
+	main.set("try_rolls", true)  # TS_TRY=rollers: Rolo rolls a ball early in every job
 	add_child(main)
 	kit.main = main
 	kit.watch_state(main.net)  # phases counted as they happen (kit.seen): a 0.25 s poll misses quick ones under load
@@ -65,13 +72,17 @@ func _ready() -> void:
 		kit.at(t0 + 7.2, "resumed?", func() -> void:
 			kit.assert_true(not get_tree().paused, "Start again resumes everyone")
 			kit.allow_pause = false)
-	kit.drop_in_out(main.party, t0 + 9.0, 3.0, func(slot: int) -> bool:
-		return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot))
+	if not OS.has_environment("BOT_LATE"):  # (a late joiner's drop-in would still sit there at the host's seat count)
+		kit.drop_in_out(main.party, t0 + 9.0, 3.0, func(slot: int) -> bool:
+			return main.avatars.has(slot) and main.huds.has(slot) and main.cams.has(slot))
 	if host:
 		kit.at(64.0, "host checks", _checks)
 		kit.at(68.0, "finish", kit.finish)
 	else:
-		kit.at(61.0 if client else (110.0 if lone else 58.0), "finish", func() -> void:
+		var end := 61.0 if client else (110.0 if lone else 58.0)
+		if OS.has_environment("BOT_LATE"):  # a machine joining a game already running leaves before the host does
+			end = maxf(t0 + 14.0, end - float(OS.get_environment("BOT_LATE")) - 2.0)
+		kit.at(end, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	if not OS.has_environment("DUO_JOIN"):
@@ -115,6 +126,8 @@ func _physics_process(delta: float) -> void:
 		ghosts_seen = maxi(ghosts_seen, main.blocks.size())
 	orbs_seen = maxi(orbs_seen, main.picks.orbs.orbs.size())
 	rings_seen = maxi(rings_seen, main.weather.rings.count())
+	lanes_seen = maxi(lanes_seen, main.rollers.rings.count())
+	balls_seen = maxi(balls_seen, main.rollers.balls().size())
 	_watch_picks()
 	var slots: Array[int] = main.party.local_slots()
 	jump_t -= delta
@@ -183,7 +196,10 @@ func _steer(slot: int, climber: bool, _delta: float) -> void:
 	var a: Node3D = main.avatars[slot]
 	max_climb = maxf(max_climb, a.position.y)
 	var goal := Vector3.ZERO
-	if climber:
+	var out := _lane_escape(a.position)
+	if out != Vector3.INF:  # in one of Rolo's told lanes: step out of it first (like a child who sees the pink lane)
+		goal = out
+	elif climber:
 		goal = Vector3(0.0, 0.0, 0.0)
 		if Vector2(a.position.x, a.position.z).length() < 2.2 and jump_t <= 0.0:
 			jump_t = 0.45
@@ -219,6 +235,22 @@ func _steer(slot: int, climber: bool, _delta: float) -> void:
 		var r := Vector3(-f.z, 0.0, f.x)
 		v = Vector2(d.dot(r), -d.dot(f))
 	kit.slot_stick(main.party, slot, "left", v)
+
+
+## Standing in a told lane (or a rolling ball's)? The nearest spot just outside it (Vector3.INF: not in one).
+func _lane_escape(p: Vector3) -> Vector3:
+	for t in main.rollers.rings.tells():
+		if String(t.kind) != "line" or not WarnRings.inside("line", t.pos, t.dir, t.size, p, 0.35):
+			continue
+		var fwd := Vector3(t.dir.x, 0.0, t.dir.z).normalized()
+		var side := Vector3(-fwd.z, 0.0, fwd.x)
+		var off: float = (p - (t.pos as Vector3)).dot(side)
+		var sgn := 1.0 if off >= 0.0 else -1.0
+		var dest: Vector3 = Vector3(p.x, 0.0, p.z) + side * sgn * ((t.size as Vector2).y * 0.5 + 0.7 - absf(off))
+		if Vector2(dest.x, dest.z).length() > main.ARENA - 0.3:  # the park's edge: the other side
+			dest = Vector3(p.x, 0.0, p.z) - side * sgn * ((t.size as Vector2).y * 0.5 + 0.7 + absf(off))
+		return dest
+	return Vector3.INF
 
 
 ## Where to push a block next: straight to the pad, or round the tower stage if it is in the way.
@@ -340,10 +372,21 @@ func _checks() -> void:
 	kit.assert_eq(main.town.entries.size(), mini((main.net.state_get("town", []) as Array).size(), main.G.town_size()), "%s: the town shows every saved tower" % mode)
 	kit.assert_eq(main.districts.get_child_count(), main.Districts.reached(int(main.net.state_get("made", 0))), "%s: the town shows its districts" % mode)
 	kit.assert_true(orbs_seen >= 3, "%s: the pick orbs showed (%d)" % [mode, orbs_seen])
-	kit.assert_true(rings_seen > 0, "%s: a weather warning ring showed" % mode)
+	if not OS.has_environment("BOT_LATE"):  # (the host's forced quake at 14 s can come before a late joiner is in)
+		kit.assert_true(rings_seen > 0, "%s: a weather warning ring showed" % mode)
 	for id in main.blocks:
 		kit.assert_true(main.bkind.has(id), "%s: block %d knows its kind" % [mode, int(id)])
 		break
+	# Third pass: Rolo's told balls, the neighbours' green, the season.
+	kit.assert_true(kit.seen_values("rolls").size() >= 1, "%s: Rolo rolled a ball (%s)" % [mode, str(kit.seen_values("rolls"))])
+	kit.assert_true(lanes_seen > 0, "%s: a ball's lane was told on the grass" % mode)
+	kit.assert_true(balls_seen > 0, "%s: a ball rolled" % mode)
+	kit.assert_eq(main.unwarned_hits, 0, "%s: nobody was bowled over by a ball that wasn't told (%d bowled over)" % [mode, main.roll_hits])
+	kit.info("%s: %d bowled over by Rolo's balls, season %s" % [mode, main.roll_hits, main.season])
+	kit.assert_true(main.roll_hits <= 1, "%s: builders who step out of a told lane are never bowled over (%d)" % [mode, main.roll_hits])
+	kit.assert_true(main.season != "" and main.season == String(main.net.state_get("season", "")) and main.season_node.season == main.season, "%s: dressed for the host's season (%s)" % [mode, main.season])
+	kit.assert_eq(main.green.folk_count(), mini(int(main.net.state_get("made", 0)), main.GreenScript.SHOW), "%s: the green shows Wren's newest neighbours" % mode)
+	kit.assert_eq(main.green.piece_count(), main.GreenScript.grown(int(main.net.state_get("made", 0))), "%s: the green has grown its pieces" % mode)
 	if mode == "client":
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
 		kit.assert_true(ghosts_seen > 0, "client: ghost blocks mirrored from the host")

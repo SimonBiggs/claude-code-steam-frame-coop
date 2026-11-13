@@ -50,10 +50,14 @@ const Districts := preload("res://games/tower_stack/districts.gd")
 const SpecialsScript := preload("res://games/tower_stack/specials.gd")
 const WeatherScript := preload("res://games/tower_stack/weather.gd")
 const PicksScript := preload("res://games/tower_stack/picks.gd")
+const RollersScript := preload("res://games/tower_stack/rollers.gd")
+const GreenScript := preload("res://games/tower_stack/green.gd")
+const SeasonScript := preload("res://games/tower_stack/season.gd")
 const BUILD_PICS := {"lighthouse": "lighthouse", "castle": "castle", "clock": "clocktower", "windmill": "windmill", "nest": "birdnest"}
 const SPECIAL_LINES := {4: ["Bouncy block!", "bouncyblock"], 5: ["Sticky honey block!", "honeyblock"], 6: ["Balloon block!", "balloonblock"]}
 const WREN_COLOR := Color(0.62, 0.42, 0.25)
 const TOWN_CHEERS := {1: "Our town!", 5: "Five towers!", 10: "Ten towers!", 20: "A big town!", 30: "A city!"}
+const STORY_GAP := 2.6  # seconds between queued story cards (tell())
 const CHEER := 3.5  # seconds a finished tower stands with its roof before it flies to the town
 const SNAP_R := 0.22  # a gentle place this close to a plan spot of the same block snaps onto it
 
@@ -203,6 +207,16 @@ var ground_id := -1  # the block a local TV player last stood on
 var round_events := 0
 var round_specials := 0
 var round_builds: Array = []  # buildings the team chose this round
+# Third pass: Rolo's told rolling balls (rollers.gd), Wren's neighbours on the village green (green.gd), seasons (season.gd).
+var rollers: Node3D  # every machine draws the lanes and balls; the host decides when (its job's plan)
+var green: Node3D
+var season_node: Node3D
+var season := ""  # the host's pick, shared as the "season" state
+var try_rolls := false  # TS_TRY=rollers (and bots): a roll early in every job
+var round_rolls := 0
+var roll_hits := 0  # TV builders bowled over (this machine's local players)
+var unwarned_hits := 0  # hits by a ball whose lane showed for less than Rollers.MIN_WARN (must stay 0)
+var story_free_t := 0.0  # clock time when the next queued story card may show (tell())
 
 
 func _ready() -> void:
@@ -262,7 +276,8 @@ func _log_round(end: String) -> void:
 		"crew": party.player_count(), "vr": vr_rig != null, "secs": int(session_t), "seed": session_seed,
 		"built": int(save.data.built), "town": (save.data.town as Array).size(), "mode": game_mode,
 		"districts": Districts.reached(int(save.data.built)), "events": round_events, "specials": round_specials,
-		"glued": specials.glues_made if specials != null else 0, "chose": round_builds})
+		"glued": specials.glues_made if specials != null else 0, "chose": round_builds, "season": season,
+		"rolls": round_rolls, "bowled": roll_hits, "green": GreenScript.grown(int(save.data.built))})
 	save.save_now()
 
 
@@ -288,6 +303,8 @@ func _setup(mode: String) -> void:
 			try_open = G.OPEN_ALL
 		"weather":
 			try_bonus = 3
+		"rollers":
+			try_rolls = true
 	_build_world()
 	if mode != "host" or flat_host:  # every machine with a screen of its own (a flat host too)
 		split = SplitView.new()
@@ -308,6 +325,7 @@ func _setup(mode: String) -> void:
 		net.state_set("best", float(save.data["best"]))
 		net.state_set("town", (save.data.town as Array).duplicate(true))
 		net.state_set("made", int(save.data.built))
+		net.state_set("season", SeasonScript.pick())
 		game_mode = String(save.data.get("mode", "brave"))
 		if net.forced_mode("TS_MODE") != "" and G.MODE_TUNE.has(net.forced_mode("TS_MODE")):
 			game_mode = net.forced_mode("TS_MODE")
@@ -394,6 +412,12 @@ func _build_world() -> void:
 	picks = PicksScript.new()
 	picks.main = self
 	add_child(picks)
+	rollers = RollersScript.new()
+	add_child(rollers)
+	green = GreenScript.new()
+	add_child(green)
+	season_node = SeasonScript.new()
+	add_child(season_node)
 	if net.mode != "client":
 		specials = SpecialsScript.new()
 		add_child(specials)
@@ -459,7 +483,7 @@ func _apply_site(s: Dictionary) -> void:
 	var windy := float(s.wind) > 0.0 or not (s.get("events", []) as Array).is_empty()
 	sock.visible = windy
 	sock.rotation.y = -float(s.wind_dir)
-	var cols: Array = G.GROUND_COLORS.get(String(s.ground), G.GROUND_COLORS["meadow"])
+	var cols: Array = G.GROUND_COLORS.get(SeasonScript.ground(season, String(s.ground)), G.GROUND_COLORS["meadow"])
 	if ground_mi != null:
 		ground_mi.material_override = MeshKit.material(cols[0])
 		path_mi.material_override = MeshKit.material(cols[1])
@@ -844,6 +868,12 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			town.set_entries(value if value is Array else [])
 		"made":
 			districts.set_made(int(value))
+			green.set_made(int(value))
+		"season":
+			season = String(value)
+			season_node.dress(season)
+			if not site.is_empty():
+				_apply_site(site)
 		"orbs":
 			if net.mode == "client" and value is Array and (value as Array).size() >= 2:
 				picks.show_row(String(value[0]), value[1] if value[1] is Array else [])
@@ -889,6 +919,9 @@ func _start_round() -> void:
 	round_events = 0
 	round_specials = 0
 	round_builds = []
+	round_rolls = 0
+	rollers.clear()
+	rollers.reset([])
 	picks.history = []
 	if specials != null:
 		specials.clear()
@@ -944,7 +977,7 @@ func _begin_build_pick(choices: Array) -> void:
 			"color": Looks.COLORS[int(s.palette[0])]})
 		jobs.append(G.job_of(s))
 	picks.begin("build", entries, jobs, _on_picked)
-	story("What next?", "wren", WREN_COLOR)
+	tell("What next?", "wren", WREN_COLOR)
 
 
 ## Host: the team chose (or the middle orb was taken for them).
@@ -987,10 +1020,11 @@ func _next_job(chosen: Dictionary = {}) -> void:
 	fill = 0
 	net.state_set("fill", 0)
 	net.state_set("job", G.job_of(s))  # every machine rebuilds it (_apply_site)
+	rollers.reset(RollersScript.plan(seed_value, int(s.level), game_mode, s.events, try_rolls))
 	round_specials += int(s.specials)
-	print("Tower Stack job %d: %s level %d %s, %d blocks (%d special) to %.2f m, wind %.2f, sway %.3f, events %s, seed %d%s" % [
+	print("Tower Stack job %d: %s level %d %s, %d blocks (%d special) to %.2f m, wind %.2f, sway %.3f, events %s, rolls %s, seed %d%s" % [
 		job_n, s.building, int(s.level), game_mode, (s.plan as Array).size(), int(s.specials), float(s.top), float(s.wind),
-		float(s.sway), str(s.events), seed_value, " (TODAY'S TOWER)" if daily else ""])
+		float(s.sway), str(s.events), str(rollers.rolls), seed_value, " (TODAY'S TOWER)" if daily else ""])
 	var beats: Array = []
 	if job_n == 1 and int(net.state_get("round", 1)) == 1:
 		beats.append(["Hi! I'm Wren!" if built == 0 else "Let's build!", "wren", WREN_COLOR])
@@ -1007,11 +1041,23 @@ func _next_job(chosen: Dictionary = {}) -> void:
 		if SPECIAL_LINES.has(k) and not shown.has(k):
 			shown[k] = true
 			beats.append([SPECIAL_LINES[k][0], SPECIAL_LINES[k][1], Looks.block_color(0, k)])
-	for i in beats.size():
-		var b: Array = beats[i]
-		get_tree().create_timer(0.3 + 2.6 * i).timeout.connect(func() -> void:
-			if is_inside_tree():
-				story(b[0], b[1], b[2]))
+	if not rollers.rolls.is_empty() and (job_n == 1 or try_rolls):
+		beats.append(["Rolo rolls balls!", "hedgehog", RollersScript.COLOR])
+	for b in beats:
+		tell(b[0], b[1], b[2])
+
+
+## A story beat in turn: cards never knock each other off (a district's card used to vanish under "What next?").
+## Hazard tells (weather, Rolo's balls) call story() at once instead.
+func tell(line: String, pic: String = "wren", color: Color = WREN_COLOR) -> void:
+	var at := maxf(clock, story_free_t)
+	story_free_t = at + STORY_GAP
+	if at <= clock + 0.01:
+		story(line, pic, color)
+		return
+	get_tree().create_timer(at - clock).timeout.connect(func() -> void:
+		if is_inside_tree() and not results_showing():
+			story(line, pic, color))
 
 
 ## A story beat: a picture and a few words on every view; VR: the giant's headline. Host broadcasts.
@@ -1065,6 +1111,7 @@ func built_fx(top: Vector3, perfect: bool) -> void:
 	_vr_say("PERFECT!" if perfect else "BUILT!", 2.0)
 	for slot in avatars:
 		Creatures.anim(avatars[slot]).play("cheer", 1.0)
+	green.cheer()
 	if net.mode != "client":
 		net.event("built", [top, perfect])
 
@@ -1080,16 +1127,19 @@ func _tower_to_town() -> void:
 	tower_h = 0.0
 	var count := int(save.data.built)
 	net.state_set("made", count)
+	var folk := GreenScript.neighbour(count - 1)  # the friend this tower brings moves onto the village green
+	tell("%s moves in!" % String(folk.name), String(folk.pic), Color(0.55, 0.85, 0.45))
+	var gp := GreenScript.piece_at(count)
+	if not gp.is_empty():
+		tell(String(gp.line), String(gp.pic), Color(0.55, 0.85, 0.45))
 	var d := Districts.opened_at(count)
 	if not d.is_empty():  # a new district of Wren's town (and maybe a new special block)
-		story(String(d.name) + "!", String(d.pic), d.color)
+		tell(String(d.name) + "!", String(d.pic), d.color)
 		var k := int(d.opens)
 		if k >= 0:
-			get_tree().create_timer(2.6).timeout.connect(func() -> void:
-				if is_inside_tree():
-					story("New: " + String(SPECIAL_LINES[k][0]).to_lower().capitalize(), String(SPECIAL_LINES[k][1]), Looks.block_color(0, k)))
+			tell("New: " + String(SPECIAL_LINES[k][0]).to_lower().capitalize(), String(SPECIAL_LINES[k][1]), Looks.block_color(0, k))
 	elif TOWN_CHEERS.has(count):
-		story(TOWN_CHEERS[count], "house", Looks.COLORS[int(site.palette[0])])
+		tell(TOWN_CHEERS[count], "house", Looks.COLORS[int(site.palette[0])])
 	var choices := _build_choices()
 	if choices.is_empty():
 		_next_job()
@@ -1150,6 +1200,7 @@ func _process(delta: float) -> void:
 	session_t += delta
 	if split != null:
 		_move_local_players(delta)
+	_roll_hits()
 	_follow_remote(delta)
 	_animate_avatars(delta)
 	_update_vr_text(delta)
@@ -1181,6 +1232,8 @@ func _process(delta: float) -> void:
 	if done_t < 0.0 and not site.is_empty():
 		for kind in weather.tick(job_t):
 			weather_warn(kind)
+		for ro in rollers.due(job_t):
+			roll(ro)
 	if done_t >= 0.0:
 		done_t += delta
 		if done_t >= CHEER:
@@ -1339,7 +1392,7 @@ func _maybe_spawn() -> void:
 	for attempt in 12:
 		var ang := randf() * TAU
 		var p := Vector3(cos(ang), 0.0, sin(ang)) * randf_range(3.5, 7.5)
-		if p.distance_to(PAD) < 3.0 or (p.z > 0.5 and absf(p.x) < 2.5):
+		if p.distance_to(PAD) < 3.0 or (p.z > 0.5 and absf(p.x) < 2.5) or p.distance_to(GreenScript.CENTER) < GreenScript.RADIUS + 0.8:
 			continue
 		_spawn_block(p + Vector3.UP * 7.0)
 		return
@@ -1477,6 +1530,55 @@ func weather_warn(kind: String) -> void:
 		round_events += 1
 		story("Big wind!" if kind == "gust" else "Quake!", "gust" if kind == "gust" else "quake", weather.COLORS.get(kind, Color.WHITE))
 		net.event("weather", [kind])
+
+
+## Rolo rolls a ball (every machine): its lane glows across the grass for Rollers.WARN seconds, then it rolls.
+func roll(ro: Array) -> void:
+	rollers.start(ro, season)
+	sfx.play_at("whoosh", Vector3(float(ro[1]), 0.5, float(ro[2])), -4.0, 0.6)
+	if net.mode != "client":
+		round_rolls += 1
+		net.state_set("rolls", int(net.state_get("rolls", 0)) + 1)  # (bots count it with watch_state)
+		var b: Array = RollersScript.BALLS.get(season, RollersScript.BALLS["summer"])
+		story(String(RollersScript.NAMES.get(season, "Rolling ball!")), String(b[0]), RollersScript.COLOR)
+		net.event("roll", [ro])
+
+
+## This machine's TV builders in a rolling ball's way get bowled over (a big hop out of its lane); jump it to stay
+## put. Host / local: loose blocks in its way get knocked aside (never the tower: lanes miss the stage and the pad).
+func _roll_hits() -> void:
+	for ball in rollers.balls():
+		var bp: Vector3 = ball.pos
+		var dir: Vector3 = ball.dir
+		for slot in party.local_slots():
+			if not avatars.has(slot) or float(boop_cd.get(slot, 0.0)) > clock:
+				continue
+			var a: Node3D = avatars[slot]
+			var d := Vector2(a.position.x - bp.x, a.position.z - bp.z)
+			if d.length() > RollersScript.R + BODY_R or a.position.y > bp.y + RollersScript.R * 0.6:
+				continue
+			boop_cd[slot] = clock + 1.0
+			roll_hits += 1
+			if float(ball.told) < RollersScript.MIN_WARN:
+				unwarned_hits += 1
+			var side := Vector3(-dir.z, 0.0, dir.x)
+			if side.dot(Vector3(d.x, 0.0, d.y)) < 0.0:
+				side = -side
+			a.position += side * 0.9
+			_hop(int(slot))
+			print("ROLL: P%d bowled over (lane told %.1f s)" % [int(slot) + 1, float(ball.told)])
+		if net.mode == "client":
+			continue
+		for id in blocks:
+			if String(bstate.get(id, "")) != "free" or float(touch_cd.get("roll%d" % int(id), 0.0)) > clock:
+				continue
+			var rb := blocks[id] as RigidBody3D
+			var p := rb.global_position
+			if p.y > 1.2 or _in_tower_zone(p) or Vector2(p.x - bp.x, p.z - bp.z).length() > RollersScript.R + 0.5:
+				continue
+			var away := Vector3(p.x - bp.x, 0.0, p.z - bp.z).normalized()
+			touch_cd["roll%d" % int(id)] = clock + 0.8
+			rb.apply_central_impulse((away * 2.5 + dir * 1.5 + Vector3.UP * 2.0) * rb.mass)
 
 
 ## The tower fell: boing, crash, shake (every machine).
@@ -1964,5 +2066,7 @@ func apply_event(kind: String, args: Array) -> void:
 			story(String(args[0]), String(args[1]), args[2], false)
 		"weather":
 			weather_warn(String(args[0]))
+		"roll":
+			roll(args[0] as Array)
 		"take":
 			picks.take_fx(int(args[0]), int(args[1]))
