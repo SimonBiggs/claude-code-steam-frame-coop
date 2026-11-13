@@ -52,12 +52,9 @@ func _ready() -> void:
 	var vr := OS.has_environment("BOT_VR")
 	var flat := host and OS.has_environment("DUO_FLAT_HOST")  # a flat host: P1 builds with a pad, like local play
 	var t0 := 3.0 if client else 1.0
-	var late := float(OS.get_environment("BOT_LATE")) if OS.has_environment("BOT_LATE") else 0.0  # (tools/multibot.ts --late)
 	kit.at(t0, "%d TV players press A" % want, _join)
 	if client or (host and not flat and not vr):
-		kit.at((62.0 - late) if client else 70.0, "finish", func() -> void:  # (a late joiner ends before the host does)
-			_checks()
-			kit.finish())
+		kit.finish_at(62.0 if client else 70.0, _checks)  # (a late joiner ends before the host does)
 	elif vr and not flat:  # local, or a VR host (the TV machines ride)
 		kit.at(2.0, "fake VR: the builder does the practice with its hands", func() -> void:
 			for t in ["straight", "left", "up"]:
@@ -83,7 +80,7 @@ func _ready() -> void:
 		kit.at(70.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
-	kit.at(57.5 - late, "second pass: picks, weather, season, toy fair", _deep_checks)  # (before dev.bots' 60 s cut)
+	kit.at(preload("res://tests/bot_end.gd").late_shift(57.5), "second pass: picks, weather, season, toy fair", _deep_checks)  # (before dev.bots' 60 s cut)
 	kit.every(2.0, _report)
 
 

@@ -28,12 +28,25 @@ static func arm(node: Node, host_s := 150.0, joiner_s := 140.0) -> void:
 ## `s` seconds, or less when the runner (BOT_DEADLINE: tools/multibot.ts --seconds) would kill this machine first:
 ## the host ends DEADLINE_SPARE s before it, joiners 10 s earlier still (they leave first, the host sees a normal leave).
 const DEADLINE_SPARE := 25.0
+## A moment on the shared timeline (the machines there from the start), on THIS machine's clock: BOT_LATE s sooner on
+## a late joiner (at least LATE_MIN s in), unchanged elsewhere. For late-joiner timing use this (or BotKit.finish_at),
+## never BOT_LATE sums in a bot (tests/bot_end_test.gd).
+static func late_shift(s: float) -> float:
+	if not OS.has_environment("BOT_LATE") or s == INF:
+		return s
+	return maxf(minf(s, LATE_MIN), s - float(OS.get_environment("BOT_LATE")))
+
+
+## A late joiner leaves this much before the host's end (on the host's clock), but plays at least LATE_MIN s.
+const LATE_SPARE := 2.0
+const LATE_MIN := 14.0
 
 static func within_deadline(s: float, joining := OS.has_environment("DUO_JOIN")) -> float:
 	if OS.has_environment("BOT_LATE") and s < INF:
-		# A late joiner (multibot --late S) started S seconds after the host: its game ends S sooner, so it still
-		# leaves first (Dungeon Delve 2026-11-12: a late client outlived the host, reloaded and never ended).
-		s = maxf(5.0, s - float(OS.get_environment("BOT_LATE")))
+		# A late joiner (multibot --late S) started S seconds after the host: its game ends S (+ LATE_SPARE) sooner,
+		# so it still leaves first (Dungeon Delve 2026-11-12: a late client outlived the host, reloaded and never
+		# ended). The ONE late rule: bots end through here (end_at, BotKit.finish_at), never their own BOT_LATE sums.
+		s = late_shift(s - LATE_SPARE)
 	if not OS.has_environment("BOT_DEADLINE"):
 		return s
 	var limit := float(OS.get_environment("BOT_DEADLINE")) - DEADLINE_SPARE - (10.0 if joining else 0.0)

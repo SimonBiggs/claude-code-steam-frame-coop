@@ -159,11 +159,9 @@ func _simple_timeline(t0: float) -> void:
 	kit.every(0.5, _scan_text)
 	if not client and not host and made_round < 0:
 		_teach_timeline()
-	# BOT_END / --quit-after / the runner's deadline may end it sooner; a late joiner leaves BOT_LATE s earlier on its
-	# own clock, so it still leaves before the host does.
+	# BOT_END / --quit-after / the runner's deadline may end it sooner; a late joiner leaves sooner on its own clock
+	# (end_at pulls it in), so it still leaves before the host does.
 	var end: float = preload("res://tests/bot_end.gd").end_at(100.0)
-	if client and OS.has_environment("BOT_LATE"):
-		end = maxf(30.0, end - float(OS.get_environment("BOT_LATE")))
 	if host:
 		# before the joiner leaves (it checks and finishes at its end - 5): a runner deadline ends joiners 10 s sooner
 		var their_end: float = preload("res://tests/bot_end.gd").joiners_end_at(100.0)

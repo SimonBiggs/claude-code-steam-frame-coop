@@ -68,12 +68,8 @@ func _ready() -> void:
 		kit.at(54.0, "host checks (the TV machine is still connected)", _checks)
 		kit.at(62.0, "finish", kit.finish)
 	else:
-		# A machine joining a game already running (tools/multibot.ts --late) counts its clock from its own start:
-		# it finishes BOT_LATE s sooner, so it still checks while the host plays.
-		var late_s := float(OS.get_environment("BOT_LATE")) if client and OS.has_environment("BOT_LATE") else 0.0
-		kit.at(maxf(30.0, (58.0 if client else 55.0) - late_s), "finish", func() -> void:
-			_checks()
-			kit.finish())
+		# (a machine joining a game already running finishes sooner, so it still checks while the host plays: kit.finish_at)
+		kit.finish_at(58.0 if client else 55.0, _checks)
 	kit.every(3.0, _report)
 	kit.every(0.5, _continue_results)
 
