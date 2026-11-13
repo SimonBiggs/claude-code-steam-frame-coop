@@ -33,6 +33,9 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "fish3-seasons", "date": "2026-11-13", "game": "fishing_lake", "pic": "snowflake", "line": "Seasons on the lake!", "try": {"ARCADE_SEASON_FISHING_LAKE": "winter"}},
+	{"id": "fish3-flocks", "date": "2026-11-13", "game": "fishing_lake", "pic": "mamaduck", "line": "Birds land! Pink rings!"},
+	{"id": "fish3-garden", "date": "2026-11-13", "game": "fishing_lake", "pic": "otter", "line": "Ollie's shore garden grows!"},
 	{"id": "duo2-friends", "date": "2026-11-12", "game": "duo_arena", "pic": "sproutbot", "line": "Save Nova's lost friends!", "try": {"DA_ZONE": "jungle"}},
 	{"id": "duo2-gifts", "date": "2026-11-12", "game": "duo_arena", "pic": "novazap", "line": "Nova's gifts after bosses!"},
 	{"id": "duo2-surprises", "date": "2026-11-12", "game": "duo_arena", "pic": "coconut", "line": "Coconuts! Watch the rings!", "try": {"DA_ZONE": "jungle"}},

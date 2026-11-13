@@ -17,9 +17,16 @@ extends Node
 ## SEEDED LAKES (lakegen.gd, book.gd): the angler casts at Ollie's wish spot now and then; every machine
 ## must build the same lake (the client rebuilds it from the snapshot), the fish book board, the story
 ## cards and a RUN line per day. BOT RESULT checks them (host / local / client).
+## THIRD PASS (seasons.gd): the season (ARCADE_SEASON=winter etc.), a flock forced early on day 2: its pink ring is
+## told before it lands (BotKit watch_state on the host's "flock" key), the angler reels out of a told ring, the
+## birds fly in on every machine, and Ollie's shore garden shows the keepsakes of granted wishes.
 
 const FAKE_PAD := 40
 const StoryCardScript := preload("res://core/story_card.gd")
+const BotKit := preload("res://tests/bot_kit.gd")
+const FlockScript := preload("res://games/fishing_lake/flock.gd")
+var kit  # BotKit, only for watch_state (the phases the host announced; never polled)
+var told_before_land := true
 
 var main
 var t := 0.0
@@ -49,6 +56,11 @@ func _ready() -> void:
 	process_mode = Node.PROCESS_MODE_ALWAYS  # keeps running if the Start check opened the pause menu
 	main = load("res://games/fishing_lake/main.tscn").instantiate()
 	add_child(main)
+	kit = BotKit.new()
+	kit.watch_state(main.net)
+	main.net.state_changed.connect(func(k: String, v: Variant) -> void:
+		if k == "flock" and str(v).ends_with(":landed") and kit.seen("flock", str(v).replace(":landed", ":told")) == 0:
+			told_before_land = false)
 
 
 func _pad_press(device: int, button: JoyButton) -> void:
@@ -125,7 +137,7 @@ func _events_timeline(mode: String) -> void:
 		return  # the practice first: the day's clock hasn't started yet
 	var plan := [["legend", 1, 1.5], ["map", 1, 16.0], ["frenzy", 2, 3.0], ["night", 2, 22.0]]
 	if main.SIMPLE_MODE:
-		plan = [["legend", 2, 3.0], ["night", 2, 22.0]]
+		plan = [["flock", 2, 0.5], ["legend", 2, 6.0], ["night", 2, 22.0]]
 	var day_t: float = main.round_time - main.time_left
 	for e in plan:
 		var ee: Array = e
@@ -196,6 +208,14 @@ func _watch() -> void:
 		seen["pond_fish"] = true
 	if main.lake.pond_root != null and main.lake.pond_root.is_visible_in_tree():
 		seen["pond"] = true
+	# Third pass: flocks on this machine, the season dressing, Ollie's shore garden.
+	for c in main.get_children():
+		if c is FlockScript:
+			seen["flock_birds"] = true
+	if main.lake.season_root != null and main.lake.season_root.get_child_count() > 0:
+		seen["season_" + main.lake.season] = true
+	if main.lake.garden_count() > 0:
+		seen["garden"] = true
 	# Seeded lakes, Ollie's wish and the fish book.
 	if not main.lake_key.is_empty():
 		seen["lake"] = true
@@ -318,6 +338,10 @@ func _drive_angler(a) -> void:
 			a.bot_reel = 0.35 if fmod(t, 6.0) < 0.3 else 0.0  # a little twitch now and then
 			if main.pick_stage != "" and a.wait_t > 0.5 and not a.nibbling:
 				a.bot_reel = 1.0  # orbs up: reel in and cast at one
+			for w in main.rings.tells():
+				if float(w.t) < float(w.secs) and _flat(a.lure_pos - w.pos).length() < float(w.size.x) + 0.3:
+					a.bot_reel = 1.0  # a told ring: reel the bobber out before the splash
+					seen["reel_out"] = true
 		"bite":
 			a.bot_reel = 1.0
 		"fight":
@@ -497,6 +521,13 @@ func _report(mode: String) -> void:
 
 
 func _exit_tree() -> void:
+	_summary()
+	if kit != null:
+		kit.free()
+		kit = null
+
+
+func _summary() -> void:
 	if main == null:
 		return
 	var a = main.players[0] if main.players.size() > 0 else null
@@ -530,6 +561,26 @@ func _exit_tree() -> void:
 			fails.append("Old Whiskers pulled without a tell")
 		if not seen.has("pond"):
 			fails.append("no Ollie's pond")
+		if not seen.has("season_" + main.season):
+			fails.append("the lake wasn't dressed for %s" % main.season)
+		var want_season := preload("res://core/season_kit.gd").override(main.GAME_ID, "", main.Seasons.SEASONS)
+		if want_season != "" and main.season != want_season:
+			fails.append("the season override asks for %s but the lake is %s" % [want_season, main.season])
+		if mode != "client" and days_done >= 2:
+			var told := 0
+			var landed := 0
+			for v in kit.seen_values("flock"):
+				told += 1 if str(v).ends_with(":told") else 0
+				landed += 1 if str(v).ends_with(":landed") else 0
+			print("BOT FLOCKS: told=%d landed=%d spooked=%d dodged=%d garden=%d season=%s" % [told, landed, main.spooked_today, main.dodged_today, main.lake.garden_count(), main.season])
+			if told == 0 or landed == 0:
+				fails.append("no flock told and landed on day 2 (told %d, landed %d)" % [told, landed])
+		if not told_before_land:
+			fails.append("a flock landed without its ring being told first")
+		if days_done >= 2 and not seen.has("flock_birds"):
+			fails.append("never saw the flock's birds on this machine")
+		if mode != "client" and seen.has("wish_done") and not seen.has("garden"):
+			fails.append("a wish was granted but Ollie's garden is empty")
 	# The TV machine plays at the host's difficulty (2026-11-12).
 	var mode_why: String = preload("res://tests/bot_kit.gd").host_mode_problem(main.net, main.game_mode)
 	if mode_why != "":

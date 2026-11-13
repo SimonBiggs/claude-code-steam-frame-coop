@@ -31,11 +31,12 @@ const LURES: Array[Dictionary] = [
 		"fish": [LakeGen.GOLDEN, LakeGen.MINNOW], "level": 2, "bite": 1.0, "shiny": 3.0},
 ]
 ## Per mode. day: day length x; bite: time to a nibble x; stamina: Old Whiskers' stamina x; tell: seconds his pull
-## is told before it comes; pull: how hard he pulls x; rest: how long he rests x.
+## is told before it comes; pull: how hard he pulls x; rest: how long he rests x. Third pass (seasons.gd):
+## visit_tell: seconds a flock's ring shows before it lands; visits: how many of the lake's flocks come.
 const MODE_NUM := {
-	"gentle": {"day": 1.15, "bite": 0.8, "stamina": 0.6, "tell": 1.8, "pull": 0.75, "rest": 1.3},
-	"brave": {"day": 1.0, "bite": 1.0, "stamina": 1.0, "tell": 1.3, "pull": 1.0, "rest": 1.0},
-	"hard": {"day": 0.9, "bite": 1.15, "stamina": 1.35, "tell": 1.0, "pull": 1.2, "rest": 0.85},
+	"gentle": {"day": 1.15, "bite": 0.8, "stamina": 0.6, "tell": 1.8, "pull": 0.75, "rest": 1.3, "visit_tell": 4.0, "visits": 1},
+	"brave": {"day": 1.0, "bite": 1.0, "stamina": 1.0, "tell": 1.3, "pull": 1.0, "rest": 1.0, "visit_tell": 3.2, "visits": 2},
+	"hard": {"day": 0.9, "bite": 1.15, "stamina": 1.35, "tell": 1.0, "pull": 1.2, "rest": 0.85, "visit_tell": 2.5, "visits": 3},
 }
 const PULLS := 16
 const TIRE_PER_S := 0.06  # angler.gd: stamina worn off per second of reeling while he rests (simple mode)
@@ -180,6 +181,8 @@ static func check_modes(seed_value: int) -> Array:
 		var n := num(m)
 		if float(n.tell) < 0.9:
 			why.append("%s: tell %.1f s too short to read" % [m, float(n.tell)])
+		if float(n.visit_tell) < 2.2:
+			why.append("%s: a flock's ring shows only %.1f s (reel out in time?)" % [m, float(n.visit_tell)])
 		why.append_array(check_pulls(boss_pulls(seed_value, m), m).map(func(w: String) -> String: return "%s: %s" % [m, w]))
 		var f := fight_secs(seed_value, m)
 		var cap := 30.0 if m == "gentle" else (50.0 if m == "brave" else 75.0)
@@ -188,10 +191,10 @@ static func check_modes(seed_value: int) -> Array:
 		if i == 0:
 			continue
 		var a := num(order[i - 1])
-		for k in ["bite", "stamina", "pull"]:
+		for k in ["bite", "stamina", "pull", "visits"]:
 			if float(n[k]) < float(a[k]):
 				why.append("%s %s easier than %s" % [m, k, order[i - 1]])
-		for k in ["day", "tell", "rest"]:
+		for k in ["day", "tell", "rest", "visit_tell"]:
 			if float(n[k]) > float(a[k]):
 				why.append("%s %s kinder than %s" % [m, k, order[i - 1]])
 		var pa := boss_pulls(seed_value, order[i - 1])

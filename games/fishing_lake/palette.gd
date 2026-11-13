@@ -7,6 +7,8 @@ const Contrast := preload("res://core/contrast.gd")
 const Lake := preload("res://games/fishing_lake/lake.gd")
 const Fish := preload("res://games/fishing_lake/fish.gd")
 const Angler := preload("res://games/fishing_lake/angler.gd")
+const Seasons := preload("res://games/fishing_lake/seasons.gd")
+const WHISKERS_RING := Seasons.WHISKERS_RING
 
 const PHASES := {"morning": 0.0, "midday": 0.5, "sunset": 1.0, "night": 1.45}
 const RAIN := {"": 0.0, " rain": 1.0}
@@ -60,4 +62,6 @@ static func groups() -> Array:
 	for w in ws:
 		surfaces["water (%s)" % w[0]] = under(Lake.BED, w[1])
 	out.append({"keys": {"bobber": {"color": Angler.BOBBER_TOP, "rim": Angler.BOBBER_BOTTOM}}, "bgs": surfaces})
+	# Third pass: a flock's warn ring (seasons.gd RING) glows on the water at every time of day; Old Whiskers' ring too.
+	out.append({"keys": {"flock ring": Seasons.RING, "whiskers ring": WHISKERS_RING}, "bgs": surfaces})
 	return out
