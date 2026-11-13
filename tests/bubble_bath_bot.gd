@@ -5,6 +5,9 @@ extends Node
 ## Local:      godot-test --headless --path . --fixed-fps 60 --quit-after 2400 res://tests/bubble_bath_bot.tscn
 ## Networked:  DUO_PORT=81xx DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=81xx DUO_JOIN=127.0.0.1 ... (same scene, real time)
 ## Flat host: add DUO_FLAT_HOST=1 to the host (no VR: one bot pad plays slot 0 on the host).
+## Second pass: the mode pick and Mama Duck's gift pick on the pick orbs (boats sail under one, the VR glove reaches
+## into one), warned surprises from a short round's first seconds (main.bot_surprises) that the boats sail out of,
+## the season and Mama's pond. Phases are counted with kit.watch_state (never polled).
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const BathGen := preload("res://games/bubble_bath/bathgen.gd")
@@ -20,6 +23,10 @@ var vr_throws := 0
 var vr_splashes := 0
 var slap_t := 0.0
 var max_train := 0
+var max_ducks := 0
+var escapes := 0  # frames a boat sailed out of a told surprise
+
+const Deep := preload("res://games/bubble_bath/deep.gd")
 
 
 func _ready() -> void:
@@ -28,7 +35,10 @@ func _ready() -> void:
 	add_child(kit)
 	main = load("res://games/bubble_bath/main.tscn").instantiate()
 	main.set("round_time", 16.0)  # short rounds: results and round 2 happen in the test
+	if not OS.has_environment("DUO_JOIN"):
+		main.set("bot_surprises", true)  # warned surprises from 3 s into the short rounds (the host decides them)
 	add_child(main)
+	kit.watch_state(main.net)  # count phases as they happen (picks, results)
 	kit.main = main
 	want = BotKit.bot_players(2, 6)
 	var client := OS.has_environment("DUO_JOIN")
@@ -56,10 +66,11 @@ func _ready() -> void:
 	kit.drop_in_out(main.party, t0 + 12.0, 3.0, func(slot: int) -> bool:
 		return main.boats.has(slot) and main.huds.has(slot) and main.cams.has(slot))
 	if host:
-		kit.at(34.0, "host checks (the TV machine is still connected)", _checks)
-		kit.at(38.0, "finish", kit.finish)
+		kit.at(43.0, "host checks (the TV machine is still connected)", _checks)
+		kit.at(47.0, "finish", kit.finish)
 	else:
-		kit.at(33.0 if client else 36.0, "finish", func() -> void:
+		var late := float(OS.get_environment("BOT_LATE")) if OS.has_environment("BOT_LATE") else 0.0  # (a late joiner leaves before the host)
+		kit.at(maxf(28.0, 42.0 - late) if client else 45.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)
@@ -101,6 +112,16 @@ func _press(action: String) -> void:
 		kit.slot_press(main.party, slots[0], action)
 
 
+func _picking() -> bool:
+	return String(main.net.state_get("phase", "")) == "pick" and not main.picks.orbs.orbs.is_empty()
+
+
+## The orb this seat goes for (each seat its own, so the first one there decides).
+func _orb_for(slot: int) -> Vector3:
+	var n: int = main.picks.orbs.orbs.size()
+	return main.picks.orb_position(posmod(slot + 1, maxi(1, n))) if n > 0 else Vector3.INF
+
+
 func _physics_process(delta: float) -> void:
 	if main == null or not main.ready_to_play:
 		return
@@ -108,6 +129,7 @@ func _physics_process(delta: float) -> void:
 		_steer(slot)
 	if main.vr_rig != null:
 		_drive_vr(delta)
+	max_ducks = maxi(max_ducks, main.ducks.size())
 	for slot in main.trains:
 		max_train = maxi(max_train, (main.trains[slot] as Array).size())
 
@@ -122,6 +144,14 @@ func _steer(slot: int) -> void:
 	var duck := _nearest_duck(b.position, true)
 	if duck != null and train_n < 2 and (main.net.mode != "client" or fmod(kit.t + slot, 8.0) < 5.0):
 		target = duck.position
+	var slow := 1.0
+	if _picking() and _orb_for(slot) != Vector3.INF:
+		target = _orb_for(slot)  # sail under an orb (and stay there)
+		slow = clampf(Vector2(target.x - b.position.x, target.z - b.position.z).length() / 0.8, 0.15, 1.0)
+	var away := _out_of_tells(b.position)
+	if away != Vector3.INF:
+		target = away  # a surprise is told here: sail out of it
+		escapes += 1
 	var d := target - b.position
 	d.y = 0.0
 	# Sail round the sponge islands: push sideways off any island just ahead.
@@ -141,8 +171,31 @@ func _steer(slot: int) -> void:
 		f.y = 0.0
 		f = f.normalized()
 		var r := Vector3(-f.z, 0.0, f.x)
-		v = Vector2(d.dot(r), -d.dot(f))
+		v = Vector2(d.dot(r), -d.dot(f)) * slow
 	kit.slot_stick(main.party, slot, "left", v)
+
+
+## A point out of the surprise told where the boat is (Vector3.INF: none here).
+func _out_of_tells(p: Vector3) -> Vector3:
+	for e in main.hazards.tells_now():
+		var pad: float = Deep.BOAT_R + 0.35
+		if not Deep.inside(e, Vector2(p.x, p.z), pad):
+			continue
+		var c := Vector3(float(e.x), p.y, float(e.z))
+		if String(e.kind) == "whale":
+			var out := Vector3(p.x - c.x, 0.0, p.z - c.z)
+			out = out.normalized() if out.length() > 0.05 else Vector3.BACK
+			return c + out * (float(e.r) + 1.0)
+		var dir := Vector3(float(e.dx), 0.0, float(e.dz)).normalized()
+		var side := Vector3(-dir.z, 0.0, dir.x)
+		var lat := (p - c).dot(side)
+		var s := signf(lat) if absf(lat) > 0.05 else 1.0
+		var on_line := p - side * lat
+		var to := on_line + side * s * (float(e.r) + 1.0)
+		if absf(to.x) > main.HX - 0.4 or absf(to.z) > main.HZ - 0.4:
+			to = on_line - side * s * (float(e.r) + 1.0)  # (the other side has room)
+		return to
+	return Vector3.INF
 
 
 ## Fake VR: slap the water with the left glove now and then; grab a duck with the right glove and
@@ -151,6 +204,12 @@ func _drive_vr(delta: float) -> void:
 	var rig = main.vr_rig
 	kit.vr_head_height(rig)  # the standard fake player (VrRig.fake_eye, x world_scale)
 	var head: Vector3 = rig.head_position()
+	if _picking():  # reach into an orb with the right glove and hold it there
+		var o := _orb_for(0)
+		kit.vr_reach(rig, 1, o if o != Vector3.INF else head + Vector3(0.25, -0.5, -0.35), 2.5, delta)
+		kit.vr_reach(rig, 0, head + Vector3(-0.25, -0.5, -0.3), 3.0, delta)
+		vr_phase = "rest"
+		return
 	slap_t += delta
 	var lp: Vector3 = rig.hand_point(0)
 	if fmod(slap_t, 2.0) < 0.4:
@@ -210,9 +269,10 @@ func _nearest_duck(from: Vector3, floating_only: bool) -> Node3D:
 
 
 func _report() -> String:
-	return "BOT %s: players %s, ducks %d, score %d/%d, total %d, vr throws %d, longest train %d, islands %d" % [main.net.mode,
+	return "BOT %s: players %s, ducks %d, score %d/%d, total %d, vr throws %d, longest train %d, islands %d, phase %s, mode %s, gift %s, surprise %s, escapes %d" % [main.net.mode,
 		str(main.party.active_slots()), main.ducks.size(), int(main.net.state_get("score", 0)), int(main.net.state_get("goal", 0)),
-		int(main.net.state_get("total", 0)), vr_throws, max_train, main.islands.size()]
+		int(main.net.state_get("total", 0)), vr_throws, max_train, main.islands.size(), String(main.net.state_get("phase", "")), main.mode,
+		main.gift, str(main.hazards.tells_now().map(func(e: Dictionary) -> String: return String(e.kind))), escapes]
 
 
 func _checks() -> void:
@@ -227,12 +287,27 @@ func _checks() -> void:
 		kit.assert_true(main.party.is_local(0) and main.boats.has(0) and main.cams.has(0), "flat host: slot 0 plays here with a camera")
 	kit.assert_true(int(main.net.state_get("total", 0)) > 0, "%s: ducks went down the plug" % mode)
 	kit.assert_true(int(main.net.state_get("round", 0)) >= 2, "%s: round 1 ended with results and round 2 started" % mode)
-	kit.assert_true(main.ducks.size() > 0, "%s: ducks float in the tub" % mode)
+	kit.assert_true(max_ducks > 0, "%s: ducks floated in the tub (up to %d)" % [mode, max_ducks])
 	kit.assert_true(not main.plan.is_empty() and int(main.plan.n) >= 2, "%s: the seeded bath is built (round %d)" % [mode, int(main.plan.get("n", 0))])
 	kit.assert_eq(main.islands.size(), main.island_root.get_child_count(), "%s: the sponge islands are in the tub" % mode)
 	kit.assert_true(main.mama != null and main.mama.get_child_count() > 0, "%s: Mama Duck sits on the rim" % mode)
 	kit.assert_true(BathGen.check(main.plan).is_empty(), "%s: this round's bath is fair (%s)" % [mode, str(BathGen.check(main.plan))])
 	kit.assert_true(int(main.net.state_get("goal", 0)) > 0, "%s: Mama Duck set a duck goal" % mode)
+	# Second pass.
+	kit.assert_true(kit.seen("phase", "pick") > 0, "%s: the team picked on the pick orbs (%d picks)" % [mode, kit.seen("phase", "pick")])
+	kit.assert_true(kit.seen("phase", "results") > 0, "%s: a round ended with results" % mode)
+	kit.check_host_mode(main.net, main.mode)
+	kit.assert_true(Deep.MODES.has(main.mode) and main.season != "" and main.pond.season == main.season, "%s: the mode (%s) and the season (%s) are set" % [mode, main.mode, main.season])
+	kit.assert_true(main.pond.water != null and main.pond.get_node_or_null("SeasonProps") != null, "%s: Mama's pond and the season's props are built" % mode)
+	kit.assert_true(int(main.pond.count) == Deep.pond(int(main.save.data.goals)) if mode != "client" else int(main.pond.count) == int(main.net.state_get("pond", 0)), "%s: Mama's pond has its pieces (%d)" % [mode, int(main.pond.count)])
+	kit.assert_true(not main.hazards.seen.is_empty(), "%s: a warned surprise showed its rings on the water (%s)" % [mode, str(main.hazards.seen)])
+	kit.assert_true(main.gift != "" and not Deep.gift(main.gift).is_empty(), "%s: Mama Duck's gift is on for round 2 (%s)" % [mode, main.gift])
+	if mode != "client":
+		var stages: Array = main.picks.history.map(func(h: Array) -> String: return String(h[0]))
+		kit.assert_true(stages.has("mode") or BotKit.mode_forced(main.net, "BB_MODE"), "the mode pick was taken (%s)" % str(main.picks.history))
+		kit.assert_true(stages.has("gift"), "Mama Duck's gift pick was taken (%s)" % str(main.picks.history))
+		kit.assert_true(String(main.save.data.mode) != "" or BotKit.mode_forced(main.net, "BB_MODE"), "the mode is saved")
+		kit.assert_true(int(main.hz_count) > 0 or int(main.save.data.surprises) > 0, "the host told surprises (%d)" % int(main.save.data.surprises))
 	if mode != "client":
 		kit.assert_true(int(main.save.data.days) >= 1 and int(main.save.data.rounds) >= 2, "rounds and play-days are saved")
 		kit.assert_true(int(main.save.data.goals) > 0 and main.family_root.get_child_count() > 0, "the team reached a goal and a toy sits on the rim (%d goals)" % int(main.save.data.goals))
