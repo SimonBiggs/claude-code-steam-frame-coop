@@ -1,4 +1,4 @@
-extends Node
+extends "res://core/pick_flow.gd"
 ## OBSTACLE RUSH PICKS on the shared pick orbs (core/pick_orbs.gd), picture first, team choices (deep.gd):
 ##   "mode"  GENTLE / BRAVE / HARD once a session (the family's last mode in the middle), before the first seeded course.
 ##   "gift"  COACH JELLY'S GIFTS before every course from a show's second: three of SPRING SHOES, GLIDE CAPE, STAR
@@ -12,79 +12,44 @@ extends Node
 ## stuck. The host sends the sticky "orbs" event [stage, entries, spots, vr] (a machine joining mid-pick sees the orbs
 ## too) and "take" [orb, slot].
 
-const PickOrbs := preload("res://core/pick_orbs.gd")
-const Party := preload("res://core/party.gd")
 const Deep := preload("res://games/obstacle_rush/deep.gd")
 
-const AFTER := 1.1  # seconds the taken orb shows its dot before the orbs go
-const OPEN := 0.8  # seconds after the orbs pop up before they can be taken
-const RESTING := 99  # inside[id]: a hand or a runner that was already in an orb when they opened
-
-var main
-var orbs: PickOrbs
-var stage := ""  # host: "" | "mode" | "gift"
-var options: Array = []
-var spots: Array = []  # every machine: the orbs' middles (Vector3)
 var vr_row := false  # every machine: the small row in front of the VR giant
 var entries_now: Array = []  # host: the shown row's entries (a VR refit puts the row up again in front of the head)
-var t := 0.0
-var chosen := -1
-var chosen_by := -1
-var done_t := 0.0
-var on_done: Callable  # host: (stage, option, slot)
-var history: Array = []  # [stage, option, by] (telemetry, bots)
-var inside := {}  # hand / runner id -> orb index it is in now (-1 none)
-var dwell := {}  # id -> seconds in that orb
 
 
-func _ready() -> void:
-	name = "Picks"
-	orbs = PickOrbs.new()
-	orbs.collision_layer = 0
-	main.add_child(orbs)
+func _init() -> void:
+	after = 1.1
+	hand_r = Deep.HAND_R
+	hand_dwell = Deep.DWELL
+	foot_dwell = Deep.TV_DWELL
 
 
-func active() -> bool:
-	return stage != ""
-
-
-func showing() -> bool:
-	return not orbs.orbs.is_empty()
-
-
-## Host / local: put up the orbs. entries: [{id, name, pic, color}], opts: what each orb means. vr: the small row in
-## front of the VR giant (only the giant is here to pick).
+## Host / local: put up the orbs. entries: [{id, name, pic, color}], opts: what each orb means. vr: in front of the
+## VR giant (only they pick), else over the start (the runners pick).
 func begin(new_stage: String, entries: Array, opts: Array, vr: bool, done: Callable) -> void:
-	stage = new_stage
-	options = opts
-	on_done = done
-	t = 0.0
-	chosen = -1
-	chosen_by = -1
-	done_t = 0.0
-	inside = {}
-	dwell = {}
+	start(new_stage, opts, done)
 	var in_vr: bool = vr and main.vr_rig != null
 	entries_now = entries
 	if in_vr and not main.vr_rig.refitted.is_connected(_on_refit):
 		main.vr_rig.refitted.connect(_on_refit)
 	var at := Deep.vr_spots(main.vr_rig.head_position(), entries.size(), main.course.desc) if in_vr else Deep.row_spots(main.course.desc, entries.size())
 	show_row(new_stage, entries, at, in_vr)
-	main.net.event("orbs", [new_stage, entries, spots, vr_row])
-	print("PICKS %s: %s (%s)" % [new_stage, opts, "in front of the VR giant" if vr_row else "over the start"])
+	publish([new_stage, entries, spots, vr_row])
 
 
-## Host / local: the VR head was fitted (first fit, a kid took the headset, someone sat down) while the small row is
-## up: put it again an arm's reach in front of the head where it is now. The session's first mode pick comes up before
-## the first fit, from the unfitted head down at the giant's feet: the row sat under the table and the lawn (2026-11-12).
+## The VR player refitted (stood up, sat down): the row goes up again in front of the head.
 func _on_refit(_h: float) -> void:
 	if not vr_row or stage == "" or chosen >= 0 or main.vr_rig == null:
 		return
 	var at := Deep.vr_spots(main.vr_rig.head_position(), entries_now.size(), main.course.desc)
 	show_row(stage, entries_now, at, true)
-	main.net.event("orbs", [stage, entries_now, spots, vr_row])
-	inside = {}
-	dwell = {}
+	publish([stage, entries_now, spots, vr_row])
+	reset_dwell()
+
+
+func orbs_off() -> Array:
+	return ["", [], [], false]
 
 
 ## Every machine: the row of orbs ("" stage: none).
@@ -105,101 +70,31 @@ func show_row(new_stage: String, entries: Array, at: Array, vr: bool) -> void:
 	main.pick_banner()
 
 
-## Orb i's middle in the world (bots aim there), INF if none.
-func orb_position(i: int) -> Vector3:
-	if i < 0 or i >= orbs.orbs.size() or not is_instance_valid(orbs.orbs[i]) or not (orbs.orbs[i] as Node3D).is_inside_tree():
-		return Vector3.INF
-	var o = orbs.orbs[i]
-	return o.icon.global_position if o.icon != null and o.icon.is_inside_tree() else (o as Node3D).global_position
+func wait_for() -> float:
+	return Deep.wait_for(stage, main.pick_nobody())
 
 
-## Seconds left to pick.
-func left() -> float:
-	return maxf(0.0, Deep.wait_for(stage, main.pick_nobody()) - t) if stage != "" and chosen < 0 else 0.0
-
-
-## Host / local, every frame while the orbs are up.
-func tick(delta: float) -> void:
-	if stage == "":
-		return
-	if chosen >= 0:
-		done_t += delta
-		if done_t >= AFTER:
-			_finish()
-		return
-	t += minf(delta, 0.1)  # (a loading hitch never eats the wait)
-	var got := _pick(delta)
-	if got.size() == 2:
-		take(int(got[0]), int(got[1]))
-		return
-	if t > Deep.wait_for(stage, main.pick_nobody()):
-		take(options.size() / 2, -1)  # nobody took one: the middle one (it glows brightest)
-
-
-## This frame's pick ([orb, slot] or []): a VR grab point moving into a small orb and staying a moment (slot 0), or
-## a runner standing under a start orb they weren't under when the orbs came up.
-func _pick(delta: float) -> Array:
-	var points := {}  # id -> [point, slot, vr]
+## The VR giant's hands (their row) or the people's runners standing under an orb (CPU runners never pick).
+func takers() -> Dictionary:
+	var points := {}
 	if vr_row and main.vr_rig != null:
 		for h in 2:
-			points["h%d" % h] = [main.vr_rig.hand_point(h), 0, true]
+			points["h%d" % h] = [main.vr_rig.hand_point(h), 0, "hand"]
 	elif not vr_row:
 		for id in main.runners:
-			if int(id) < 10:  # people only: CPU runners never pick
-				points["r%d" % int(id)] = [(main.runners[id] as Node3D).position, int(id), false]
-	var got: Array = []
-	for id in points:
-		var pos: Vector3 = points[id][0]
-		var vr: bool = points[id][2]
-		var i := orbs.nearest_hit(pos, Deep.HAND_R) if vr else Deep.under(spots, pos)
-		if not inside.has(id):  # where it was when the orbs came up: resting in one is never a pick until it leaves
-			inside[id] = RESTING if i >= 0 else -1
-		var before := int(inside[id])
-		if before == RESTING:
-			inside[id] = RESTING if i >= 0 else -1
-			dwell[id] = 0.0
-			continue
-		if i != before:
-			dwell[id] = 0.0
-		inside[id] = i
-		if i >= 0 and t >= OPEN:
-			dwell[id] = float(dwell.get(id, 0.0)) + delta
-			if float(dwell[id]) >= (Deep.DWELL if vr else Deep.TV_DWELL) and got.is_empty():
-				got = [i, int(points[id][1])]
-	return got
+			if int(id) < 10:
+				points["r%d" % int(id)] = [(main.runners[id] as Node3D).position, int(id), "walk"]
+	return points
 
 
-## Host / local: orb i taken by slot (0 = the VR giant or P1, a runner's slot, -1: nobody chose, the middle one).
-func take(i: int, slot: int) -> void:
-	if stage == "" or chosen >= 0 or i < 0 or i >= options.size():
-		return
-	chosen = i
-	chosen_by = slot
-	take_fx(i, slot)
-	main.net.event("take", [i, slot])
-	print("PICK %s: %s took %d (%s)" % [stage, "nobody" if slot < 0 else "P%d" % (slot + 1), i, str(options[i])])
+func orb_at(kind: String, point: Variant) -> int:
+	return orbs.nearest_hit(point, hand_r) if kind == "hand" else Deep.under(spots, point)
 
 
-## Every machine: a dot in the taker's colour circles orb i, a happy sound and a burst.
-func take_fx(i: int, slot: int) -> void:
-	var col: Color = Party.COLORS[slot % Party.COLORS.size()] if slot >= 0 else Color(1, 1, 1)
-	var at := orbs.take(i, col)
+func fx(i: int, slot: int, at: Vector3, col: Color) -> void:
 	if at != Vector3.INF:
 		main.sfx.play_at("power_up", at, -4.0, 1.0 + 0.1 * i)
 		main.confetti(at, col, 18)
 	if slot == 0 and vr_row and main.vr_rig != null:
 		main.vr_rig.pulse(0, 0.5, 0.08)
 		main.vr_rig.pulse(1, 0.5, 0.08)
-
-
-func _finish() -> void:
-	var st := stage
-	var opt: Variant = options[chosen]
-	history.append([st, str(opt), chosen_by])
-	stage = ""
-	options = []
-	spots = []
-	orbs.clear()
-	main.net.event("orbs", ["", [], [], false])
-	if on_done.is_valid():
-		on_done.call(st, opt, chosen_by)

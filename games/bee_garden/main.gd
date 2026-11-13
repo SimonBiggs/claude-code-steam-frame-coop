@@ -2792,7 +2792,7 @@ func _begin_pick() -> bool:
 
 
 ## Host / local: a pick was taken (by a bee or the gardener, or the middle one when nobody chose).
-func _on_picked(stage: String, opt: Variant) -> void:
+func _on_picked(stage: String, opt: Variant, _by: int = -1) -> void:
 	match stage:
 		"mode":
 			game_mode = GardenGen.mode_of(String(opt))

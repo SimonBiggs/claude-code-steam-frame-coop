@@ -10,6 +10,9 @@ extends SceneTree
 ##     -> core/season_kit.gd prop() / drift() (three games had copied them by 2026-11-11)
 ##   - GIFT pick: a game's own "gift order" shuffle -> PickOrbs.gift_choices(unlocked, last, seed) (six games had
 ##     copied it by 2026-11-13)
+##   - PICK FLOW: a game's own dwell / take / finish (RESTING dwell, the nobody-chose middle take, the AFTER wait before
+##     the orbs go) -> extends "res://core/pick_flow.gd" and override takers() / orb_at() / fx() ... (28 games had
+##     their own copy of it by 2026-11-13)
 ## A diegetic thing that only looks similar (a hazard vent, a shop sign) is allowed by a line in its file:
 ##   ## shared-picks-ok: <func name> (why)
 ## Every game script must also compile (load() + can_instantiate()).
@@ -18,6 +21,7 @@ extends SceneTree
 
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const WarnRings := preload("res://core/warn_rings.gd")
+const PickFlow := preload("res://core/pick_flow.gd")
 
 const WARN_NAME := "(?i)(warn|tell|telegraph|danger)"
 const WARN_FILE := "(?i)/(tele|warn|telegraph)[a-z_]*\\.gd$"
@@ -27,6 +31,8 @@ const WARN_GEOMETRY := "(\\.torus\\(|\\.disc\\(|CylinderMesh\\.new|TorusMesh\\.n
 const PICK_GEOMETRY := "(MeshInstance3D\\.new\\(|MeshKit\\.instance\\(|Sprite3D\\.new)"
 const SEASON_COPY := "(?s)\"winter\"\\s*:[^\n]*snowman.{0,1200}\"autumn\"\\s*:[^\n]*pumpkin"
 const GIFT_COPY := "Seeded\\.rng\\([^\\n]*\"gift order\""
+## A game's own copy of the pick flow (core/pick_flow.gd): its RESTING dwell, its nobody-chose take, its AFTER wait.
+const FLOW_COPY := "(?m)(^\\s*[a-z_]+\\[[^\\]\\n]+\\]\\s*=\\s*RESTING\\b|take\\(options\\.size\\(\\) / 2, -1\\)|done_t >= AFTER\\b)"
 const MODE_LOOK := "\"(gentle|brave|hard|heroic|mega)\"\\s*:\\s*Color\\(|\"name\"\\s*:\\s*\"(GENTLE|BRAVE|HARD|HEROIC)\"|\"kind\"\\s*:\\s*\"mode\"[^}\\n]*\"name\"\\s*:\\s*\""
 
 var fails := 0
@@ -70,6 +76,10 @@ static func scan(path: String, text: String) -> Array:
 		out.append("%s: its own seasonal props (snowman, pumpkin...): use core/season_kit.gd prop(builder, season, at, i, size)" % path)
 	if not ok.has("gifts") and RegEx.create_from_string(GIFT_COPY).search(text):
 		out.append("%s: its own gift pick shuffle: use PickOrbs.gift_choices(unlocked, last, seed)" % path)
+	if not ok.has("flow"):
+		var mf := RegEx.create_from_string(FLOW_COPY).search(text)
+		if mf != null:
+			out.append("%s: its own pick flow (%s): extends \"res://core/pick_flow.gd\" (takers / orb_at / dwell_for / fx keep a game's own differences)" % [path, mf.get_string().strip_edges().left(40)])
 	if not ok.has("modes"):
 		var rx_mode := RegEx.create_from_string(MODE_LOOK)
 		var mm := rx_mode.search(text)
@@ -102,6 +112,9 @@ func _initialize() -> void:
 	_expect(scan("bad", bad_mode).size() == 1, "the scan finds a game's own mode colours")
 	_expect(scan("bad", bad_season).size() == 1, "the scan finds a game's own seasonal props")
 	_expect(scan("bad", "\treturn Seeded.shuffled(Seeded.rng(seed_value, \"gift order\"), out)\n").size() == 1, "the scan finds a game's own gift pick")
+	_expect(scan("bad", "\t\tinside[id] = RESTING if i >= 0 else -1\n").size() == 1, "the scan finds a game's own RESTING dwell")
+	_expect(scan("bad", "\tif t <= 0.0:\n\t\ttake(options.size() / 2, -1)\n").size() == 1, "the scan finds a game's own nobody-chose take")
+	_expect(scan("bad", "\t\tif done_t >= AFTER:\n\t\t\t_finish()\n").size() == 1, "the scan finds a game's own finish wait")
 	_expect(scan("good", good).is_empty(), "the scan passes code that uses the helpers")
 	_expect(scan("ok", "## shared-picks-ok: _make_pod (a test)\n" + bad_pick).is_empty(), "shared-picks-ok lets a func through")
 	# 2. Every game.
@@ -118,6 +131,10 @@ func _initialize() -> void:
 	_expect(PickOrbs.mode_name("mega") == "HARD" and PickOrbs.mode_name("heroic") == "HARD", "mega / heroic show as HARD")
 	_expect(PickOrbs.mode_color("zoom") == PickOrbs.mode_color("brave"), "zoom shows as BRAVE")
 	_expect(PickOrbs.mode_ids("hard") == ["gentle", "hard", "brave"], "mode_ids puts the last mode in the middle")
+	# The shared flow's helpers (the flow itself runs in every game's bot).
+	_expect(PickFlow.order_along([Vector3(1, 0, 0), Vector3(-1, 0, 0), Vector3(0, 0, 0)], Vector3.RIGHT) == [1, 2, 0], "order_along: left to right")
+	_expect(not PickFlow.head_moved(Transform3D(), Transform3D(Basis(), Vector3(0.1, 0, 0))), "head_moved: a small step keeps the row")
+	_expect(PickFlow.head_moved(Transform3D(), Transform3D(Basis(Vector3.UP, 0.8), Vector3.ZERO)), "head_moved: a turn moves the row")
 	# 4. The shared gift pick: three different, the newest always there, not the last one again, the same for a seed.
 	var un := ["a", "b", "c", "d", "e"]
 	for s in 50:

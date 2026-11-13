@@ -2022,11 +2022,12 @@ func _process(delta: float) -> void:
 		return
 	time_left -= delta
 	if phase == "pick":
-		time_left = picks.left(pick_time)
+		picks.wait_s = pick_time
+		time_left = picks.left()
 	if int(ceil(time_left)) != int(net.state_get("time", 0)):
 		net.state_set("time", maxi(0, int(ceil(time_left))))
 	if phase == "pick":
-		picks.tick(delta, pick_time)  # (nobody took one: the middle one; then the flight starts in _on_picked)
+		picks.tick(delta)  # (nobody took one: the middle one; then the flight starts in _on_picked)
 		return
 	flight_t += delta
 	for e in hazards.due(flight_t):

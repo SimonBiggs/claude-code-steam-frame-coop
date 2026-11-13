@@ -47,10 +47,11 @@ func _ready() -> void:
 	# One flat player alone (no VR giant, nobody else) pushes blocks slowly: a longer round, still under the real 180 s,
 	# so the crane can finish a tower for them before the lone check's end (120 s).
 	var lone := BotKit.bot_players(2, 6) == 1 and not OS.has_environment("DUO_HOST") and not OS.has_environment("DUO_JOIN") and not OS.has_environment("BOT_VR")
-	# 50 s rounds, local and networked (round 2 still starts by ~53 s). 42 s left no room for one toppled stack, so
-	# about 1 local run in 30 never finished a tower (2026-11-12); networked runs had the same 42 s and the same risk,
-	# so their checks moved 8 s later too (client finish 61 s, host checks 64 s, host finish 68 s).
-	main.set("round_time", 95.0 if lone else 50.0)
+	# 48 s rounds, local and networked (round 2 starts by ~56 s: the round clock waits while the pick orbs are up, and
+	# since core/pick_flow.gd a pick takes a moment: orbs open 0.8 s, then a short dwell). 42 s left no room for one
+	# toppled stack, so about 1 local run in 30 never finished a tower (2026-11-12); networked runs had the same 42 s and
+	# the same risk, so their checks moved 8 s later too (client finish 61 s, host checks 64 s, host finish 68 s).
+	main.set("round_time", 95.0 if lone else 48.0)
 	main.set("daily_ok", false)
 	main.set("try_open", 7)  # towergen OPEN_ALL: special blocks from job 2 on
 	main.set("try_rolls", true)  # TS_TRY=rollers: Rolo rolls a ball early in every job

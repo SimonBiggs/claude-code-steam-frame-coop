@@ -1,4 +1,4 @@
-extends Node
+extends "res://core/pick_flow.gd"
 ## GHOST LANTERN PICKS on the shared pick orbs (core/pick_orbs.gd), picture first, team choices:
 ##   "mode"     GENTLE / BRAVE / HARD before the first night of a visit (the family's last mode in the middle).
 ##   "lantern"  GRANNY BOO'S LANTERN GIFT between nights: three of BIG LIGHT (a wider beam), LONG LIGHT (it shines
@@ -10,10 +10,7 @@ extends Node
 ## Host / local decide; the host keeps the "orbs" state [stage, entries, places] (sticky: a machine joining mid-pick
 ## sees the orbs too) and sends "take" [i, slot] events; every machine draws.
 
-const PickOrbs := preload("res://core/pick_orbs.gd")
-
 const WAIT := {"mode": 14.0, "lantern": 12.0}
-const AFTER := 1.0  # seconds the taken orb shows its dot before the orbs go
 const GAP := 1.0
 const VR_GAP := 0.85  # a VR row a little narrower: the start spot's easel and cuckoo clock (props.gd) stand just outside it
 const Y := 1.3
@@ -21,7 +18,6 @@ const AHEAD := 1.7  # metres in front of the VR lantern-bearer (a flat one: AHEA
 const AHEAD_FLAT := 3.2
 const FEET_R := 0.55  # how close (flat) a walking player must come under an orb
 const HAND_R := 0.22
-## Lantern gifts: [id, name, picture, colour]. main.gd reads the levels (upgrades[id], 0..MAX_LEVEL).
 const UPGRADES: Array = [
 	["wide", "BIG LIGHT", "biglight", Color(1.0, 0.85, 0.35)],
 	["far", "LONG LIGHT", "longlight", Color(0.55, 0.85, 1.0)],
@@ -30,43 +26,29 @@ const UPGRADES: Array = [
 ]
 const MAX_LEVEL := 2
 
-var main: Node
-var orbs: PickOrbs
-var stage := ""  # host: "" | "mode" | "lantern"
-var options: Array = []  # host: what each orb means (mode ids / upgrade ids)
-var t := 0.0
-var chosen := -1
-var chosen_by := -1
-var done_t := 0.0
-var on_done: Callable  # host: (stage, option)
-var history: Array = []  # host: what was chosen this visit (telemetry)
+
+func _init() -> void:
+	after = 1.0
+	waits = WAIT
+	wait_default = 10.0
+	hand_r = HAND_R
+	sync = "state"
 
 
-func _ready() -> void:
-	name = "Picks"
-	orbs = PickOrbs.new()
-	orbs.collision_layer = 0  # nothing shoots them: hands and feet only
-	main.add_child(orbs)
-
-
-func active() -> bool:
-	return stage != ""
-
-
-## Host: the upgrade ids the lantern-bearer may still take (seeded order for the night), at most three.
+## The lantern upgrades this night: three not at MAX_LEVEL yet (the same on every machine for a seed).
 static func offer(levels: Dictionary, seed_value: int, night: int) -> Array:
 	var r := RandomNumberGenerator.new()
 	r.seed = hash([seed_value, "lantern", night])
-	var open: Array = []
+	var open_ids: Array = []
 	for u in UPGRADES:
 		if int(levels.get(u[0], 0)) < MAX_LEVEL:
-			open.append(String(u[0]))
-	for i in range(open.size() - 1, 0, -1):
+			open_ids.append(String(u[0]))
+	for i in range(open_ids.size() - 1, 0, -1):
 		var j := r.randi_range(0, i)
-		var tmp: Variant = open[i]
-		open[i] = open[j]
-		open[j] = tmp
-	return open.slice(0, 3)
+		var tmp: Variant = open_ids[i]
+		open_ids[i] = open_ids[j]
+		open_ids[j] = tmp
+	return open_ids.slice(0, 3)
 
 
 static func upgrade_entry(id: String) -> Dictionary:
@@ -78,21 +60,12 @@ static func upgrade_entry(id: String) -> Dictionary:
 
 ## Host / local: put up the orbs in front of the lantern-bearer.
 func begin(new_stage: String, entries: Array, opts: Array, done: Callable) -> void:
-	stage = new_stage
-	options = opts
-	on_done = done
-	t = float(WAIT.get(new_stage, 10.0))
-	chosen = -1
-	chosen_by = -1
-	done_t = 0.0
+	start(new_stage, opts, done)
 	var places := _places(entries.size())
 	show_row(new_stage, entries, places)
-	if main.net.mode == "host":
-		main.net.state_set("orbs", [new_stage, entries, places])
-	print("PICK %s up: %s" % [new_stage, str(opts)])
+	publish([new_stage, entries, places])
 
 
-## A row across the lantern-bearer's view, AHEAD metres in front at chest height, kept inside the house.
 func _places(n: int) -> Array:
 	var p0 = main.players[0]
 	var head: Transform3D = p0.xr_camera.global_transform if p0.vr and p0.xr_camera != null and p0.xr_camera.is_inside_tree() else p0.global_transform
@@ -117,7 +90,6 @@ func _places(n: int) -> Array:
 	return out
 
 
-## Every machine: the row of orbs ("" stage: none).
 func show_row(new_stage: String, entries: Array, places: Array) -> void:
 	if new_stage == "" or entries.is_empty():
 		orbs.clear()
@@ -125,71 +97,27 @@ func show_row(new_stage: String, entries: Array, places: Array) -> void:
 	orbs.show_orbs(new_stage, entries, Vector3.ZERO, GAP, Y, {"at": places, "scale": 0.7, "pop": true, "touch": FEET_R})
 
 
-## Host / local, every frame while the orbs are up (the clock; touches are physics frames: _physics_process).
-func tick(delta: float) -> void:
-	if stage == "":
-		return
-	if chosen >= 0:
-		done_t += delta
-		if done_t >= AFTER:
-			_finish()
-		return
-	t -= delta
-	if t <= 0.0:
-		take(options.size() / 2, -1)  # the middle one (it glows brightest)
-
-
-## Host / local: a VR hand touching an orb, or someone walking under one (where the hands and feet are this frame).
-func _physics_process(_delta: float) -> void:
-	if stage == "" or chosen >= 0 or main.net.mode == "client":
-		return
+## VR players' hands reaching into an orb, the others walking under one.
+func takers() -> Dictionary:
+	var points := {}
 	for p in main.players:
 		if not p.active or p.ghost:
 			continue
 		if p.vr:
-			for hand in [p.hand_r, p.hand_l]:
-				if hand == null or not hand.is_inside_tree():
-					continue
-				var i2 := orbs.nearest_hit(hand.global_position, HAND_R)
-				if i2 >= 0:
-					take(i2, p.index)
-					return
+			for k in 2:
+				var hand: Node3D = p.hand_r if k == 0 else p.hand_l
+				if hand != null and hand.is_inside_tree():
+					points["h%d_%d" % [p.index, k]] = [hand.global_position, int(p.index), "hand"]
 		elif p.is_inside_tree() and (not p.remote or main.net.connected):
-			var i := orbs.at_point(p.global_position)
-			if i >= 0:
-				take(i, p.index)
-				return
+			points["p%d" % p.index] = [p.global_position, int(p.index), "walk"]
+	return points
 
 
-## Host / local: orb i taken by slot (-1: nobody chose, the middle one).
-func take(i: int, slot: int) -> void:
-	if chosen >= 0 or i < 0 or i >= options.size():
-		return
-	chosen = i
-	chosen_by = slot
-	take_fx(i, slot)
-	if main.net.mode == "host":
-		main.net.event("take", [i, slot])
-	print("PICK %s: %s took %d (%s)" % [stage, "nobody" if slot < 0 else "P%d" % (slot + 1), i, str(options[i])])
+func slot_color(slot: int) -> Color:
+	return main.PLAYER_COLORS[slot % main.PLAYER_COLORS.size()]
 
 
-## Every machine: a dot in the taker's colour circles orb i, a happy sound.
-func take_fx(i: int, slot: int) -> void:
-	var col: Color = main.PLAYER_COLORS[slot % main.PLAYER_COLORS.size()] if slot >= 0 else Color(1, 1, 1)
-	var at := orbs.take(i, col)
+func fx(i: int, _slot: int, at: Vector3, col: Color) -> void:
 	if at != Vector3.INF:
 		main.local_sound("note", -4.0, 1.0 + 0.12 * i)
 		main.burst(at, col, 14, 0.06)
-
-
-func _finish() -> void:
-	var st := stage
-	var opt: Variant = options[chosen]
-	history.append([st, str(opt), chosen_by >= 0])
-	stage = ""
-	options = []
-	orbs.clear()
-	if main.net.mode == "host":
-		main.net.state_set("orbs", ["", [], []])
-	if on_done.is_valid():
-		on_done.call(st, opt)
