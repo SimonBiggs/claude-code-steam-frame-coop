@@ -9,6 +9,9 @@ extends SceneTree
 ##   - a spatial shader in a script that blends by ALPHA (blend_mix, not blend_add / ALPHA_SCISSOR) whose material
 ##     never goes through UiKit.see_through (the functions using the shader, or a helper they call, must call it);
 ##   - a StandardMaterial3D / ORMMaterial3D in a .tscn / .tres with alpha transparency and no priority under the UI;
+##   - a NODE faded by its own transparency float (`node.transparency = x`, `tween_property(node, "transparency", ...)`,
+##     `set_transparency(`) outside UiKit.fade3d: the float sends the mesh into the blended pass at its material's priority
+##     (usually 0), over the cards, whatever the material says (Party Board's arrows, Tiny Town's rainbow, 2026-11-13);
 ##   - `# see-through-ok` without a reason.
 ## Opt out a real overlay (a fade or hurt sphere round the head, the VR card panel itself) with
 ## `# see-through-ok: why` on that line or the line above (for a shader: above the line that opens its """).
@@ -19,12 +22,14 @@ const UiKit := preload("res://core/ui_kit.gd")
 const VrViewCheck := preload("res://core/vr_view_check.gd")
 const ROOTS := ["res://games", "res://core", "res://arcade"]
 const USE := "use UiKit.see_through(mat) (core/ui_kit.gd: alpha + UiKit.VR_PRIO_UNDER_UI, so it never washes out a VR card)"
+const USE_FADE := "use UiKit.fade3d(node, amount) (core/ui_kit.gd: sets the float AND drops the node's materials to UiKit.VR_PRIO_UNDER_UI; tweens: tween_method(func(v): UiKit.fade3d(node, v), ...))"
 const OPT_OUT := "or, for a real overlay meant to cover the cards too, mark it `# see-through-ok: why`"
 ## .tscn / .tres materials allowed to stay over the UI ("res://path::sub_resource id"), with the reason.
 const RESOURCE_OK := {}
 
 var fails: Array[String] = []
 var raw_re := RegEx.create_from_string("\\.transparency\\s*=(?!=)\\s*(.*\\bTRANSPARENCY_ALPHA(_DEPTH_PRE_PASS)?\\b|[14]\\s*(#|$))|set\\(\\s*\"transparency\"")
+var node_re := RegEx.create_from_string("(\\.|^\\s*)transparency\\s*[-+*/]?=(?!=)|\\btween_property\\([^,]+,\\s*\"transparency\"|\\bset_transparency\\(")
 var alpha_re := RegEx.create_from_string("\\bALPHA\\s*[-+*/]?=[^=]")
 var func_re := RegEx.create_from_string("^\\s*(static\\s+)?func\\s+(\\w+)")
 var const_re := RegEx.create_from_string("^\\s*(const|var)\\s+(\\w+)[^=]*=\\s*\"\"\"")
@@ -97,6 +102,9 @@ func _check_script(path: String, text: String) -> Array[String]:
 				var mark := _ok_mark(lines, i)
 				if mark != "ok":
 					out.append("%s:%d sets a see-through material by hand (`%s`): %s, %s" % [path, i + 1, l.strip_edges(), USE, OPT_OUT])
+			elif node_re.search(probe) != null and not probe.contains("TRANSPARENCY_"):
+				if _ok_mark(lines, i) != "ok":
+					out.append("%s:%d fades a node by its transparency float by hand (`%s`): it draws over VR cards at its material's priority; %s, %s" % [path, i + 1, l.strip_edges(), USE_FADE, OPT_OUT])
 			if l.find("see-through-ok") >= 0 and _ok_mark(lines, i) == "bad":
 				out.append("%s:%d `see-through-ok` needs a reason: `# see-through-ok: why it must draw over VR cards`" % [path, i + 1])
 		else:
@@ -117,7 +125,13 @@ func _check_script(path: String, text: String) -> Array[String]:
 		var a: int = order[k][1]
 		var b: int = order[k + 1][1] if k + 1 < order.size() else lines.size()
 		var body := "\n".join(lines.slice(a, b))
-		funcs[order[k][0]] = {"a": a, "b": b, "st": body.contains("see_through(")}
+		funcs[order[k][0]] = {"a": a, "b": b, "st": body.contains("see_through("), "stn": body.count("see_through("), "body": body}
+	# each see_through call covers ONE material: a call to a helper of this script that calls it counts as one too
+	for f in funcs:
+		for h in funcs:
+			if h != f and funcs[h].st:
+				funcs[f].stn += RegEx.create_from_string("\\b%s\\(" % h).search_all(funcs[f].body).size()
+	var cands: Array = []  # [blk, users, via_helper]
 	for blk in blocks:
 		var body: String = blk.body
 		if not body.contains("shader_type spatial") or alpha_re.search(body) == null:
@@ -132,16 +146,38 @@ func _check_script(path: String, text: String) -> Array[String]:
 		var mark := _ok_mark(lines, open)
 		if mark == "ok":
 			continue
-		if _shader_goes_through(lines, funcs, blk):
+		cands.append(_shader_users(lines, funcs, blk))
+	# per material: a function using N blended shaders (not handed to a see_through helper) needs N see_through calls
+	var need := {}
+	for c in cands:
+		if not c[2]:
+			for u in c[1]:
+				need[u] = int(need.get(u, 0)) + 1
+	for c in cands:
+		if c[2]:
+			continue
+		var blk: Dictionary = c[0]
+		var ok := false
+		var short := ""
+		for u in c[1]:
+			if funcs[u].stn >= int(need[u]):
+				ok = true
+			elif funcs[u].stn > 0:
+				short = "%s() uses %d see-through shaders but calls see_through only %d time(s)" % [u, need[u], funcs[u].stn]
+		if ok:
 			continue
 		var what := "shader %s" % blk.name if blk.name != "" else "the shader opened here"
-		out.append("%s:%d %s blends by ALPHA but its material never goes through UiKit.see_through: call UiKit.see_through(shader_material) where it's made (it sets VR_PRIO_UNDER_UI), %s (above the line that opens the shader)" % [path, open + 1, what, OPT_OUT])
+		if short != "":
+			out.append("%s:%d %s blends by ALPHA but its material may not go through UiKit.see_through: %s (one call per material, or pass each shader to a helper that calls it), %s (above the line that opens the shader)" % [path, int(blk.open) + 1, what, short, OPT_OUT])
+		else:
+			out.append("%s:%d %s blends by ALPHA but its material never goes through UiKit.see_through: call UiKit.see_through(shader_material) where it's made (it sets VR_PRIO_UNDER_UI), %s (above the line that opens the shader)" % [path, int(blk.open) + 1, what, OPT_OUT])
 	return out
 
 
-## A blended shader is fine when a function that uses it (or makes it inline) calls see_through, or passes it to a
-## function of this script that does (Ghost Lantern's shader_mat(code)).
-func _shader_goes_through(lines: PackedStringArray, funcs: Dictionary, blk: Dictionary) -> bool:
+## [blk, the functions using the shader (or making it inline), passed straight into a helper of this script that calls
+## see_through (Ghost Lantern's shader_mat(code): each call makes its own material)]. A shader is fine when handed to
+## such a helper, or when a function using it calls see_through at least once per blended shader it uses.
+func _shader_users(lines: PackedStringArray, funcs: Dictionary, blk: Dictionary) -> Array:
 	var users: Array[String] = []
 	var nm: String = blk.name
 	if nm == "":
@@ -154,11 +190,12 @@ func _shader_goes_through(lines: PackedStringArray, funcs: Dictionary, blk: Dict
 				# passed straight into a helper of this script: shader_mat(GHOST_SHADER)
 				var cm := RegEx.create_from_string("(\\w+)\\([^()]*\\b%s\\b" % nm).search(lines[i])
 				if cm != null and funcs.has(cm.get_string(1)) and funcs[cm.get_string(1)].st:
-					return true
+					return [blk, [], true]
+	var uniq: Array[String] = []
 	for u in users:
-		if u != "" and funcs.has(u) and funcs[u].st:
-			return true
-	return false
+		if u != "" and funcs.has(u) and not uniq.has(u):
+			uniq.append(u)
+	return [blk, uniq, false]
 
 
 func _func_at(funcs: Dictionary, line: int) -> String:
@@ -219,6 +256,14 @@ func _runtime() -> void:
 	UiKit.see_through(s)
 	if s.render_priority != UiKit.VR_PRIO_UNDER_UI:
 		fails.append("UiKit.see_through(shader_material) must set VR_PRIO_UNDER_UI")
+	var fm := StandardMaterial3D.new()  # opaque, priority 0
+	var mi := MeshInstance3D.new()
+	mi.mesh = BoxMesh.new()
+	mi.material_override = fm
+	UiKit.fade3d(mi, 0.4)
+	if not is_equal_approx(mi.transparency, 0.4) or fm.render_priority > UiKit.VR_PRIO_UNDER_UI:
+		fails.append("UiKit.fade3d(node, 0.4) must set the node's transparency AND drop its materials to VR_PRIO_UNDER_UI (got %.2f / %d)" % [mi.transparency, fm.render_priority])
+	mi.free()
 	if UiKit.VR_PRIO_UNDER_UI >= UiKit.VR_PRIO_PANEL:
 		fails.append("UiKit.VR_PRIO_UNDER_UI (%d) must be under UiKit.VR_PRIO_PANEL (%d)" % [UiKit.VR_PRIO_UNDER_UI, UiKit.VR_PRIO_PANEL])
 
@@ -240,6 +285,21 @@ func _self_test() -> void:
 		["const S := \"\"\"\nshader_type spatial;\nrender_mode blend_mix;\nvoid fragment() { ALPHA = 0.5; }\n\"\"\"\nfunc f():\n\tvar sm := ShaderMaterial.new()\n\tsm.shader = Shader.new()\n\tsm.shader.code = S\n\tUiKit.see_through(sm)\n", 0],
 		["const S := \"\"\"\nshader_type spatial;\nrender_mode blend_add;\nvoid fragment() { ALPHA = 0.5; }\n\"\"\"\nfunc f():\n\tmk(S)\n", 0],
 		["const S := \"\"\"\nshader_type spatial;\nvoid fragment() { ALPHA = 0.5; }\n\"\"\"\nfunc f():\n\tmk(S)\nfunc mk(c):\n\tvar sm := ShaderMaterial.new()\n\tUiKit.see_through(sm)\n", 0],
+		["\tmi.transparency = 0.45\n", 1],
+		["\tmi.transparency = 0.0 if on else 0.45\n", 1],
+		["\ttransparency = 0.5\n", 1],
+		["\ttw.tween_property(g, \"transparency\", 1.0, 0.2)\n", 1],
+		["\tg.set_transparency(0.3)\n", 1],
+		["\ttw.tween_property(g, \"transparency\", 1.0, 0.2)  # see-through-ok: a VR card fading itself\n", 0],
+		["\tUiKit.fade3d(mi, 0.45)\n", 0],
+		["\tif mi.transparency == 0.0:\n", 0],
+		["\tvar transparency := 0.5\n", 0],
+		["\tm.transparency = BaseMaterial3D.TRANSPARENCY_DISABLED\n", 0],
+		# per material: two blended shaders and one see_through call in the function using both -> one slips through
+		["const A := \"\"\"\nshader_type spatial;\nvoid fragment() { ALPHA = 0.5; }\n\"\"\"\nconst B := \"\"\"\nshader_type spatial;\nvoid fragment() { ALPHA = 0.3; }\n\"\"\"\nfunc f():\n\tvar a := ShaderMaterial.new()\n\ta.shader = Shader.new()\n\ta.shader.code = A\n\tvar b := ShaderMaterial.new()\n\tb.shader = Shader.new()\n\tb.shader.code = B\n\tUiKit.see_through(a)\n", 2],
+		["const A := \"\"\"\nshader_type spatial;\nvoid fragment() { ALPHA = 0.5; }\n\"\"\"\nconst B := \"\"\"\nshader_type spatial;\nvoid fragment() { ALPHA = 0.3; }\n\"\"\"\nfunc f():\n\tvar a := ShaderMaterial.new()\n\ta.shader = Shader.new()\n\ta.shader.code = A\n\tvar b := ShaderMaterial.new()\n\tb.shader = Shader.new()\n\tb.shader.code = B\n\tUiKit.see_through(a)\n\tUiKit.see_through(b)\n", 0],
+		["const A := \"\"\"\nshader_type spatial;\nvoid fragment() { ALPHA = 0.5; }\n\"\"\"\nconst B := \"\"\"\nshader_type spatial;\nvoid fragment() { ALPHA = 0.3; }\n\"\"\"\nfunc f():\n\tvar a := mk(A)\n\tvar b := mk(B)\nfunc mk(c):\n\tvar sm := ShaderMaterial.new()\n\tUiKit.see_through(sm)\n\treturn sm\n", 0],
+		["func f():\n\tvar a := ShaderMaterial.new()\n\ta.shader = Shader.new()\n\ta.shader.code = \"\"\"\nshader_type spatial;\nvoid fragment() { ALPHA = 0.5; }\n\"\"\"\n\tvar b := ShaderMaterial.new()\n\tb.shader = Shader.new()\n\tb.shader.code = \"\"\"\nshader_type spatial;\nvoid fragment() { ALPHA = 0.3; }\n\"\"\"\n\tUiKit.see_through(b)\n", 2],
 		["const S := \"\"\"\nshader_type canvas_item;\nvoid fragment() { COLOR.a = 0.5; }\n\"\"\"\n", 0],
 	]
 	for c in cases:

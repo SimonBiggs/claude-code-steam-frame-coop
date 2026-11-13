@@ -57,7 +57,6 @@ const BUILD_PICS := {"lighthouse": "lighthouse", "castle": "castle", "clock": "c
 const SPECIAL_LINES := {4: ["Bouncy block!", "bouncyblock"], 5: ["Sticky honey block!", "honeyblock"], 6: ["Balloon block!", "balloonblock"]}
 const WREN_COLOR := Color(0.62, 0.42, 0.25)
 const TOWN_CHEERS := {1: "Our town!", 5: "Five towers!", 10: "Ten towers!", 20: "A big town!", 30: "A city!"}
-const STORY_GAP := 2.6  # seconds between queued story cards (tell())
 const CHEER := 3.5  # seconds a finished tower stands with its roof before it flies to the town
 const SNAP_R := 0.22  # a gentle place this close to a plan spot of the same block snaps onto it
 
@@ -216,7 +215,6 @@ var try_rolls := false  # TS_TRY=rollers (and bots): a roll early in every job
 var round_rolls := 0
 var roll_hits := 0  # TV builders bowled over (this machine's local players)
 var unwarned_hits := 0  # hits by a ball whose lane showed for less than Rollers.MIN_WARN (must stay 0)
-var story_free_t := 0.0  # clock time when the next queued story card may show (tell())
 
 
 func _ready() -> void:
@@ -977,7 +975,7 @@ func _begin_build_pick(choices: Array) -> void:
 			"color": Looks.COLORS[int(s.palette[0])]})
 		jobs.append(G.job_of(s))
 	picks.begin("build", entries, jobs, _on_picked)
-	tell("What next?", "wren", WREN_COLOR)
+	story("What next?", "wren", WREN_COLOR)
 
 
 ## Host: the team chose (or the middle orb was taken for them).
@@ -1044,28 +1042,17 @@ func _next_job(chosen: Dictionary = {}) -> void:
 	if not rollers.rolls.is_empty() and (job_n == 1 or try_rolls):
 		beats.append(["Rolo rolls balls!", "hedgehog", RollersScript.COLOR])
 	for b in beats:
-		tell(b[0], b[1], b[2])
+		story(b[0], b[1], b[2])
 
 
-## A story beat in turn: cards never knock each other off (a district's card used to vanish under "What next?").
-## Hazard tells (weather, Rolo's balls) call story() at once instead.
-func tell(line: String, pic: String = "wren", color: Color = WREN_COLOR) -> void:
-	var at := maxf(clock, story_free_t)
-	story_free_t = at + STORY_GAP
-	if at <= clock + 0.01:
-		story(line, pic, color)
-		return
-	get_tree().create_timer(at - clock).timeout.connect(func() -> void:
-		if is_inside_tree() and not results_showing():
-			story(line, pic, color))
-
-
-## A story beat: a picture and a few words on every view; VR: the giant's headline. Host broadcasts.
-func story(line: String, pic: String = "wren", color: Color = WREN_COLOR, broadcast: bool = true) -> void:
-	StoryCard.show(_all_huds(), {"who": "WREN" if pic == "wren" else "", "line": line, "pic": pic, "color": color, "duration": 2.8})
+## A story beat: a picture and a few words on every view; VR: the giant's headline. Host broadcasts. Beats take turns
+## (core/story_card.gd: each card is read MIN_READ s before the next replaces it); hazard tells (weather, Rolo's
+## balls) are urgent: they replace the card at once.
+func story(line: String, pic: String = "wren", color: Color = WREN_COLOR, broadcast: bool = true, urgent := false) -> void:
+	StoryCard.show(_all_huds(), {"who": "WREN" if pic == "wren" else "", "line": line, "pic": pic, "color": color, "duration": 2.8, "urgent": urgent})
 	_vr_say(line, 2.4)
 	if broadcast and net.mode == "host":
-		net.event("story", [line, pic, color])
+		net.event("story", [line, pic, color, urgent])
 
 
 ## Host: the tower reached the hoop and held: roof on, Wren cheers, it joins the town, next job.
@@ -1128,18 +1115,18 @@ func _tower_to_town() -> void:
 	var count := int(save.data.built)
 	net.state_set("made", count)
 	var folk := GreenScript.neighbour(count - 1)  # the friend this tower brings moves onto the village green
-	tell("%s moves in!" % String(folk.name), String(folk.pic), Color(0.55, 0.85, 0.45))
+	story("%s moves in!" % String(folk.name), String(folk.pic), Color(0.55, 0.85, 0.45))
 	var gp := GreenScript.piece_at(count)
 	if not gp.is_empty():
-		tell(String(gp.line), String(gp.pic), Color(0.55, 0.85, 0.45))
+		story(String(gp.line), String(gp.pic), Color(0.55, 0.85, 0.45))
 	var d := Districts.opened_at(count)
 	if not d.is_empty():  # a new district of Wren's town (and maybe a new special block)
-		tell(String(d.name) + "!", String(d.pic), d.color)
+		story(String(d.name) + "!", String(d.pic), d.color)
 		var k := int(d.opens)
 		if k >= 0:
-			tell("New: " + String(SPECIAL_LINES[k][0]).to_lower().capitalize(), String(SPECIAL_LINES[k][1]), Looks.block_color(0, k))
+			story("New: " + String(SPECIAL_LINES[k][0]).to_lower().capitalize(), String(SPECIAL_LINES[k][1]), Looks.block_color(0, k))
 	elif TOWN_CHEERS.has(count):
-		tell(TOWN_CHEERS[count], "house", Looks.COLORS[int(site.palette[0])])
+		story(TOWN_CHEERS[count], "house", Looks.COLORS[int(site.palette[0])])
 	var choices := _build_choices()
 	if choices.is_empty():
 		_next_job()
@@ -1530,7 +1517,7 @@ func weather_warn(kind: String) -> void:
 	sound("whoosh" if kind == "gust" else "crash", -6.0, 0.7)
 	if net.mode != "client":
 		round_events += 1
-		story("Big wind!" if kind == "gust" else "Quake!", "gust" if kind == "gust" else "quake", weather.COLORS.get(kind, Color.WHITE))
+		story("Big wind!" if kind == "gust" else "Quake!", "gust" if kind == "gust" else "quake", weather.COLORS.get(kind, Color.WHITE), true, true)
 		net.event("weather", [kind])
 
 
@@ -1542,7 +1529,7 @@ func roll(ro: Array) -> void:
 		round_rolls += 1
 		net.state_set("rolls", int(net.state_get("rolls", 0)) + 1)  # (bots count it with watch_state)
 		var b: Array = RollersScript.BALLS.get(season, RollersScript.BALLS["summer"])
-		story(String(RollersScript.NAMES.get(season, "Rolling ball!")), String(b[0]), RollersScript.COLOR)
+		story(String(RollersScript.NAMES.get(season, "Rolling ball!")), String(b[0]), RollersScript.COLOR, true, true)
 		net.event("roll", [ro])
 
 
@@ -2065,7 +2052,7 @@ func apply_event(kind: String, args: Array) -> void:
 		"built":
 			built_fx(args[0], bool(args[1]))
 		"story":
-			story(String(args[0]), String(args[1]), args[2], false)
+			story(String(args[0]), String(args[1]), args[2], false, args.size() > 3 and bool(args[3]))
 		"weather":
 			weather_warn(String(args[0]))
 		"roll":

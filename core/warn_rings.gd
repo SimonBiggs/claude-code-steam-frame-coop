@@ -225,7 +225,7 @@ func _process(delta: float) -> void:
 			"rings":
 				_shape_scale(w, (0.9 + 0.1 * absf(sin(t * 12.0))) * grow)
 			"disc":
-				n.transparency = 0.35 + 0.35 * sin(t * 14.0)
+				UiKit.fade3d(n, 0.35 + 0.35 * sin(t * 14.0))
 				_shape_scale(w, grow if String(w.kind) != "ring" else 0.25 * grow)
 			"flash":
 				var k := t / maxf(secs, 0.01)

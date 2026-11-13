@@ -2164,8 +2164,6 @@ func show_story(beat: Dictionary) -> void:
 		StoryCard.show(huds, beat)
 	var tl = players[0] if not players.is_empty() else null
 	if tl != null and tl.vr and tl.xr_camera != null:
-		if vr_story != null and is_instance_valid(vr_story):
-			vr_story.call("hide_card")
 		var opts := beat.duplicate()
 		opts["vr_height"] = 0.18  # above the level's headline
 		vr_story = StoryCard.show_vr(self, tl.xr_camera, opts)

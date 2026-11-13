@@ -1384,8 +1384,6 @@ func story(beat: Dictionary, broadcast: bool = true) -> void:
 			huds.append(p.hud)
 	StoryCard.show(huds, beat)
 	if players.size() > 0 and players[0].vr_like() and players[0].xr_camera != null and players[0].is_local():
-		if vr_story != null and is_instance_valid(vr_story):
-			vr_story.queue_free()  # a newer card replaces the one showing (as on the TV)
 		vr_story = StoryCard.show_vr(self, players[0].xr_camera, beat)
 
 

@@ -2441,7 +2441,7 @@ func _lift_low_cards() -> void:
 			continue
 		for c in (h as Node).get_children():
 			if c is StoryCard.Card and float((c as StoryCard.Card).opts.get("y", 0.0)) > 0.5:
-				(c as StoryCard.Card).leave()
+				(c as StoryCard.Card).leave(0.3, true)  # (on purpose: out of the drawer's way)
 
 
 ## Where the big message sits: across the middle (y 0.42 of the screen), or low under the easel at the end (the

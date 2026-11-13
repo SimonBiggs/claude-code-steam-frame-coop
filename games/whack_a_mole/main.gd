@@ -938,8 +938,6 @@ func _story(beat: Dictionary) -> void:
 func show_story(beat: Dictionary) -> void:
 	StoryCard.show(_all_huds(), beat)
 	if vr_rig != null:
-		if vr_story != null and is_instance_valid(vr_story):
-			vr_story.queue_free()
 		vr_story = StoryCard.show_vr(self, vr_rig.camera, beat)
 
 

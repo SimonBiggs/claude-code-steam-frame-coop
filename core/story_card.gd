@@ -1,7 +1,9 @@
 extends RefCounted
 ## StoryCard: short story beats told with a picture and one short line, for every game's light story.
 ## Never blocks play and never needs a button: the card slides in, stays a few seconds, slides out.
-## A newer card replaces the one showing. TV: a card at the top of each view (under the timer), so the
+## A newer card replaces the one showing once that one has been up MIN_READ s: until then it waits its turn (TV and
+## VR alike), so a card is never knocked off before it can be read (Tower Stack's district card vanished at once
+## under "What next?", 2026-11-13). opts.urgent = true (a hazard warning, a countdown) replaces it at once instead. TV: a card at the top of each view (under the timer), so the
 ## picture and the words are big on a Deck too. VR: a world-space card a little below eye level.
 ##   const StoryCard := preload("res://core/story_card.gd")
 ##   StoryCard.show(huds_array, {"who": "PIP", "line": "The wind took my letters!", "pic": "bird",
@@ -43,6 +45,38 @@ static func check() -> Array[String]:
 	return Registry.check(SHARED_PICTURES, "res://core/story_card.gd")
 
 
+## Every card stays up at least this long before a newer one takes its place (opts.urgent skips the wait).
+const MIN_READ := 2.0
+## A card gone sooner than this (and sooner than its own duration) without opts.urgent was knocked off: counted in
+## Engine meta SHORT_META, and tests/bot_kit.gd finish() fails the bot for it.
+const SHORT_READ := 1.5
+const SHORT_META := "story_card_short"
+## At most this many cards wait their turn on one view (the oldest waiting one drops: a pile-up is stale news).
+const MAX_WAITING := 3
+
+
+static func _urgent(opts: Dictionary) -> bool:
+	return bool(opts.get("urgent", false)) or bool(opts.get("replace", false))
+
+
+## A story card that went away before anyone could read it (not urgent-replaced, not its own short duration, and its
+## view is still there: a whole view or scene going away doesn't count). Checked a frame later for that reason.
+static func _note_gone(parent: Node, shown: float, duration: float, line: String) -> void:
+	if shown >= SHORT_READ or duration < SHORT_READ or parent == null:
+		return
+	var tree := Engine.get_main_loop() as SceneTree
+	if tree == null or tree.has_meta("bot_quitting"):
+		return
+	var wr: WeakRef = weakref(parent)
+	tree.process_frame.connect(func() -> void:
+		var p := wr.get_ref() as Node
+		if p == null or not p.is_inside_tree() or p.is_queued_for_deletion():
+			return
+		Engine.set_meta(SHORT_META, int(Engine.get_meta(SHORT_META, 0)) + 1)
+		push_warning("StoryCard: \"%s\" was knocked off after %.1f s (a card stays up %.1f s; opts.urgent replaces on purpose)" % [line, shown, MIN_READ])
+		print("STORY CARD: \"%s\" knocked off after %.1f s (core/story_card.gd MIN_READ)" % [line, shown]), CONNECT_ONE_SHOT)
+
+
 ## The last card shown (its roots and opts), so tests can show it again on demand (replay()).
 static var _last_roots: Array = []
 static var _last_opts: Dictionary = {}
@@ -63,11 +97,19 @@ static func show(root: Variant, opts: Dictionary) -> Control:
 	var parent := root as Control
 	if parent == null or not is_instance_valid(parent):
 		return null
+	var urgent := _urgent(opts)
+	var waiting: Array = []
 	for old in parent.get_children():
-		if old is Card:
-			(old as Card).leave(0.08)  # out of the way at once: two cards on top of each other read as neither
+		if old is Card and not (old as Card).leaving:
+			if urgent:
+				(old as Card).leave(0.08, true)  # out of the way at once, on purpose (and the ones waiting: stale now)
+			elif (old as Card).waiting:
+				waiting.append(old)
+	while waiting.size() >= MAX_WAITING:
+		(waiting.pop_front() as Card).leave(0.0, true)
 	var c := Card.new()
 	c.opts = opts
+	c.waiting = not urgent  # (shows at once when nothing is being read: Card._try_start)
 	parent.add_child(c)
 	return c
 
@@ -81,6 +123,7 @@ static func replay(duration: float = 3.0) -> Control:
 	var o := _last_opts.duplicate()
 	o["duration"] = duration
 	o["sound"] = ""
+	o["urgent"] = true  # (a test looking at the card now: no waiting its turn)
 	return show(roots, o)
 
 
@@ -106,6 +149,17 @@ static func is_story(n: Node) -> bool:
 static func show_vr(world: Node, cam: Node3D, opts: Dictionary) -> Node3D:
 	if world == null or cam == null:
 		return null
+	var urgent := _urgent(opts)
+	var waiting: Array = []
+	for old in _vr_cards(world):
+		if urgent:
+			old.set_meta("story_urgent_out", true)
+			old.call("hide_card")
+		elif old.has_meta("story_waiting"):
+			waiting.append(old)
+	while waiting.size() >= MAX_WAITING:
+		var w: Node = waiting.pop_front()
+		w.queue_free()  # (never shown: a waiting card that drops was not knocked off)
 	var card := HudKit.vr_card(world, cam, String(opts.get("who", "")), String(opts.get("line", "")),
 		{"duration": float(opts.get("duration", 4.0)), "color": opts.get("color", "accent"), "width": 1.0,
 		"height": float(opts.get("vr_height", -0.22)), "title_size": 0.07, "body_size": 0.055})
@@ -115,7 +169,69 @@ static func show_vr(world: Node, cam: Node3D, opts: Dictionary) -> Node3D:
 		card.add_child(StoryCardPics.vr_medallion(pic, UiKit.color_of(opts.get("color", "accent"), UiKit.ACCENT), card))
 	# A diorama game (XROrigin3D.world_scale > 1, e.g. Giant's Table 20, Block Builders 8): UiKit.vr_place scales the
 	# card with XRServer.world_scale itself (opts.world_scale is no longer needed and ignored).
+	# Its turn: replaces the card before it (games never free it themselves: tests/story_pictures_test.gd), or waits
+	# hidden until that one has been read (VrGate).
+	var dur := float(opts.get("duration", 4.0))
+	var line := String(opts.get("line", ""))
+	card.tree_exiting.connect(func() -> void:
+		if not card.has_meta("story_waiting") and not card.has_meta("story_urgent_out"):
+			_note_gone(card.get_parent(), float(card.get("t")) - (0.2 if bool(card.get("_hiding")) else 0.0), dur, line))
+	if not urgent and not _vr_try(card):
+		card.set_meta("story_waiting", true)
+		card.visible = false
+		card.process_mode = Node.PROCESS_MODE_DISABLED  # (no clock, no follow, its fade-in held until its turn)
+		var gate := VrGate.new()
+		gate.card = card
+		world.add_child(gate)
 	return card
+
+
+## The world's VR story cards still showing or waiting (not fading out), oldest first.
+static func _vr_cards(world: Node) -> Array:
+	var out: Array = []
+	for c in world.get_children():
+		if c.is_in_group(VR_GROUP) and not c.is_queued_for_deletion() and not bool(c.get("_hiding")):
+			out.append(c)
+	return out
+
+
+## Can this VR card show now? Yes when no older card is being read; an older one read for MIN_READ s fades out for it.
+static func _vr_try(card: Node) -> bool:
+	var prev: Node = null
+	for c in _vr_cards(card.get_parent()):
+		if c == card:
+			break
+		prev = c
+	if prev == null:
+		return true
+	if prev.has_meta("story_waiting") or float(prev.get("t")) < MIN_READ:
+		return false
+	prev.call("hide_card")
+	return true
+
+
+## Holds a waiting VR story card until its turn, then shows it where the head looks now.
+class VrGate extends Node:
+	const UiKit := preload("res://core/ui_kit.gd")
+	const Outer := preload("res://core/story_card.gd")
+	var card: Node3D
+
+	func _process(_delta: float) -> void:
+		if card == null or not is_instance_valid(card) or card.is_queued_for_deletion():
+			queue_free()
+			return
+		if not Outer._vr_try(card):
+			return
+		card.remove_meta("story_waiting")
+		card.visible = true
+		card.process_mode = Node.PROCESS_MODE_INHERIT
+		card.set("t", 0.0)
+		var cam: Node3D = card.get("cam")
+		if cam != null and is_instance_valid(cam):
+			UiKit.vr_place(card, cam, float(card.get("distance")), float(card.get("height")))
+		card.call("_step_aside")
+		queue_free()
+
 
 
 ## A picture Control `px` pixels square (see SHARED_PICTURES and games/*/story_pictures.gd; other names use UiKit icons).
@@ -144,10 +260,12 @@ static func sprite(kind: String, px: int = 192, color: Color = Color(1.0, 0.75, 
 
 class Card extends Control:
 	const UiKit := preload("res://core/ui_kit.gd")
+	const Outer := preload("res://core/story_card.gd")
 	var opts := {}
 	var panel: PanelContainer
 	var t := 0.0
 	var leaving := false
+	var waiting := false  # waiting its turn behind a card still being read (MIN_READ): hidden, clock stopped
 	var _line: Label
 	var _s := 1.0
 
@@ -184,11 +302,36 @@ class Card extends Control:
 		panel.resized.connect(_place)
 		_place.call_deferred()
 		modulate.a = 0.0
+		if waiting and not _try_start():
+			visible = false
+			return
+		_start()
+
+	func _start() -> void:
+		waiting = false
+		visible = true
+		t = 0.0
+		modulate.a = 0.0
 		var tw := create_tween()
 		tw.tween_property(self, "modulate:a", 1.0, 0.25)
 		var snd := String(opts.get("sound", "ui_notify"))
 		if snd != "":
 			UiKit.sound(snd, -6.0)
+
+	## Its turn? Yes when no older card on this view is being read; one read for MIN_READ s leaves for it.
+	func _try_start() -> bool:
+		var prev: Card = null
+		for c in get_parent().get_children():
+			if c == self:
+				break
+			if c is Card and not (c as Card).leaving:
+				prev = c
+		if prev == null:
+			return true
+		if prev.waiting or prev.t < Outer.MIN_READ:
+			return false
+		prev.leave(0.08)
+		return true
 
 	func _place() -> void:
 		if panel == null:
@@ -224,15 +367,25 @@ class Card extends Control:
 				return true
 		return false
 
-	func leave(time: float = 0.3) -> void:
+	## Fade out and go. on_purpose: an urgent card replaced it, or a waiting card dropped (never counted as knocked off).
+	func leave(time: float = 0.3, on_purpose := false) -> void:
 		if leaving:
 			return
 		leaving = true
+		if not on_purpose and not waiting:
+			Outer._note_gone(get_parent(), t, float(opts.get("duration", 4.0)), String(opts.get("line", "")))
+		if time <= 0.0:
+			queue_free()
+			return
 		var tw := create_tween()
 		tw.tween_property(self, "modulate:a", 0.0, time)
 		tw.tween_callback(queue_free)
 
 	func _process(delta: float) -> void:
+		if waiting:
+			if not _try_start():
+				return
+			_start()
 		t += delta
 		_place()  # (a results screen can open while the card shows)
 		if not leaving and t > float(opts.get("duration", 4.0)):

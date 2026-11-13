@@ -7,6 +7,7 @@ extends Node3D
 
 const W := preload("res://games/bee_garden/world.gd")
 const Story := preload("res://games/bee_garden/story.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 const POS := Vector3(-5.5, W.LAWN_Y, -2.35)
 const BOARDS: Array[float] = [1.2, 2.1, 3.0, 3.9]   # board heights above the lawn
@@ -142,7 +143,7 @@ func _build_queen() -> void:
 		wing.set_meta("side", sx)
 		queen.add_child(wing)
 		var wm := W.mesh_node(wing, W.sphere(0.2, 8), W.cmat(Color(0.92, 0.97, 1.0)), Vector3(sx * 0.16, 0.0, 0.0), Vector3(1.0, 0.12, 0.55))
-		wm.transparency = 0.35
+		UiKit.fade3d(wm, 0.35)
 		wings.append(wing)
 	# She sits on the hive roof (world.gd HIVE_POS), facing the garden.
 	queen.position = W.HIVE_POS + Vector3(0.0, 1.42, 0.0) - POS

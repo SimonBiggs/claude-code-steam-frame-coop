@@ -815,7 +815,7 @@ func _refresh_all() -> void:
 		if on:
 			(t.label as Label3D).text = String(answers[i])
 			var dim := correct >= 0 and i != correct
-			(t.panel as GeometryInstance3D).transparency = 0.75 if dim else 0.0
+			(t.panel as GeometryInstance3D).transparency = 0.75 if dim else 0.0  # see-through-ok: the studio screen's answer tile is a UiKit panel (VR_PRIO_PANEL) dimming itself
 			(t.label as Label3D).modulate = Color(1, 1, 1, 0.35) if dim else Color.WHITE
 	_refresh_picture(show_pic, String(q.get("pic", "")), int(q.get("id", 0)), int(net.state_get("tiles", 0)))
 	# VR desk

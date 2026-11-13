@@ -15,7 +15,7 @@ var want := 2
 var saw_results := false
 var saw_finale := false
 var jumps := 0
-var late := false  # this machine joined a game already running (BOT_LATE)
+var late := false  # this machine joined a game already running (BotKit.joined_late)
 var saw_orbs := false  # the pick orbs showed on this machine (skies.gd modes / Poppy's gifts)
 var saw_gust_rings := false  # a wind gust's warn rings showed on this machine
 var gusts_planned := 0  # host: gusts in the rounds played
@@ -42,15 +42,13 @@ func _ready() -> void:
 	var client := OS.has_environment("DUO_JOIN")
 	var host := OS.has_environment("DUO_HOST")
 	var t0 := 3.0 if client else 1.0
-	# A machine joining a game already running (tools/multibot.ts --late: BOT_LATE s after the others) lands mid-round,
+	# A machine joining a game already running (tools/multibot.ts --late: some seconds after the others) lands mid-round,
 	# mid-pick or on the results: it only joins, plays and checks what reached it (the pause, jump and drop-in steps
 	# belong to the machines there from the start).
-	late = client and OS.has_environment("BOT_LATE")
+	late = BotKit.joined_late()
 	kit.at(t0, "%d TV players press A on their pads" % want, _join)
 	if late:
-		kit.at(maxf(12.0, 40.0 - float(OS.get_environment("BOT_LATE"))), "finish (joined late)", func() -> void:
-			_checks()
-			kit.finish())
+		kit.finish_at(40.0, _checks)
 		kit.every(2.0, _report)
 		kit.every(0.25, _watch_results)
 		return
