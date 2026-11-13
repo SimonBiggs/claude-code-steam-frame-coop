@@ -34,7 +34,7 @@ const KEEP := 40  # friends kept in the save
 const POND_R := 3.2  # == world.gd's pond
 const GROW := 0.12  # the pond's radius grows this much per friend...
 const POND_MAX := 4.6  # ...up to this (it grows outward: its near edge stays by the fence)
-const SKATER := 0.55  # a skater's size (metres tall-ish)
+const SKATER := 0.75  # a skater's size (metres tall-ish)
 
 var pond: Node3D
 var pond_home := Vector3.ZERO

@@ -24,8 +24,9 @@ const HATS := {"spring": Color(0.92, 0.35, 0.6), "summer": Color(0.9, 0.75, 0.35
 const BRIM := {"summer": 1.7}  # brim width times the top hat's
 const DRIFT := {"spring": Color(1.0, 0.7, 0.85), "summer": Color(1.0, 0.85, 0.3), "autumn": Color(0.9, 0.45, 0.12)}
 const PROP_R := 22.3  # between the lamps (21.4) and the picket fence (23.2)
-const PROP_N := 10
-const PROP_SIZE := 1.3
+const PROP_N := 11
+const ARENA_RADIUS := 20.0  # == main.gd (the deep3 test checks)
+const PROP_SIZE := 2.0
 const TREE_GAP := 0.35  # radians kept clear round the big tree straight ahead (-Z)
 
 var season := ""
@@ -37,12 +38,14 @@ static func hat(s: String) -> Color:
 	return HATS.get(s, HATS["winter"])
 
 
-## Where the props stand: evenly round the square, skipping the big tree straight ahead.
+## Where the props stand: evenly round the square, skipping the big tree straight ahead and the pond.
 static func spots() -> Array[Vector3]:
 	var out: Array[Vector3] = []
 	for i in PROP_N:
 		var a := -PI / 2.0 + TREE_GAP + (TAU - 2.0 * TREE_GAP) * (float(i) + 0.5) / float(PROP_N)
-		out.append(Vector3(cos(a), 0.0, sin(a)) * PROP_R)
+		var p := Vector3(cos(a), 0.0, sin(a)) * PROP_R
+		if preload("res://games/snowball_blitz/world.gd").pond_clear(p, ARENA_RADIUS, 1.5):  # (not by Bobo's pond)
+			out.append(p)
 	return out
 
 

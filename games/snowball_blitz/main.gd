@@ -382,12 +382,10 @@ func mat(mat_name: String) -> StandardMaterial3D:
 		"ice":
 			m = make_material(Color(0.6, 0.85, 1.0, 0.45), 0.6)
 			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			m.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # (see-through scenery: under VR cards)
 			m.roughness = 0.1
 		"thaw":
 			m = make_material(Color(1.0, 0.65, 0.3, 0.35), 1.0)
 			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			m.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # (see-through scenery: under VR cards)
 		"skin":
 			m = make_material(Color(1.0, 0.8, 0.65), 0.0)
 		"lid":
@@ -403,7 +401,6 @@ func mat(mat_name: String) -> StandardMaterial3D:
 		"steam":
 			m = make_material(Color(1, 1, 1, 0.35), 0.0)
 			m.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-			m.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # (see-through scenery: under VR cards)
 			m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		_:
 			if mat_name.begins_with("scarf"):
@@ -3003,7 +3000,7 @@ func _trick_tick(delta: float) -> void:
 func _trick_show(w: int, t: Dictionary) -> void:
 	var col: Color = Tricks.COLORS.get(String(t.kind), Color.ORANGE)
 	for z in Tricks.zones(t):
-		rings.shape(String(z.kind), z.pos, z.dir, z.size, col, float(t.tell), {"style": "disc", "stay": 0.4})
+		rings.shape(String(z.kind), z.pos, z.dir, z.size, col, float(t.tell), {"style": "disc", "stay": 0.4, "alpha": 0.5})
 	trick_log.append([w, String(t.kind), siege_t, -1.0])
 	print("SURPRISE told: wave %d %s for %.1f s" % [w, t.kind, float(t.tell)])
 

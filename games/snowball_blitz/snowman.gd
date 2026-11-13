@@ -591,7 +591,6 @@ func tell_glow(secs: float) -> void:
 		var mat := StandardMaterial3D.new()
 		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
-		mat.render_priority = preload("res://core/ui_kit.gd").VR_PRIO_UNDER_UI  # (see-through scenery: under VR cards)
 		mat.albedo_color = Color(Bosses.info(kind).color, 0.35)
 		mat.emission_enabled = true
 		mat.emission = Bosses.info(kind).color

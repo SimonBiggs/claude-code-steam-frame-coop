@@ -17,6 +17,7 @@ const Main := preload("res://games/snowball_blitz/main.gd")
 const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const TestTime := preload("res://tests/test_time.gd")
+const World := preload("res://games/snowball_blitz/world.gd")
 
 var fails := 0
 
@@ -105,17 +106,17 @@ func _initialize() -> void:
 	_expect(Tricks.BOSS_WAVES == [G.KING_WAVE, G.FINALE], "boss waves match siegegen.gd")
 	_expect(Tricks.ICICLE_KEEP > 0.0, "icicles never take the last of a wall")
 	# Seasons.
-	var pond := Vector3(G.ARENA_RADIUS + 6.5, 0.0, G.ARENA_RADIUS * 0.25)
 	for se in Seasons.SEASONS:
 		_expect(StoryCard.has_picture(String(Seasons.PICS[se])), "%s has a card picture" % se)
 		_expect(Seasons.HATS.has(se) and Seasons.LINES.has(se) and Seasons.CARD_COLORS.has(se), "%s has a hat, a line and a colour" % se)
 		_expect(se == "winter" or Seasons.DRIFT.has(se), "%s drifts" % se)
 		_expect(String(Seasons.LINES[se]).length() <= 16, "%s card line is short" % se)
+	_expect(is_equal_approx(Seasons.ARENA_RADIUS, Main.ARENA_RADIUS) and Seasons.spots().size() >= 8, "season props: 8+ round the square")
 	for p in Seasons.spots():
 		var r := Vector2(p.x, p.z).length()
 		_expect(r > G.ARENA_RADIUS + 1.5, "season prop %s stands outside the square" % str(p))
 		_expect(p.distance_to(Vector3(0, 0, -(G.ARENA_RADIUS + 6.0))) > 4.0, "season prop clear of the big tree")
-		_expect(p.distance_to(pond) > Rink.POND_R + 1.0, "season prop clear of the pond")
+		_expect(World.pond_clear(p, G.ARENA_RADIUS, 1.5), "season prop clear of the pond at its biggest")
 		for i in G.VILLAGE_SLOTS:
 			_expect(p.distance_to(G.village_slot(i)) > 2.2, "season prop clear of igloo %d" % i)
 	# Bobo's friends.
@@ -131,6 +132,8 @@ func _initialize() -> void:
 		_expect(met.has(f.id), "%s visits sometimes" % f.id)
 		_expect(StoryCard.has_picture(String(f.pic)), "%s has a picture (%s)" % [f.id, f.pic])
 		_expect(("%s stays to skate!" % f.name).length() <= 24, "%s's card line is short" % f.id)
+	for i in G.VILLAGE_SLOTS:
+		_expect(World.pond_clear(G.village_slot(i), G.ARENA_RADIUS, 1.5), "igloo %d clear of the pond at its biggest" % i)
 	_expect(Rink.pick(99, "winter") == Rink.pick(99, "winter"), "the same seed brings the same friend")
 	_expect(Rink.pond_radius(0) == Rink.POND_R and Rink.pond_radius(5) > Rink.pond_radius(4) and Rink.pond_radius(999) == Rink.POND_MAX, "the pond grows with friends and stops")
 	for k in Tricks.KINDS:

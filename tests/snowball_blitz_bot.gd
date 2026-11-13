@@ -609,6 +609,7 @@ func _bot_check(ok: bool, what: String) -> void:
 func _check_deep3() -> void:
 	var want := SeasonKit.override("snowball_blitz", "", Seasons.SEASONS)
 	_bot_check(Seasons.SEASONS.has(main.season), "a season (%s)" % main.season)
+	print("BOT AGREE season=%s" % main.season)  # (tools/multibot.ts: every machine dressed the same)
 	if want != "":
 		_bot_check(main.season == want, "the season test setting dresses the square (%s)" % want)
 	_bot_check(main.seasons_node.season == main.season, "the square is dressed for %s" % main.season)
