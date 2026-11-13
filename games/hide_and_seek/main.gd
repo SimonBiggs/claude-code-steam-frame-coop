@@ -2344,8 +2344,6 @@ func _show_story(beat: Dictionary) -> void:
 			huds.append(p.hud)
 	StoryCard.show(huds, beat)
 	if not players.is_empty() and players[0].vr and players[0].xr_camera != null and net.mode != "client":
-		if vr_story != null and is_instance_valid(vr_story):
-			vr_story.queue_free()
 		vr_story = StoryCard.show_vr(self, players[0].xr_camera, beat)
 
 

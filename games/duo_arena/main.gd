@@ -2587,8 +2587,6 @@ func _update_story(delta: float) -> void:
 		StoryCard.show(views_root, opts)
 	var p0 = players[0] if not players.is_empty() else null
 	if p0 != null and p0.vr and not p0.ghost and p0.xr_camera != null:
-		if vr_story != null and is_instance_valid(vr_story):
-			vr_story.queue_free()
 		vr_story = StoryCard.show_vr(self, p0.xr_camera, opts)
 	zone.cheer()
 	story_shown += 1

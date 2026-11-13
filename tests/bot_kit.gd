@@ -382,6 +382,11 @@ func finish(quit: bool = true, note := "") -> void:
 	var vr_view := int(Engine.get_meta("vr_view_failures", 0))  # core/vr_view_watch.gd's problems count too
 	failures += vr_view
 	checks += vr_view
+	# A story card knocked off before it could be read (under StoryCard.SHORT_READ s, not opts.urgent): core/story_card.gd
+	# queues cards for MIN_READ s, so this is a game freeing / leaving one itself (Tower Stack, 2026-11-13).
+	var short := int(Engine.get_meta("story_card_short", 0))
+	if short > 0:
+		assert_true(false, "%d story card(s) knocked off before they could be read (see the STORY CARD lines: let core/story_card.gd replace them, or opts.urgent on purpose)" % short)
 	if failures == 0 and checks == 0:  # a run that checked nothing tested nothing (tests/bot_end.gd's shared rule)
 		printerr("SCRIPT ERROR: BOT RESULT: FAIL (0 checks%s: this bot counted nothing before it ended)" % note)
 	elif failures == 0:

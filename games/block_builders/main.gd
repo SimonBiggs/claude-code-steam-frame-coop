@@ -1616,8 +1616,6 @@ func _show_story(beat: Dictionary, broadcast: bool = true) -> void:
 	if story_root != null:
 		StoryCard.show(story_root, beat)
 	if builder != null and builder.vr and builder.xr_camera != null:
-		if vr_story != null and is_instance_valid(vr_story):
-			vr_story.queue_free()
 		vr_story = StoryCard.show_vr(self, builder.xr_camera, beat)  # (a diorama: the card scales with XRServer.world_scale)
 
 

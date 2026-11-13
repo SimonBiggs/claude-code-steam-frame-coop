@@ -997,8 +997,6 @@ func show_story(beat: Dictionary) -> void:
 			roots.append(p.get_meta("story_root"))
 	StoryCard.show(roots, b)
 	if gardener != null and gardener.vr and gardener.xr_camera != null:
-		if vr_story != null and is_instance_valid(vr_story):
-			vr_story.queue_free()
 		vr_story = StoryCard.show_vr(self, gardener.xr_camera, b)
 		# (the garden is a diorama, XR world scale W.S: UiKit.vr_place scales the card with it)
 	print("Story: %s: %s (%s)" % [b.get("who", ""), b.get("line", ""), b.get("pic", "")])

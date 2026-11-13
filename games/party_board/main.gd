@@ -990,8 +990,6 @@ func _do_fx(kind: String, args: Array) -> void:
 			if tv_ui != null:
 				StoryCard.show(tv_ui, beat)
 			if vr_rig != null:
-				if vr_story != null and is_instance_valid(vr_story):
-					vr_story.queue_free()
 				vr_story = StoryCard.show_vr(self, vr_rig.camera, beat.merged({"vr_height": vr_ui_height(0.3)}))
 		"prop":
 			if props != null:
