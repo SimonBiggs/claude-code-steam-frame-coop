@@ -564,6 +564,7 @@ export async function installTools(since: string) {
     const cur = await readFile(dest, "utf8").catch(() => null);
     const base = (await sh(`git show ${since}:${rel}`, LIVE)).out;
     const neu = await readFile(src, "utf8");
+    if (cur === neu) { done.push(`${rel}: installed copy already up to date`); continue; }  // nothing to install or restart
     if (cur !== null && cur !== neu && cur.trimEnd() !== base.trimEnd()) {
       const tmp = `/tmp/install-${process.pid}-${rel.replace(/\//g, "_")}`;
       await writeFile(tmp + ".cur", cur); await writeFile(tmp + ".base", base + "\n"); await writeFile(tmp + ".new", neu);
@@ -591,6 +592,13 @@ export async function installTools(since: string) {
       for (const u of units) {
         const unit = u.split("/").pop()!;
         if ((await sh(`systemctl --user is-active ${unit}`)).out !== "active") continue;
+        // Never restart the brepl we're running in (2026-11-13: a landing of tools/brepl restarted brepl.service and
+        // killed its own dev.land job, so the result never reached the channel). Say so; restart it by hand.
+        if (Number((await sh(`systemctl --user show -p MainPID --value ${unit}`)).out) === process.pid) {
+          const msg = `${unit} runs the new ${name} only after a restart: NOT restarting it from inside itself (it would kill every running job, this landing too). When nothing important is running: brepl --restart`;
+          done.push(msg); (globalThis as any).send?.("⚠ brepl", msg);
+          continue;
+        }
         const r = await sh(`systemctl --user restart ${unit} && systemctl --user is-active ${unit}`);
         done.push(`restarted ${unit}: ${r.out}`);
       }
