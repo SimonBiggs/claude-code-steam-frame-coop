@@ -15,6 +15,7 @@ extends Node
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
+const WarnRings := preload("res://core/warn_rings.gd")
 
 var kit: BotKit
 var main: Node
@@ -191,7 +192,10 @@ func _steer(slot: int, climber: bool, _delta: float) -> void:
 	var a: Node3D = main.avatars[slot]
 	max_climb = maxf(max_climb, a.position.y)
 	var goal := Vector3.ZERO
-	if climber:
+	var out := _lane_escape(a.position)
+	if out != Vector3.INF:  # in one of Rolo's told lanes: step out of it first (like a child who sees the pink lane)
+		goal = out
+	elif climber:
 		goal = Vector3(0.0, 0.0, 0.0)
 		if Vector2(a.position.x, a.position.z).length() < 2.2 and jump_t <= 0.0:
 			jump_t = 0.45
@@ -227,6 +231,22 @@ func _steer(slot: int, climber: bool, _delta: float) -> void:
 		var r := Vector3(-f.z, 0.0, f.x)
 		v = Vector2(d.dot(r), -d.dot(f))
 	kit.slot_stick(main.party, slot, "left", v)
+
+
+## Standing in a told lane (or a rolling ball's)? The nearest spot just outside it (Vector3.INF: not in one).
+func _lane_escape(p: Vector3) -> Vector3:
+	for t in main.rollers.rings.tells():
+		if String(t.kind) != "line" or not WarnRings.inside("line", t.pos, t.dir, t.size, p, 0.35):
+			continue
+		var fwd := Vector3(t.dir.x, 0.0, t.dir.z).normalized()
+		var side := Vector3(-fwd.z, 0.0, fwd.x)
+		var off: float = (p - (t.pos as Vector3)).dot(side)
+		var sgn := 1.0 if off >= 0.0 else -1.0
+		var dest: Vector3 = Vector3(p.x, 0.0, p.z) + side * sgn * ((t.size as Vector2).y * 0.5 + 0.7 - absf(off))
+		if Vector2(dest.x, dest.z).length() > main.ARENA - 0.3:  # the park's edge: the other side
+			dest = Vector3(p.x, 0.0, p.z) - side * sgn * ((t.size as Vector2).y * 0.5 + 0.7 + absf(off))
+		return dest
+	return Vector3.INF
 
 
 ## Where to push a block next: straight to the pad, or round the tower stage if it is in the way.
@@ -358,6 +378,7 @@ func _checks() -> void:
 	kit.assert_true(balls_seen > 0, "%s: a ball rolled" % mode)
 	kit.assert_eq(main.unwarned_hits, 0, "%s: nobody was bowled over by a ball that wasn't told (%d bowled over)" % [mode, main.roll_hits])
 	kit.info("%s: %d bowled over by Rolo's balls, season %s" % [mode, main.roll_hits, main.season])
+	kit.assert_true(main.roll_hits <= 1, "%s: builders who step out of a told lane are never bowled over (%d)" % [mode, main.roll_hits])
 	kit.assert_true(main.season != "" and main.season == String(main.net.state_get("season", "")) and main.season_node.season == main.season, "%s: dressed for the host's season (%s)" % [mode, main.season])
 	kit.assert_eq(main.green.folk_count(), mini(int(main.net.state_get("made", 0)), main.GreenScript.SHOW), "%s: the green shows Wren's newest neighbours" % mode)
 	kit.assert_eq(main.green.piece_count(), main.GreenScript.grown(int(main.net.state_get("made", 0))), "%s: the green has grown its pieces" % mode)
