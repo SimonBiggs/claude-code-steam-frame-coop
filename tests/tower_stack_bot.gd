@@ -9,6 +9,9 @@ extends Node
 ## comes after the first tower. On the pick orbs the first TV player WALKS into one (the middle one for the mode,
 ## the first one for the next building), the fake VR giant TOUCHES one; the bot checks the team's choice is the job
 ## built next, and a weather warning reaches every machine (its ring on the TV too).
+## Third pass: Rolo rolls a ball early in every job (try_rolls): its lane is told on every machine before the ball
+## rolls, nobody is ever bowled over by a ball whose lane showed too briefly, the green shows Wren's neighbours, and
+## every machine dresses for the host's season.
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
@@ -31,6 +34,8 @@ var job_seen := -1
 var cheers_done := 0  # towers whose CHEER ended during play (the round did not run out first): each opens a build pick
 var cheer_was := -1.0
 var cheer_round := 0
+var lanes_seen := 0  # most of Rolo's lane tells seen at once (every machine)
+var balls_seen := 0  # most balls rolling at once
 
 
 func _ready() -> void:
@@ -47,6 +52,7 @@ func _ready() -> void:
 	main.set("round_time", 95.0 if lone else 50.0)
 	main.set("daily_ok", false)
 	main.set("try_open", 7)  # towergen OPEN_ALL: special blocks from job 2 on
+	main.set("try_rolls", true)  # TS_TRY=rollers: Rolo rolls a ball early in every job
 	add_child(main)
 	kit.main = main
 	kit.watch_state(main.net)  # phases counted as they happen (kit.seen): a 0.25 s poll misses quick ones under load
@@ -115,6 +121,8 @@ func _physics_process(delta: float) -> void:
 		ghosts_seen = maxi(ghosts_seen, main.blocks.size())
 	orbs_seen = maxi(orbs_seen, main.picks.orbs.orbs.size())
 	rings_seen = maxi(rings_seen, main.weather.rings.count())
+	lanes_seen = maxi(lanes_seen, main.rollers.rings.count())
+	balls_seen = maxi(balls_seen, main.rollers.balls().size())
 	_watch_picks()
 	var slots: Array[int] = main.party.local_slots()
 	jump_t -= delta
@@ -344,6 +352,15 @@ func _checks() -> void:
 	for id in main.blocks:
 		kit.assert_true(main.bkind.has(id), "%s: block %d knows its kind" % [mode, int(id)])
 		break
+	# Third pass: Rolo's told balls, the neighbours' green, the season.
+	kit.assert_true(kit.seen_values("rolls").size() >= 1, "%s: Rolo rolled a ball (%s)" % [mode, str(kit.seen_values("rolls"))])
+	kit.assert_true(lanes_seen > 0, "%s: a ball's lane was told on the grass" % mode)
+	kit.assert_true(balls_seen > 0, "%s: a ball rolled" % mode)
+	kit.assert_eq(main.unwarned_hits, 0, "%s: nobody was bowled over by a ball that wasn't told (%d bowled over)" % [mode, main.roll_hits])
+	kit.info("%s: %d bowled over by Rolo's balls, season %s" % [mode, main.roll_hits, main.season])
+	kit.assert_true(main.season != "" and main.season == String(main.net.state_get("season", "")) and main.season_node.season == main.season, "%s: dressed for the host's season (%s)" % [mode, main.season])
+	kit.assert_eq(main.green.folk_count(), mini(int(main.net.state_get("made", 0)), main.GreenScript.SHOW), "%s: the green shows Wren's newest neighbours" % mode)
+	kit.assert_eq(main.green.piece_count(), main.GreenScript.grown(int(main.net.state_get("made", 0))), "%s: the green has grown its pieces" % mode)
 	if mode == "client":
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
 		kit.assert_true(ghosts_seen > 0, "client: ghost blocks mirrored from the host")

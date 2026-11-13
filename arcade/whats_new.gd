@@ -33,6 +33,9 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "tower3-rolo", "date": "2026-11-13", "game": "tower_stack", "pic": "hedgehog", "line": "Rolo rolls balls! Jump!", "try": {"TS_TRY": "rollers"}},
+	{"id": "tower3-green", "date": "2026-11-13", "game": "tower_stack", "pic": "bunny", "line": "Neighbours move in!"},
+	{"id": "tower3-seasons", "date": "2026-11-13", "game": "tower_stack", "pic": "snowman", "line": "Seasons in Wren's park!", "try": {"ARCADE_SEASON_TOWER_STACK": "winter"}},
 	{"id": "fish3-seasons", "date": "2026-11-13", "game": "fishing_lake", "pic": "snowflake", "line": "Seasons on the lake!", "try": {"ARCADE_SEASON_FISHING_LAKE": "winter"}},
 	{"id": "fish3-flocks", "date": "2026-11-13", "game": "fishing_lake", "pic": "mamaduck", "line": "Birds land! Pink rings!"},
 	{"id": "fish3-garden", "date": "2026-11-13", "game": "fishing_lake", "pic": "otter", "line": "Ollie's shore garden grows!"},
