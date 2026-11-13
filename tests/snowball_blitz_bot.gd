@@ -477,7 +477,16 @@ func _tip_error(who: String, text: String) -> void:
 	cues["tip_text"] = true
 
 
+## tools/multibot.ts: every machine dressed the square for the same season (a late joiner ends before its siege checks:
+## it says it on the way out).
+func _agree_season() -> void:
+	if not has_meta("agreed") and main != null and is_instance_valid(main) and main.season != "":
+		set_meta("agreed", true)
+		print("BOT AGREE season=%s" % main.season)
+
+
 func _exit_tree() -> void:
+	_agree_season()
 	if watch != null:
 		watch.free()
 		watch = null
@@ -609,7 +618,7 @@ func _bot_check(ok: bool, what: String) -> void:
 func _check_deep3() -> void:
 	var want := SeasonKit.override("snowball_blitz", "", Seasons.SEASONS)
 	_bot_check(Seasons.SEASONS.has(main.season), "a season (%s)" % main.season)
-	print("BOT AGREE season=%s" % main.season)  # (tools/multibot.ts: every machine dressed the same)
+	_agree_season()
 	if want != "":
 		_bot_check(main.season == want, "the season test setting dresses the square (%s)" % want)
 	_bot_check(main.seasons_node.season == main.season, "the square is dressed for %s" % main.season)
