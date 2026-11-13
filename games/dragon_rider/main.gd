@@ -21,7 +21,7 @@ extends Node3D
 ## games", "everything's being driven by text"): the core is just flying a big friendly dragon through
 ## glowing rings while the gunners pop balloons. Everything cut is behind the flag, not deleted:
 ##  - PRACTICE first: three big glowing rings close ahead, one at a time (left, right, up), with a
-##    see-through ghost pair of hands (ghost_hands.gd, rider's headset only) showing the rein move;
+##    see-through ghost pair of hands (core/ghost_hand.gd x2 holding ghost reins, rider's headset only) showing the rein move;
 ##    each gunner gets one glowing balloon right where they are looking.
 ##  - Gentle, gradual stages: stage 1 = four big rings in an easy line, slow flight, balloons close by.
 ##    One new thing per stage: 2 stars, 3 the golden balloon, 4 sky bunnies, 5 racing Goldie, 6 storm
@@ -40,8 +40,8 @@ extends Node3D
 ##    until two presses), STICK / MOUSE / an arrow key + an arrow when their practice balloon or a storm
 ##    sprite is off screen (until they've turned to it twice), a pulsing bolt when the controller is
 ##    unplugged. The next-ring and practice-balloon markers are big glowing arrows at the view's edge.
-##    VR: the ghost hands show the rein moves in practice; the shared Cannon Cove ghost hand
-##    (games/cannon_cove/ghost_hand.gd, driven from here) squeezes the trigger when the ring is far ahead,
+##    VR: the ghost hands show the rein moves in practice; the shared ghost hand (core/ghost_hand.gd)
+##    (core/ghost_hand.gd, driven from here) squeezes the trigger when the ring is far ahead,
 ##    until the rider has flapped twice; the gold arrow ahead of the nose grows and pulses while the
 ##    Storm King's ring is open (no FLY THROUGH! text). PAUSED has no sentence; controller and full-seat
 ##    sentences are gone. Each cue goes after two goes (cue_did / cue_learned).
@@ -61,8 +61,7 @@ const RivalScript := preload("res://games/dragon_rider/rival.gd")
 const BossScript := preload("res://games/dragon_rider/boss.gd")
 const JoinListenerScript := preload("res://games/dragon_rider/join_listener.gd")
 const PropsScript := preload("res://games/dragon_rider/props.gd")
-const GhostHandsScript := preload("res://games/dragon_rider/ghost_hands.gd")
-const CoveGhostHand := preload("res://games/cannon_cove/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
@@ -244,6 +243,11 @@ var charm_count := -1
 var story_queue: Array = []
 var story_t := 0.0
 var ghost_hands: Node3D
+var ghost_rein_hands: Array[GhostHand] = []  # its two see-through hands (core/ghost_hand.gd)...
+var ghost_reins: Array[MeshInstance3D] = []  # ...and the ghost reins from each hand to the ring
+var ghost_rein_mode := ""
+var ghost_rein_t := 0.0
+var ghost_rein_alpha := 0.0
 var practice_step := -1        # 0..2: practice ring (left, right, up); 3: done; -1: not practising
 var practice_t := 0.0
 var practice_ring: MeshInstance3D
@@ -256,7 +260,7 @@ var idle_t := 0.0              # rider not steering (for the gentle nudge toward
 var next_visitor := 0
 var sounds_added := {}
 var solo_boss_t := 0.0
-var flap_hand: Node3D            # simple mode, VR: the shared Cannon Cove ghost hand squeezing the trigger (flap)
+var flap_hand: Node3D            # simple mode, VR: the shared ghost hand (core/ghost_hand.gd) squeezing the trigger (flap)
 var flap_idle_t := 0.0
 var flap_was := false
 # Second pass (deep.gd): the session's mode, this stage's gift, the season, warned sky events, the baby dragons.
@@ -1617,7 +1621,7 @@ func flap_moment() -> bool:
 	return absf(err) < 0.3
 
 
-## Simple mode, VR: the shared Cannon Cove ghost hand sits just over the rider's right hand and its
+## Simple mode, VR: the shared ghost hand (core/ghost_hand.gd) sits just over the rider's right hand and its
 ## pointing finger squeezes the trigger (flap = faster) when the next ring is far ahead, until the
 ## rider has flapped twice. Only the rider's headset builds it.
 func _update_flap_hand(delta: float) -> void:
@@ -1628,7 +1632,7 @@ func _update_flap_hand(delta: float) -> void:
 	if flap_hand == null:
 		if not show:
 			return
-		flap_hand = CoveGhostHand.new()
+		flap_hand = GhostHand.new()
 		flap_hand.name = "FlapHand"
 		dragon.add_child(flap_hand)  # top_level: placed by the rider's right hand every frame
 	flap_hand.visible = show
@@ -1791,7 +1795,7 @@ func _simple_animate(delta: float) -> void:
 			want = PRACTICE_MOVES[practice_step]
 			var ri: Vector2 = players[0].rein_input
 			right_way = (want == "left" and ri.x < -0.1) or (want == "right" and ri.x > 0.1) or (want == "up" and ri.y > 0.1)
-		ghost_hands.show_demo(want, players[0].head_local(), right_way, delta)
+		_ghost_reins(want, players[0].head_local(), right_way, delta)
 		_update_flap_hand(delta)
 
 
@@ -1958,9 +1962,7 @@ func _build_views(mode: String) -> void:
 	else:
 		print("No VR headset: %s" % ("TV gunners" if mode == "client" else "split screen, player 1 flies the dragon"))
 	if SIMPLE_MODE and players[0].vr:
-		ghost_hands = GhostHandsScript.new()
-		ghost_hands.main = self
-		dragon.add_child(ghost_hands)
+		_build_ghost_reins()
 	_ensure_views_root()
 	for p in players:
 		if _is_local(p) and p.active:
@@ -3218,3 +3220,77 @@ func _deep_animate(delta: float) -> void:
 				wr.rotation.z = -flap
 			b.position = Deep.baby_spot(i) + Vector3(0, sin(now * 1.6 + i) * 0.35, 0)
 			b.rotation.z = -dragon.steer * 0.3
+
+
+## Simple mode, VR practice: a see-through pair of hands holding ghost reins SHOWS the rider what to do
+## instead of hint text: "left" (both hands move left, the left one dips a little), "right", or "up" (both
+## hands rise). It sits just in front of the rider's real hands (measured from their head, never from a
+## calibrated rest pose), loops the move, and fades while the rider steers. Dragon-local (the steady
+## saddle frame). Only the rider's headset builds it.
+func _build_ghost_reins() -> void:
+	ghost_hands = Node3D.new()
+	ghost_hands.name = "GhostHands"
+	dragon.add_child(ghost_hands)
+	var rein_mat := GhostHand.make_mat(GhostHand.TINT)
+	for i in 2:
+		var h := GhostHand.new()
+		h.left = i == 0
+		h.world_space = false  # dragon-local: placed with hand.position
+		ghost_hands.add_child(h)
+		h.visible = true
+		h.set_grip(1.0)  # a fist round the reins
+		ghost_rein_hands.append(h)
+		var r := MeshInstance3D.new()
+		r.mesh = cyl_mesh(0.01, 0.01, 1.0, 4)
+		r.material_override = rein_mat
+		r.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		ghost_hands.add_child(r)
+		ghost_reins.append(r)
+	ghost_hands.visible = false
+
+
+## want: "left", "right", "up" or "" to hide. head: the rider's eyes (dragon-local).
+## busy: the rider is steering right now (the demo fades out).
+func _ghost_reins(want: String, head: Vector3, busy: bool, delta: float) -> void:
+	if want != ghost_rein_mode:
+		ghost_rein_mode = want
+		ghost_rein_t = 0.0
+	ghost_rein_alpha = move_toward(ghost_rein_alpha, 0.0 if want == "" or busy else 0.5, delta * 1.5)
+	ghost_hands.visible = ghost_rein_alpha > 0.01
+	if not ghost_hands.visible:
+		return
+	ghost_rein_t = fmod(ghost_rein_t + delta, 2.4)
+	var t := ghost_rein_t
+	# 0-0.3 s rest, 0.3-1.1 s move, hold to 1.8 s, back by 2.4 s.
+	var k := 0.0
+	if t > 0.3 and t < 1.1:
+		k = ease((t - 0.3) / 0.8, -1.8)
+	elif t >= 1.1 and t < 1.8:
+		k = 1.0
+	elif t >= 1.8:
+		k = 1.0 - ease((t - 1.8) / 0.6, -1.8)
+	var move := Vector3.ZERO
+	var tilt := 0.0
+	match want:
+		"left":
+			move = Vector3(-0.22, 0.0, 0.0)
+			tilt = 1.0
+		"right":
+			move = Vector3(0.22, 0.0, 0.0)
+			tilt = -1.0
+		"up":
+			move = Vector3(0.0, 0.3, 0.0)
+	var ring: Vector3 = dragon.REINS_RING
+	for i in 2:
+		var sd := -1.0 if i == 0 else 1.0
+		# Slightly further forward than real hands so the ghost never sits inside them.
+		var p := head + Vector3(0.2 * sd, -0.42, -0.5) + move * k + Vector3(0, 0.05 * tilt * sd * k, 0)
+		var h := ghost_rein_hands[i]
+		h.mat.albedo_color.a = ghost_rein_alpha
+		h.hand.position = p
+		var d := p - ring
+		var len := d.length()
+		if len > 0.01:
+			ghost_reins[i].transform = Transform3D(basis_y_to(d / len) * Basis.from_scale(Vector3(1.0, len, 1.0)), (p + ring) * 0.5)
+	(ghost_reins[0].material_override as StandardMaterial3D).albedo_color.a = ghost_rein_alpha
+

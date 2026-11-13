@@ -33,7 +33,7 @@ extends Node3D
 ##    button (X A B Y / A S D F) floating over the glowing drum. A glowing 3D arrow bobs over the
 ##    practice drum on every screen (VR: next to the see-through stick). Each cue fades once that
 ##    player has hit that lane / drum twice. Between songs the VR drummer sees the shared ghost hand
-##    (games/cannon_cove/ghost_hand.gd) reach for a maraca, squeeze and shake it, until they have
+##    (core/ghost_hand.gd) reach for a maraca, squeeze and shake it, until they have
 ##    picked one up twice. The start headline is VR only (the TV sees the RHYTHM BAND sign), PAUSED
 ##    has no sentence, and no view shows its own player's name tag.
 ##

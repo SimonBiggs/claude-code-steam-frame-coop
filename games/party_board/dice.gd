@@ -7,7 +7,7 @@ extends Node3D
 ##    roll. Fell off the table or got stuck? It comes back. The TV machine sees the giant dice fly
 ##    (positions in the snapshot).
 ## SIMPLE_MODE teaching (no text): a TV player's spinning block has a glowing, pulsing A button under
-## it; the VR player gets the ghost hand (ghost_hand.gd) grabbing and throwing the dice on the practice
+## it; the VR player gets the ghost hand (core/ghost_hand.gd) grabbing and throwing the dice on the practice
 ## roll, and again whenever the dice have waited a while.
 
 const MeshKit := preload("res://core/mesh_kit.gd")
@@ -225,17 +225,16 @@ func _process(delta: float) -> void:
 
 ## SIMPLE, VR player: the ghost hand shows how to grab and throw the dice (practice roll, or waiting).
 func _update_ghost() -> void:
-	var g: Node = main.ghost
-	if g == null:
+	if main.ghost == null:
 		return
 	var want: bool = not vr_dice.is_empty() and vr_waiting() and _held < 0 and not get_tree().paused \
 		and (bool(state.get("practice", false)) or _hint_t > GHOST_AFTER)
 	if want:
 		_ghost_on = true
-		g.call("show_throw", pedestal(0), main.to_world(Vector3(0, 1.0, 3.5)))
+		main.ghost_throw(pedestal(0), main.to_world(Vector3(0, 1.0, 3.5)))
 	elif _ghost_on:
 		_ghost_on = false
-		g.call("hide_demo")
+		main.ghost_hide()
 
 
 # --- VR physical dice (host) ------------------------------------------------------------------------------

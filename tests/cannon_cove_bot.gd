@@ -541,7 +541,7 @@ func _musket_target(p):
 func _note_cues() -> void:
 	var gh = main.ghost_hand
 	if gh != null and gh.visible:
-		cues["ghost_let_go" if gh.release_t >= 0.0 else "ghost_hand"] = true
+		cues["ghost_let_go" if gh.mode == "release" else "ghost_hand"] = true
 	if main.get_node_or_null("MissArrow") != null:
 		cues["miss_arrow"] = true
 	if main.help_panel != null and main.help_panel.visible:

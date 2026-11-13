@@ -25,7 +25,7 @@ const HOLD_OUT := 0.36  # ...to here from the centre (generous: kids hold it all
 const HOLD_DEPTH := 0.22
 const FULL_LOCK := 1.5  # radians of wheel turn for full steering
 const FRAME_VY := 3.0  # m/s: the most the seat frame moves up or down (ramps and bumps stay gentle)
-const CoveGhostHand := preload("res://games/cannon_cove/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 const PANEL_OFF := Vector3(0.78, -0.6, -2.3)  # text panels, relative to the eyes
 # see-through-ok: the vignette round the head is an overlay meant to tint the whole view (priority 100)
@@ -473,19 +473,18 @@ func place(delta: float) -> void:
 	vignette_mat.set_shader_parameter("strength", v)
 
 
-## Simple mode: two see-through ghost hands (the shared Cannon Cove one, the left one mirrored) grip the
+## Simple mode: two see-through ghost hands (core/ghost_hand.gd, the left one mirrored) grip the
 ## rim and turn the wheel left and right whenever nobody holds it (the practice, the countdown, or hands
 ## off for a moment): grab it like that. Until the driver has pulled the trigger twice, the right hand's
 ## pointing finger also squeezes the trigger whenever the kart stands still.
 func _build_ghost_hands() -> void:
-	ghost_r = CoveGhostHand.new()
-	ghost_l = CoveGhostHand.new()
+	ghost_r = GhostHand.new()
+	ghost_l = GhostHand.new()
+	ghost_l.left = true
 	for g in [ghost_l, ghost_r]:
 		seat.add_child(g)  # top_level: placed on the rim every frame
 		g.mat.albedo_color = Color(0.7, 0.95, 1.0, 0.45)
-		g.mat.cull_mode = BaseMaterial3D.CULL_DISABLED  # the mirrored left hand turns its faces inside out
 		g.visible = false
-	ghost_l.hand.scale = Vector3(-1, 1, 1)  # a left hand
 
 
 func _go_learned() -> bool:

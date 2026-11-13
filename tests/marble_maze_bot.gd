@@ -256,10 +256,10 @@ func _simple_checks(delta: float) -> void:
 			saw_ring = true
 			print("BOT: practice ring is glowing at %s" % main.board.practice_spot())
 		var gh = main.ghost_hand
-		if gh != null and gh.marble.visible and not saw_ghost_marble:
+		if gh != null and main.ghost_marble.visible and not saw_ghost_marble:
 			saw_ghost_marble = true
 			print("BOT: ghost marble rolls to the ring")
-		if gh != null and gh.visible and gh.shown_hands and not saw_hands:
+		if gh != null and gh.visible and gh.shown and not saw_hands:
 			saw_hands = true
 			print("BOT: ghost hands show the grip and tilt")
 	if main.state == "play" and saw_ring and not practice_done:
@@ -637,9 +637,9 @@ func _look_away() -> void:
 ## Picture cues instead of words; any instruction text in a tip spot is an error.
 func _note_cues() -> void:
 	var gh = main.ghost_hand
-	if gh != null and gh.visible and gh.shown_hands:
+	if gh != null and gh.visible and gh.shown:
 		cues["ghost_hands"] = true
-	if gh != null and gh.marble.visible:
+	if gh != null and main.ghost_marble.visible:
 		cues["ghost_marble"] = true
 	for k in ["tilt_arrow", "goal_arrow", "grab_arrow"]:
 		var n = main.get(k)

@@ -834,7 +834,7 @@ func _record() -> String:
 		_see("tray_arrow_" + String(main.tray_arrow_kind))
 	if main.ghost_hand != null and main.ghost_hand.shown:
 		_see("ghost_hand")
-	if main.wish_view != null and main.wish_view.bubble_count() > 0:
+	if main.wish_view != null and main.wish_view.bubbles_shown > 0:
 		_see("wish_bubble")
 	if main.wish_view != null and main.wish_view._mist.multimesh.instance_count > 0:
 		_see("mist")

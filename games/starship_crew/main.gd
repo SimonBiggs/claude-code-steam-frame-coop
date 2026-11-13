@@ -16,7 +16,7 @@ extends Node3D
 ##   a new part that stays (saved); the pilot has a little glowing model of it on the dashboard.
 ##   Planets visited go on the captain's star map. One RUN telemetry line per mission (and on quit).
 ## - PRACTICE: the pilot gets a glowing ring that waits, and a ghost glove that shows how to push the
-##   stick towards it (ghost_hand.gd); the gunners get one glowing rock that waits to be zapped.
+##   stick towards it (core/ghost_hand.gd); the gunners get one glowing rock that waits to be zapped.
 ## - Text: VR gets one short headline far out in front; the TV shows one short line at most.
 ## - Solo VR: a CPU gunner zaps now and then. Local play without a headset: a robot autopilot flies.
 ## - SECOND PASS (deep.gd): GENTLE / BRAVE / HARD once a session and CAPTAIN WHISKERS' SHIP MODULES before every
@@ -44,7 +44,7 @@ const SkyKit := preload("res://core/sky_kit.gd")
 const Art := preload("res://games/starship_crew/art.gd")
 const Space := preload("res://games/starship_crew/space.gd")
 const Cockpit := preload("res://games/starship_crew/cockpit.gd")
-const GhostHand := preload("res://games/starship_crew/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const MissionGen := preload("res://games/starship_crew/missiongen.gd")
 const Story := preload("res://games/starship_crew/story.gd")
 const Seeded := preload("res://core/seeded.gd")
@@ -260,7 +260,8 @@ func _setup(mode: String) -> void:
 	crew_node.main = self
 	add_child(crew_node)
 	if vr_rig != null:
-		ghost = GhostHand.new()
+		ghost = GhostHand.new()  # practice: the see-through glove (core/ghost_hand.gd) shows how to steer
+		ghost.look = GhostHand.Look.GLOVE
 		add_child(ghost)
 		awards.set_player(0, "PILOT")
 	if mode != "host" or vr_rig == null:
@@ -834,7 +835,30 @@ func _ghost(delta: float) -> void:
 			var d2 := Vector2(rp2.x, rp2.y) - space.off
 			if d2.length() > 0.3:
 				dir = d2.normalized()
-	demo_tilt = ghost.show_demo(on, cockpit.handle_point(), dir, delta)
+	demo_tilt = _ghost_demo(on, cockpit.handle_point(), dir, delta)
+
+
+## Practice for the VR pilot: the see-through glove reaches for the flight stick (handle), takes it and
+## pushes it towards the glowing ring (dir: x right, y up), then lets go, on a loop. Returns the demo's
+## stick tilt so the stick moves along with the glove.
+func _ghost_demo(on: bool, handle: Vector3, dir: Vector2, delta: float) -> Vector2:
+	if not ghost.gate(on, delta):
+		return Vector2.ZERO
+	var cycle := 3.0
+	var t := ghost.play("steer", cycle, delta)
+	var rest := handle + Vector3(0.06, -0.12, 0.2)
+	var push := handle + Vector3(dir.x, dir.y, 0.0) * 0.09
+	# Reach for the stick, hold it, push it towards the ring, hold, let go.
+	var k := GhostHand.track([[0.0, rest], [0.7, handle, 0.0, 0.5], [1.0, handle], [1.8, push, 0.0, -2.0], [2.4, push],
+		[cycle, rest, 0.0, 1.0]], t)
+	var tilt := Vector2.ZERO
+	if k.seg == 3:  # pushing
+		tilt = dir * ease(k.k, -2.0)
+	elif k.seg == 4:  # holding it there
+		tilt = dir
+	ghost.set_alpha(ghost.fade(cycle, 0.3, 0.4))
+	ghost.pose(Transform3D(Basis(Vector3.RIGHT, -0.5), k.p + Vector3(0.0, -0.02, 0.03)))
+	return tilt
 
 
 ## TV: each local gunner moves a crosshair with the left stick and zaps with A.

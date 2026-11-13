@@ -16,7 +16,7 @@ extends Node
 ## - A glowing 3D arrow (everyone sees it, VR too) bobs over what to hit / go to: the practice bat, the
 ##   pilot's gold dash ring, a dizzy kaiju (punch it home).
 ## - VR dash practice: a glowing pulsing button on each controller (the A / X button), until the pilot
-##   has dashed twice. The ghost hand (ghost_hand.gd) still shows the punch and the beam.
+##   has dashed twice. The ghost hand (core/ghost_hand.gd) still shows the punch and the beam.
 ## - The shared view (nobody seated): a pulsing A + plus + person (a controller can join).
 ## - A lost controller: a soft pop (and the bolt); back: a happy ding; a full party: a soft pop.
 ## Everything is built once (views when they're made, arrows at load); per frame only moves / shows.

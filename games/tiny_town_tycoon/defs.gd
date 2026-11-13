@@ -12,7 +12,7 @@ extends RefCounted
 ## building joins the tray at a time as the town grows (a sparkle in the tray, no tier names). No coins,
 ## costs, needs (power / water / jobs), events, goals, island select or awards; houses only need a road.
 ## Drivers just bring bricks to new buildings (a glowing ring and an arrow, no job text). A practice
-## moment teaches by doing (ghost_hand.gd for the mayor, one glowing delivery for the drivers) and the
+## moment teaches by doing (core/ghost_hand.gd for the mayor, one glowing delivery for the drivers) and the
 ## island is full of things to touch (props.gd). Everything cut stays in the code behind this flag.
 const SIMPLE_MODE := true
 ## SIMPLE_MODE tray, in unlock order, and how many buildings (not counting the town hall) the town

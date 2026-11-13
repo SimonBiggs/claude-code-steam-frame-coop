@@ -5,7 +5,7 @@ extends Node3D
 ##  table, squashing or smacking it all count too; knights' bonks just make it giggle): confetti, a chime, and
 ##  the next one. After STEPS of them (or MAX_TIME seconds) wave 1 starts.
 ##  A bouncing arrow points at the goblin (at the ring while you hold it), and a see-through ghost
-##  hand (the shared Cannon Cove one, Giant-sized) shows the move: reach down, squeeze, swing over to
+##  hand (the shared core/ghost_hand.gd, Giant-sized) shows the move: reach down, squeeze, swing over to
 ##  the ring, let go.
 ##  RAIN: the same ghost hand, open, hovers over the campfire (an umbrella) until the Giant's hand
 ##  is there.
@@ -13,7 +13,7 @@ extends Node3D
 
 const W := preload("res://games/giants_table/world.gd")
 const GoblinScript := preload("res://games/giants_table/goblin.gd")
-const CoveGhostHand := preload("res://games/cannon_cove/ghost_hand.gd")  # the shared see-through hand
+const GhostHand := preload("res://core/ghost_hand.gd")  # the shared see-through hand
 const GOBLIN_SPOTS := [Vector3(1.2, 0.0, 8.8), Vector3(-1.4, 0.0, 9.2)]
 const RING_SPOTS := [Vector3(-4.6, 0.0, 7.4), Vector3(4.0, 0.0, 6.8)]
 const STEPS := 2
@@ -31,7 +31,7 @@ var ring_pos := Vector3.ZERO
 var ring: MeshInstance3D
 var ring_mat: StandardMaterial3D
 var arrow: MeshInstance3D
-var hand: Node3D  # the shared ghost hand (games/cannon_cove/ghost_hand.gd), scaled up to the Giant
+var hand: Node3D  # the shared ghost hand (core/ghost_hand.gd), scaled up to the Giant
 var demo_t := 0.0
 var idle_t := 0.0
 var anim_t := 0.0
@@ -65,7 +65,7 @@ func _ready() -> void:
 
 ## The shared see-through ghost hand (real size in metres, so W.S times bigger on the table).
 func _build_hand() -> void:
-	hand = CoveGhostHand.new()
+	hand = GhostHand.new()
 	hand.name = "GhostHand"
 	add_child(hand)  # top_level: placed every frame (_place_hand)
 	hand.mat.albedo_color = Color(0.75, 0.95, 1.0, 0.5)
