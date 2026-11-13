@@ -13,6 +13,12 @@ extends Node3D
 ## bath each day is the same on every machine and its toys wear a gold star. Picture cards (story_pictures.gd) tell it.
 ## Telemetry: one RUN line per round and on quit. Networked: the host sets "bath" = [seed, round, daily] in the state
 ## store and every machine rebuilds the same bath from it; toys + ducklings go as "family", cards as "story" events.
+## SECOND PASS (deep.gd): GENTLE / BRAVE / HARD once a session and MAMA DUCK'S GIFTS (big train, zoomy boats, big plug,
+## duck magnet, bubble shield, golden tap) before every later round, both on pick orbs over the near rim (picks.gd:
+## sail under one / reach into one); warned surprises told by steady rings on the water (hazards.gd): WALLY the
+## squirty whale pops up in a purple circle and SHOWERS spray along orange bands - sail out before they go off; the
+## bathroom dressed for the season and MAMA'S POND behind the tub grows a piece every two goals (pond.gd).
+## State: "deep" [mode, gift, season], "mode", "hz" (the surprise showing), "pond"; events "orbs" (sticky), "take".
 
 const NetScript := preload("res://core/net.gd")
 const BathGen := preload("res://games/bubble_bath/bathgen.gd")
@@ -44,6 +50,12 @@ const Creatures := preload("res://core/creatures.gd")
 const SkyKit := preload("res://core/sky_kit.gd")
 const ResCache := preload("res://core/res_cache.gd")
 const Art := preload("res://games/bubble_bath/art.gd")
+const Deep := preload("res://games/bubble_bath/deep.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
+const PicksScript := preload("res://games/bubble_bath/picks.gd")
+const HazardsScript := preload("res://games/bubble_bath/hazards.gd")
+const PondScript := preload("res://games/bubble_bath/pond.gd")
 
 const GAME_ID := "bubble_bath"
 const HX := 4.2  # inside half-size of the tub (x)
@@ -156,6 +168,22 @@ var family_root: Node3D
 var family_key := ""
 var story_queue: Array = []
 var story_t := 0.0
+# --- Second pass (deep.gd): mode + gift picks, warned surprises, seasons, Mama's pond ---
+var picks: Node  # picks.gd (host / local run the picks; every machine shows the orbs)
+var hazards: Node3D  # hazards.gd (every machine draws the "hz" state)
+var pond: Node3D  # pond.gd (Mama's pond + the season's props and drift)
+var mode := "brave"
+var mode_picked := false
+var gift := ""  # this round's gift from Mama Duck (every machine, from "deep")
+var gift_round := -1  # host: the session round the gift is for
+var season := ""
+var session_round := 0  # host: rounds played this session (no surprises on the first)
+var hz_list: Array = []  # host: this round's surprises (deep.gd hazards)
+var hz_i := 0
+var hz_now := {}
+var hz_count := 0
+var scattered := 0  # host: ducks a surprise knocked off a train this round
+var bot_surprises := false  # BB_SURPRISES_NOW: surprises from a short round's first seconds (bots, What's New "try")
 
 
 func _ready() -> void:
@@ -167,6 +195,7 @@ func _ready() -> void:
 	net.main = self
 	add_child(net)
 	net.sticky_event("family")  # a machine that joins later gets the latest one (core/net.gd)
+	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs (picks.gd)
 	net.state_changed.connect(_on_state_changed)
 	party = Party.new()
 	party.name = "Party"
@@ -176,7 +205,8 @@ func _ready() -> void:
 	save = Save.new()
 	save.game_id = GAME_ID
 	# toys: [[kind, play-day, golden], ...]; days: days played; daily: the date TODAY'S BATH ran; goals: goals ever reached.
-	save.defaults = {"best": 0, "toys": [], "goals": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "baths": 0, "rounds": 0, "ducks": 0, "golden": 0}
+	save.defaults = {"best": 0, "toys": [], "goals": 0, "days": 0, "last_day": "", "daily": "", "daily_done": "", "baths": 0, "rounds": 0, "ducks": 0, "golden": 0,
+		"mode": "", "last_gift": "", "surprises": 0}
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -232,9 +262,13 @@ func _setup(mode: String) -> void:
 		net.state_set("best", int(save.data["best"]))
 		net.state_set("shared", false)
 		_start_bath()
-		_start_round()
-	elif net.state_get("bath", null) != null:
-		_apply_bath(net.state_get("bath", null))  # joined mid-round: build the bath already playing
+		_next_round()
+	else:
+		if net.state_get("bath", null) != null:
+			_apply_bath(net.state_get("bath", null))  # joined mid-round: build the bath already playing
+		for k in ["deep", "pond", "hz"]:
+			if net.state_get(k, null) != null:
+				_on_state_changed(k, net.state_get(k, null))
 	hints.intro(INTRO, {"duration": 6.0})
 	if vr_rig != null:
 		hints.hint("vr_splash", "Splash the water!", {"to": "vr", "icon": "drop"})
@@ -292,6 +326,15 @@ func _build_world(vr: bool) -> void:
 	family_root.name = "Family"
 	add_child(family_root)
 	_build_family([], 0, false)
+	pond = PondScript.new()
+	pond.main = self
+	add_child(pond)
+	hazards = HazardsScript.new()
+	hazards.main = self
+	add_child(hazards)
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
 
 
 func _random_water_spot(margin: float) -> Vector3:
@@ -462,9 +505,11 @@ func _move_local_boats(delta: float) -> void:
 			f = f.normalized()
 			var r := Vector3(-f.z, 0.0, f.x)
 			var dir := r * mv.x - f * mv.y
-			v += dir * BOAT_ACCEL * delta
-			if v.length() > BOAT_MAX and v.dot(dir) > 0.0:
-				v = v.limit_length(maxf(BOAT_MAX, v.length() - BOAT_ACCEL * 2.0 * delta))
+			var accel := Deep.ZOOM_ACCEL if gift == "zoomy" else BOAT_ACCEL  # (ZOOMY BOATS: Mama Duck's gift)
+			var top := Deep.ZOOM_MAX if gift == "zoomy" else BOAT_MAX
+			v += dir * accel * delta
+			if v.length() > top and v.dot(dir) > 0.0:
+				v = v.limit_length(maxf(top, v.length() - accel * 2.0 * delta))
 		v *= maxf(0.0, 1.0 - 1.4 * delta)
 		var p := b.position + v * delta
 		var lim := Vector2(HX - BOAT_R, HZ - BOAT_R)
@@ -549,7 +594,7 @@ func on_request(_slot: int, action: String, _args: Array) -> void:
 			net.state_set("shared", not bool(net.state_get("shared", false)))
 		"next_round":
 			if String(net.state_get("phase", "")) == "results" and results_t > 2.0:
-				_start_round()
+				_next_round()
 
 
 func on_pause_changed(paused: bool, by_slot: int) -> void:
@@ -602,6 +647,24 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			if vr_rig != null:
 				HudKit.vr_banner(self, vr_rig.camera, "SPLASH!", "", {"duration": 1.5, "sound": ""})
 			sound("go", -4.0)
+		"deep":
+			if value is Array and (value as Array).size() >= 3:
+				mode = Deep.mode_of(String(value[0]))
+				gift = String(value[1])
+				season = String(value[2])
+				if pond != null and season != "":
+					pond.set_season(season)
+				if drain_spin != null:
+					drain_spin.scale = Vector3.ONE * (Deep.drain_r(gift) / DRAIN_R)  # (BIG PLUG)
+		"hz":
+			if hazards != null:
+				var hz := Deep.unpack(value if value is Array else [])
+				hazards.show_now(hz)
+				if not hz.is_empty():
+					_tell(hz)
+		"pond":
+			if pond != null:
+				pond.set_pieces(int(value), true)
 		"phase":
 			if String(value) == "results":
 				_show_results(net.state_get("results", {}))
@@ -632,7 +695,30 @@ func _start_round() -> void:
 	goal_hit = false
 	golden_caught = 0
 	golden_left = (plan.golden as Array).duplicate()
-	goal = maxi(2, int(round(float(plan.goal) * minf(1.0, round_time / BathGen.ROUND_SECS))))
+	session_round += 1
+	if gift_round != session_round:
+		gift = ""
+	_send_deep()
+	if gift == "goldtap":  # GOLDEN TAP: two more golden ducks this round
+		for w in Deep.GOLD_TAP:
+			golden_left.append(Vector2(float(w), randi() % maxi(1, (plan.spots as Array).size())))
+		golden_left.sort_custom(func(a: Vector2, b: Vector2) -> bool: return a.x < b.x)
+	goal = goal_for_story()
+	var full := plan.duplicate()
+	full.goal = Deep.goal_for(plan, mode)
+	var hz_spec := {"seed": Seeded.derive(bath_seed, "hz%d" % bath_round), "mode": mode, "season": season, "round": session_round,
+		"secs": round_time, "kid": BathGen.kid_seconds(full) if round_time >= 60.0 else 0.0}
+	if bot_surprises:
+		hz_spec["round"] = Deep.FIRST_ROUND
+		hz_spec["first"] = Deep.SHORT_FIRST
+	hz_list = Deep.hazards(plan, hz_spec)
+	hz_i = 0
+	hz_now = {}
+	hz_count = 0
+	scattered = 0
+	net.state_set("hz", [])
+	print("Bubble Bath round %d: %s, %s, gift %s, goal %d, surprises %s" % [bath_round, mode, season, gift if gift != "" else "none", goal,
+		str(hz_list.map(func(e: Dictionary) -> String: return "%s@%.0f" % [e.kind, float(e.t)]))])
 	for i in 6:
 		_spawn_duck(_next_spot(), Vector3.ZERO, FLOAT)
 	net.state_set("goal", goal)
@@ -652,6 +738,8 @@ func _end_round() -> void:
 		save.data["daily_done"] = Seeded.today()  # a TODAY'S BATH round finished (the Trophy Hall's golden star)
 		save.mark_dirty()
 	_log_round("time")
+	hz_now = {}
+	net.state_set("hz", [])
 	var toys := (save.data.toys as Array).size()
 	var data := awards.results({"title": "SPLASHTASTIC!", "subtitle": "%d ducks down the plug!" % score,
 		"style": "victory", "stats": [["GOAL", "%d/%d" % [mini(score, goal), goal]], ["TOYS", str(toys)], ["BEST", str(int(net.state_get("best", 0)))]],
@@ -716,10 +804,18 @@ func _process(delta: float) -> void:
 	if vr_rig != null:
 		_vr_hands(delta)
 	_update_ducks(delta)
+	if picks.active():
+		picks.tick(delta)
+		var pl := int(ceil(picks.left()))
+		if pl != int(net.state_get("time", 0)) and picks.active():
+			net.state_set("time", pl)
+		return
 	if results_showing():
 		results_t += delta
 		if results_t > 12.0:
-			_start_round()  # play again by itself
+			_next_round()  # play again by itself (after a gift pick)
+		return
+	if String(net.state_get("phase", "play")) != "play":
 		return
 	time_left -= delta
 	if int(ceil(time_left)) != int(net.state_get("time", 0)):
@@ -745,6 +841,7 @@ func _process(delta: float) -> void:
 		var gid := _spawn_duck(Vector3(sp.x, WATER_Y + 2.5, sp.y), Vector3(0.0, -1.0, 0.0), FLY, true)
 		duck_by[gid] = -1
 		_story_for_all("A golden duck!", "mamaduck", Color(1.0, 0.75, 0.1))
+	_tick_surprises()
 	_pick_up_and_deliver()
 
 
@@ -818,6 +915,8 @@ func _update_ducks(delta: float) -> void:
 				to_drain.y = 0.0
 				if to_drain.length() < 1.3:  # a gentle whirlpool
 					v += (to_drain.normalized() + Vector3(-to_drain.z, 0.0, to_drain.x).normalized() * 0.6) * 0.7 * delta
+				if gift == "magnet":
+					v = _magnet(d.position, v, delta)
 				var p := d.position + v * delta
 				v = _bounce_walls(p, v)
 				p.x = clampf(p.x, -HX + DUCK_R, HX - DUCK_R)
@@ -831,7 +930,7 @@ func _update_ducks(delta: float) -> void:
 				if v.length() > 0.3:
 					d.rotation.y = lerp_angle(d.rotation.y, atan2(v.x, v.z), minf(1.0, 4.0 * delta))
 				d.rotation.z = sin(clock * 2.0 + float(id)) * 0.1
-				if Vector2(to_drain.x, to_drain.z).length() < DRAIN_R * 0.75:
+				if Vector2(to_drain.x, to_drain.z).length() < Deep.drain_r(gift) * 0.75:
 					_sink(int(id), int(duck_by[id]))
 			HELD:
 				if vr_rig != null:
@@ -854,7 +953,7 @@ func _update_ducks(delta: float) -> void:
 					duck_state[id] = FLOAT
 					duck_t[id] = 0.0
 					var fd := Vector2(p.x - drain.x, p.z - drain.z).length()
-					if fd < DRAIN_R * 1.5 and int(duck_by[id]) >= 0:
+					if fd < Deep.drain_r(gift) * 1.5 and int(duck_by[id]) >= 0:
 						HudKit.popup(self, p + Vector3.UP * 0.6, "SPLASH SHOT!", {"color": "gold", "size": 1.3})
 						_sink(int(id), int(duck_by[id]))
 				d.position = p
@@ -862,7 +961,7 @@ func _update_ducks(delta: float) -> void:
 				var t: float = duck_t[id]
 				if t >= 0.0:
 					var a := t * 12.0
-					var r := maxf(0.0, DRAIN_R * 0.6 * (1.0 - t / 0.7))
+					var r := maxf(0.0, Deep.drain_r(gift) * 0.6 * (1.0 - t / 0.7))
 					d.position = drain + Vector3(cos(a) * r, -t * 0.3, sin(a) * r)
 					d.rotation.y = -a
 					d.scale = Vector3.ONE * 1.3 * maxf(0.05, 1.0 - t / 0.8)
@@ -910,7 +1009,8 @@ func _pick_up_and_deliver() -> void:
 		for id in train.duplicate():
 			if not ducks.has(id) or int(duck_state[id]) != TOW:
 				train.erase(id)
-		if train.size() < MAX_TRAIN:
+		var most := Deep.train_max(gift, MAX_TRAIN)  # (BIG TRAIN: Mama Duck's gift)
+		if train.size() < most:
 			for id in ducks:
 				if int(duck_state[id]) != FLOAT:
 					continue
@@ -920,10 +1020,10 @@ func _pick_up_and_deliver() -> void:
 					train.append(id)
 					net.event("quack", [d.position, int(slot)])
 					quack(d.position, int(slot))
-					if train.size() >= MAX_TRAIN:
+					if train.size() >= most:
 						break
 		trains[slot] = train
-		if not train.is_empty() and Vector2(b.position.x - drain.x, b.position.z - drain.z).length() < DRAIN_R + BOAT_R + 0.15:
+		if not train.is_empty() and Vector2(b.position.x - drain.x, b.position.z - drain.z).length() < Deep.drain_r(gift) + BOAT_R + 0.15:
 			var n := 0
 			var i := 0
 			for id in train:
@@ -1003,7 +1103,7 @@ func _squash(n: Node3D) -> void:
 # --- VR hands -------------------------------------------------------------------------------
 
 func _vr_hands(_delta: float) -> void:
-	var playing := not results_showing()
+	var playing := String(net.state_get("phase", "play")) == "play"
 	for h in [VrRig.LEFT, VrRig.RIGHT]:
 		var p := vr_rig.hand_point(h)
 		var inside := absf(p.x) < HX and absf(p.z) < HZ
@@ -1289,6 +1389,12 @@ func apply_event(kind: String, args: Array) -> void:
 			cheer()
 		"story":
 			_story(args[0], args[1], args[2])
+		"orbs":
+			if picks != null:
+				picks.show_row(String(args[0]), args[1], args[2], float(args[3]) if args.size() >= 4 else Deep.ORB_SCALE)
+		"take":
+			if picks != null:
+				picks.take_fx(int(args[0]), int(args[1]))
 
 
 # --- The seeded bath and Mama Duck's family ------------------------------------------------------
@@ -1314,8 +1420,25 @@ func _start_bath() -> void:
 		(save.data.toys as Array).size(), int(save.data.days)])
 	_build_family(save.data.toys, int(save.data.days), int(save.data.goals) >= BathGen.CROWN_TOYS)
 	_send_family()
+	season = SeasonKit.override(GAME_ID, Seeded.season(), Deep.SEASONS)
+	if String(save.data.mode) != "":
+		mode = Deep.mode_of(String(save.data.mode))
+	if net.forced_mode("BB_MODE") != "":
+		mode = Deep.mode_of(net.forced_mode("BB_MODE"))
+		mode_picked = true  # (bots, What's New "try": straight in)
+	if OS.has_environment("BB_GIFT") and not Deep.gift(OS.get_environment("BB_GIFT")).is_empty():
+		mode_picked = true
+		gift = OS.get_environment("BB_GIFT")  # (What's New "try": the first round with that gift)
+		gift_round = 1
+	if OS.has_environment("BB_SURPRISES_NOW"):
+		bot_surprises = true
+		mode_picked = true
+	_send_deep()
+	net.state_set("pond", Deep.pond(int(save.data.goals)))
 	story_t = 6.5  # after the intro card
 	_story_for_all("Hi! I'm Mama Duck!", "mamaduck", MAMA_COLOR)
+	var sd := Deep.season_data(season)
+	_story_for_all(String(sd.line), String(sd.pic), sd.drift)
 	if bath_daily:
 		_story_for_all("TODAY'S BATH!", "bathtub", Color(1.0, 0.85, 0.3))
 	if new_day and int(save.data.days) > 1:
@@ -1365,7 +1488,7 @@ func _apply_bath(bath: Variant) -> void:
 
 ## The goal Mama Duck asks for at the start of a round (the round's plan, scaled for short test rounds).
 func goal_for_story() -> int:
-	return maxi(2, int(round(float(plan.goal) * minf(1.0, round_time / BathGen.ROUND_SECS))))
+	return maxi(2, int(round(float(Deep.goal_for(plan, mode)) * minf(1.0, round_time / BathGen.ROUND_SECS))))
 
 
 ## Where a boat starts this round.
@@ -1426,6 +1549,15 @@ func _check_goal() -> void:
 	_story_for_all(TOY_LINES.get(kind, "A new toy!"), kind, Color(1.0, 0.85, 0.3) if bath_daily else TOY_COLORS.get(kind, Color.WHITE))
 	if int(save.data.goals) == BathGen.CROWN_TOYS:
 		_story_for_all("A crown for me!", "crown", Color(1.0, 0.85, 0.25))
+	var pieces := Deep.pond(int(save.data.goals))
+	if pieces > Deep.pond(int(save.data.goals) - 1):  # MAMA'S POND grows a piece every POND_EVERY goals
+		net.state_set("pond", pieces)
+		var piece: String = Deep.POND[pieces - 1]
+		_story_for_all("My pond grew!", "lily", Color(0.45, 0.85, 0.55))
+		_story_for_all(String(Deep.POND_LINES.get(piece, "Look!")), piece, Color(0.45, 0.85, 0.55))
+		for gd in Deep.GIFTS:
+			if int(gd.unlock) == pieces:
+				_story_for_all("New gift: %s!" % String(gd.name), String(gd.pic), gd.color)
 
 
 ## Every machine: Mama Duck bounces and the toys sparkle when the goal is reached.
@@ -1536,7 +1668,192 @@ func _log_round(end: String) -> void:
 		"score": int(net.state_get("score", 0)), "goal": goal, "goal_hit": goal_hit, "golden": golden_caught,
 		"golden_plan": (plan.golden as Array).size(), "islands": islands.size(), "drain": [snappedf(drain.x, 0.01), snappedf(drain.z, 0.01)],
 		"boats": boats.size(), "vr": vr_rig != null, "net": net.mode, "splashes": splashes,
-		"toys": (save.data.toys as Array).size(), "goals": int(save.data.goals), "days": int(save.data.days)})
+		"toys": (save.data.toys as Array).size(), "goals": int(save.data.goals), "days": int(save.data.days),
+		"difficulty": mode, "gift": gift, "season": season, "session_round": session_round, "surprises": hz_count,
+		"scattered": scattered, "pond": Deep.pond(int(save.data.goals)), "picks": picks.history.size() if picks != null else 0})
+
+
+# --- Second pass: picks, surprises, gifts (deep.gd, picks.gd, hazards.gd, pond.gd) ----------------------------------
+
+## Host: the mode, the gift and the season for every machine (the TV machine takes the host's mode from "deep").
+## "mode" alone too: the shared host-difficulty check reads it.
+func _send_deep() -> void:
+	net.state_set("deep", [mode, gift, season])
+	net.state_set("mode", mode)
+
+
+## Nobody here could take a pick (no splasher, no boats): the middle comes sooner.
+func pick_nobody() -> bool:
+	return vr_rig == null and boats.is_empty()
+
+
+## Host: the next round, after the mode pick (once a session) or Mama Duck's gift pick (every round from the second).
+func _next_round() -> void:
+	if net.mode == "client" or picks == null or picks.active():
+		return
+	if not mode_picked:
+		_start_pick("mode")
+	elif session_round >= 1 and gift_round != session_round + 1:
+		_start_pick("gift")
+	else:
+		_start_round()
+
+
+func _start_pick(stage: String) -> void:
+	for id in ducks.keys():
+		_remove_duck(int(id))
+	for slot in trains:
+		trains[slot] = []
+	held = -1
+	var entries: Array = []
+	var opts: Array = []
+	if stage == "mode":
+		opts = PickOrbs.mode_ids(Deep.mode_of(String(save.data.mode)) if String(save.data.mode) != "" else "brave")
+		for id in opts:
+			var md := PickOrbs.mode(String(id))
+			entries.append({"id": id, "name": md.name, "pic": md.pic, "color": md.color})
+		_story_for_all("Easy or tricky?", "mamaduck", MAMA_COLOR)
+	else:
+		opts = Deep.gift_choices(Deep.pond(int(save.data.goals)), String(save.data.last_gift),
+			Seeded.derive(bath_seed, "gift%d" % session_round))
+		for id in opts:
+			var gd := Deep.gift(String(id))
+			entries.append({"id": id, "name": gd.name, "pic": gd.pic, "color": gd.color})
+		_story_for_all("A gift for you!", "gift", MAMA_COLOR)
+	hz_now = {}
+	net.state_set("hz", [])
+	net.state_set("phase", "pick")
+	HudKit.banner(_all_huds(), "PICK ONE!", "", {"duration": 1.5})
+	if vr_rig != null:
+		HudKit.vr_banner(self, vr_rig.camera, "PICK ONE!", "", {"duration": 1.5, "sound": ""})
+	picks.begin(stage, entries, opts, _on_picked)
+	sound("whistle", -8.0, 1.3)
+
+
+## Host: the team picked (or the middle one was taken for them).
+func _on_picked(stage: String, opt: Variant, _slot: int) -> void:
+	if stage == "mode":
+		mode_picked = true
+		mode = Deep.mode_of(String(opt))
+		save.data.mode = mode
+		_story_for_all(String(PickOrbs.MODE_LINES.get(mode, "Let's go!")), String(PickOrbs.mode(mode).pic), PickOrbs.mode_color(mode))
+	else:
+		gift = String(opt)
+		gift_round = session_round + 1
+		save.data.last_gift = gift
+		var gd := Deep.gift(gift)
+		_story_for_all(String(gd.get("line", "A gift!")), String(gd.get("pic", "gift")), gd.get("color", MAMA_COLOR))
+	save.mark_dirty()
+	print("Picked %s: %s" % [stage, str(opt)])
+	_next_round()
+
+
+## Host, every frame of a round: tell the next surprise, clear it when it is over (every machine sets it off itself
+## from the "hz" state: hazards.gd calls hz_go / hz_spray).
+func _tick_surprises() -> void:
+	if hz_now.is_empty():
+		if hz_i < hz_list.size() and round_t >= float((hz_list[hz_i] as Dictionary).t):
+			hz_now = hz_list[hz_i]
+			hz_i += 1
+			hz_count += 1
+			save.data.surprises = int(save.data.surprises) + 1
+			if int(save.data.surprises) <= 2:  # the first ones: Mama Duck says what to do
+				_story_for_all(String(Deep.KIND_LINES[String(hz_now.kind)]), String(Deep.KIND_PICS[String(hz_now.kind)]), HazardsScript.color_of(String(hz_now.kind)))
+			net.state_set("hz", Deep.pack(hz_now))
+		return
+	if round_t - float(hz_now.t) >= Deep.span(hz_now):
+		hz_now = {}
+		net.state_set("hz", [])
+
+
+## Every machine: a surprise's tell started: its name in a banner (the rings on the water show where).
+func _tell(hz: Dictionary) -> void:
+	var nm := String(Deep.KIND_NAMES.get(String(hz.kind), "LOOK!"))
+	HudKit.banner(_all_huds(), nm, "", {"duration": 1.6})
+	if vr_rig != null:
+		HudKit.vr_banner(self, vr_rig.camera, nm, "", {"duration": 1.6, "sound": ""})
+
+
+## Every machine (hazards.gd, when the tell is over): Wally pops up - big waves push this machine's boats out of his
+## circle; on the host a train caught inside scatters (not with the BUBBLE SHIELD) and floating ducks are pushed out.
+## The shower starts spraying (hz_spray does the pushing).
+func hz_go(e: Dictionary) -> void:
+	var c := Vector3(float(e.x), WATER_Y, float(e.z))
+	if String(e.kind) == "spray":
+		sfx.play_at("splash", c, -2.0, 1.3)
+		return
+	var push := float(e.push) * (0.5 if gift == "shield" else 1.0)
+	wave(c, Vector3.ZERO, 1.2 * push)
+	burst(c + Vector3.UP * 0.9, Color(0.7, 0.9, 1.0), 40, 4.5)
+	sfx.play_at("splash", c, 2.0, 0.7)
+	sfx.play_at("honk", c, -2.0, 0.5)
+	var rad := float(e.r) + BOAT_R
+	for slot in party.local_slots():
+		if boats.has(slot):
+			var b: Node3D = boats[slot]
+			var off := Vector3(b.position.x - c.x, 0.0, b.position.z - c.z)
+			if off.length() < rad:
+				var out := off.normalized() if off.length() > 0.01 else Vector3.BACK
+				boat_vel[slot] = out * 3.2 * push
+				_squash(b)
+	if net.mode == "client":
+		return
+	for slot in boats:
+		var b: Node3D = boats[slot]
+		var off := Vector3(b.position.x - c.x, 0.0, b.position.z - c.z)
+		if off.length() >= rad or gift == "shield":
+			continue
+		var out := off.normalized() if off.length() > 0.01 else Vector3.BACK
+		for id in trains.get(slot, []):
+			if duck_state.has(id) and int(duck_state[id]) == TOW:
+				duck_state[id] = FLOAT
+				duck_vel[id] = (out + Vector3(randf_range(-0.6, 0.6), 0.0, randf_range(-0.6, 0.6))).normalized() * 2.0 * push
+				duck_by[id] = -1
+				scattered += 1
+		trains[slot] = []
+	for id in ducks:
+		if int(duck_state[id]) == FLOAT:
+			var off := (ducks[id] as Node3D).position - c
+			off.y = 0.0
+			if off.length() < float(e.r):
+				duck_vel[id] = (off.normalized() if off.length() > 0.01 else Vector3.FORWARD) * 2.4 * push
+
+
+## Every machine, every frame the shower sprays: this machine's boats in the band are pushed along it; the host
+## pushes floating ducks too.
+func hz_spray(e: Dictionary, delta: float) -> void:
+	var dir := Vector3(float(e.dx), 0.0, float(e.dz)).normalized()
+	var push := float(e.push) * (0.5 if gift == "shield" else 1.0)
+	for slot in party.local_slots():
+		if boats.has(slot):
+			var b: Node3D = boats[slot]
+			if Deep.inside(e, Vector2(b.position.x, b.position.z), BOAT_R):
+				boat_vel[slot] = (boat_vel.get(slot, Vector3.ZERO) as Vector3) + dir * 5.0 * push * delta
+	if net.mode == "client":
+		return
+	for id in ducks:
+		if int(duck_state[id]) == FLOAT:
+			var p: Vector3 = (ducks[id] as Node3D).position
+			if Deep.inside(e, Vector2(p.x, p.z), DUCK_R):
+				duck_vel[id] = (duck_vel[id] as Vector3) + dir * 4.0 * float(e.push) * delta
+
+
+## DUCK MAGNET: a floating duck near a boat with room in its train paddles to it.
+func _magnet(at: Vector3, v: Vector3, delta: float) -> Vector3:
+	var best := Vector3.INF
+	var bd := Deep.MAGNET_R
+	for slot in boats:
+		if (trains.get(slot, []) as Array).size() >= Deep.train_max(gift, MAX_TRAIN):
+			continue
+		var b: Vector3 = (boats[slot] as Node3D).position
+		var dd := Vector2(b.x - at.x, b.z - at.z).length()
+		if dd < bd:
+			bd = dd
+			best = b
+	if best == Vector3.INF:
+		return v
+	var to := Vector3(best.x - at.x, 0.0, best.z - at.z).normalized()
+	return v + to * Deep.MAGNET_PULL * 1.1 * delta  # (the water's drag, 1.1/s, keeps it to about MAGNET_PULL)
 
 
 func _exit_tree() -> void:

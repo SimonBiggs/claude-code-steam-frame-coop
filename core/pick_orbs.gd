@@ -27,6 +27,7 @@ extends Node3D
 
 const StoryCard := preload("res://core/story_card.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
+const Seeded := preload("res://core/seeded.gd")
 ## Every orb is in this group while it shows: VR cards, banners and words move clear of it (UiKit.vr_dodge) and
 ## core/vr_view_check.gd fails a VR bot whose panel covers one. A game never lifts its orbs out of a card's way.
 const KEEP_CLEAR := preload("res://core/vr_view_check.gd").KEEP_CLEAR
@@ -99,6 +100,33 @@ static func mode_ids(middle: String = "brave") -> Array:
 		ids.erase(middle)
 		ids.insert(ids.size() / 2, middle)
 	return ids
+
+
+
+## A game's GIFT pick (the gifts a story friend offers between rounds, every game the same way): three different ids
+## of `unlocked` (in unlock order), the newest unlock always among them, not `last` again when there are others,
+## shuffled; the same on every machine for a seed. ONE copy for every game (tests/shared_picks_test.gd fails a game
+## with its own "gift order" shuffle).
+static func gift_choices(unlocked: Array, last: String, seed_value: int) -> Array:
+	if unlocked.is_empty():
+		return []
+	var un := unlocked
+	var newest: String = un[un.size() - 1]
+	var pool: Array = []
+	for id in un:
+		if id != newest and (id != last or un.size() <= 3):
+			pool.append(id)
+	pool = Seeded.shuffled(Seeded.rng(seed_value, "gifts"), pool)
+	var out: Array = [newest] if newest != last or un.size() <= 3 else []
+	for id in pool:
+		if out.size() >= 3:
+			break
+		out.append(id)
+	if out.size() < 3:
+		for id in un:
+			if out.size() < 3 and not out.has(id):
+				out.append(id)
+	return Seeded.shuffled(Seeded.rng(seed_value, "gift order"), out)
 
 
 static func spot(i: int, n: int, origin: Vector3, gap: float, y: float) -> Vector3:

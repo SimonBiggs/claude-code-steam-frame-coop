@@ -33,6 +33,10 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "bath2-wally", "date": "2026-11-13", "game": "bubble_bath", "pic": "wally", "line": "Wally pops up! Sail out!", "try": {"BB_SURPRISES_NOW": "1"}},
+	{"id": "bath2-gifts", "date": "2026-11-13", "game": "bubble_bath", "pic": "ducktrain", "line": "Mama Duck's gifts!", "try": {"BB_GIFT": "train"}},
+	{"id": "bath2-pond", "date": "2026-11-13", "game": "bubble_bath", "pic": "lily", "line": "Mama's pond grows!"},
+	{"id": "bath2-seasons", "date": "2026-11-13", "game": "bubble_bath", "pic": "snowflake", "line": "Seasons in the bath!", "try": {"ARCADE_SEASON_BUBBLE_BATH": "winter"}},
 	{"id": "fish3-seasons", "date": "2026-11-13", "game": "fishing_lake", "pic": "snowflake", "line": "Seasons on the lake!", "try": {"ARCADE_SEASON_FISHING_LAKE": "winter"}},
 	{"id": "fish3-flocks", "date": "2026-11-13", "game": "fishing_lake", "pic": "mamaduck", "line": "Birds land! Pink rings!"},
 	{"id": "fish3-garden", "date": "2026-11-13", "game": "fishing_lake", "pic": "otter", "line": "Ollie's shore garden grows!"},

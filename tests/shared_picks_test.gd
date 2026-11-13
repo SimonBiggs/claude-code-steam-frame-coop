@@ -8,6 +8,8 @@ extends SceneTree
 ##   - MODE look: "gentle"/"brave"/"hard"/"heroic"/"mega": Color(...) or "name": "GENTLE"/... -> PickOrbs.mode()
 ##   - SEASON props: a game's own copy of the seasonal props (a "winter" snowman / "autumn" pumpkin built in a match)
 ##     -> core/season_kit.gd prop() / drift() (three games had copied them by 2026-11-11)
+##   - GIFT pick: a game's own "gift order" shuffle -> PickOrbs.gift_choices(unlocked, last, seed) (six games had
+##     copied it by 2026-11-13)
 ## A diegetic thing that only looks similar (a hazard vent, a shop sign) is allowed by a line in its file:
 ##   ## shared-picks-ok: <func name> (why)
 ## Every game script must also compile (load() + can_instantiate()).
@@ -24,6 +26,7 @@ const PICK_NAME := "(?i)(pick(?!up)|pod|orb|altar|choice|choose)"
 const WARN_GEOMETRY := "(\\.torus\\(|\\.disc\\(|CylinderMesh\\.new|TorusMesh\\.new|PlaneMesh\\.new|SurfaceTool\\.new|ring_mesh\\()"
 const PICK_GEOMETRY := "(MeshInstance3D\\.new\\(|MeshKit\\.instance\\(|Sprite3D\\.new)"
 const SEASON_COPY := "(?s)\"winter\"\\s*:[^\n]*snowman.{0,1200}\"autumn\"\\s*:[^\n]*pumpkin"
+const GIFT_COPY := "Seeded\\.rng\\([^\\n]*\"gift order\""
 const MODE_LOOK := "\"(gentle|brave|hard|heroic|mega)\"\\s*:\\s*Color\\(|\"name\"\\s*:\\s*\"(GENTLE|BRAVE|HARD|HEROIC)\"|\"kind\"\\s*:\\s*\"mode\"[^}\\n]*\"name\"\\s*:\\s*\""
 
 var fails := 0
@@ -65,6 +68,8 @@ static func scan(path: String, text: String) -> Array:
 			out.append("%s: %s() builds its own picks: use core/pick_orbs.gd show_orbs(..., opts) (body / icon / at keep your look)" % [path, fname])
 	if not ok.has("seasons") and RegEx.create_from_string(SEASON_COPY).search(text):
 		out.append("%s: its own seasonal props (snowman, pumpkin...): use core/season_kit.gd prop(builder, season, at, i, size)" % path)
+	if not ok.has("gifts") and RegEx.create_from_string(GIFT_COPY).search(text):
+		out.append("%s: its own gift pick shuffle: use PickOrbs.gift_choices(unlocked, last, seed)" % path)
 	if not ok.has("modes"):
 		var rx_mode := RegEx.create_from_string(MODE_LOOK)
 		var mm := rx_mode.search(text)
@@ -96,6 +101,7 @@ func _initialize() -> void:
 	_expect(scan("bad", bad_pick).size() == 1, "the scan finds home-made picks")
 	_expect(scan("bad", bad_mode).size() == 1, "the scan finds a game's own mode colours")
 	_expect(scan("bad", bad_season).size() == 1, "the scan finds a game's own seasonal props")
+	_expect(scan("bad", "\treturn Seeded.shuffled(Seeded.rng(seed_value, \"gift order\"), out)\n").size() == 1, "the scan finds a game's own gift pick")
 	_expect(scan("good", good).is_empty(), "the scan passes code that uses the helpers")
 	_expect(scan("ok", "## shared-picks-ok: _make_pod (a test)\n" + bad_pick).is_empty(), "shared-picks-ok lets a func through")
 	# 2. Every game.
@@ -112,6 +118,16 @@ func _initialize() -> void:
 	_expect(PickOrbs.mode_name("mega") == "HARD" and PickOrbs.mode_name("heroic") == "HARD", "mega / heroic show as HARD")
 	_expect(PickOrbs.mode_color("zoom") == PickOrbs.mode_color("brave"), "zoom shows as BRAVE")
 	_expect(PickOrbs.mode_ids("hard") == ["gentle", "hard", "brave"], "mode_ids puts the last mode in the middle")
+	# 4. The shared gift pick: three different, the newest always there, not the last one again, the same for a seed.
+	var un := ["a", "b", "c", "d", "e"]
+	for s in 50:
+		var g := PickOrbs.gift_choices(un, "b", s)
+		_expect(g.size() == 3 and g.has("e") and not g.has("b") and g == PickOrbs.gift_choices(un, "b", s), "gift_choices seed %d: %s" % [s, str(g)])
+		var d := {}
+		for id in g:
+			d[id] = true
+		_expect(d.size() == 3, "gift_choices gives three different gifts")
+	_expect(PickOrbs.gift_choices(["a", "b", "c"], "c", 3).size() == 3, "gift_choices with only three unlocked offers all three")
 
 ## 4. The helpers with every option (on the first frame: root is in the tree then).
 func _helpers() -> void:
