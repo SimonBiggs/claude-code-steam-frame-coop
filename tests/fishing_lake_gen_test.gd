@@ -11,6 +11,10 @@ const LakeGen := preload("res://games/fishing_lake/lakegen.gd")
 const Book := preload("res://games/fishing_lake/book.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Tackle := preload("res://games/fishing_lake/tackle.gd")
+const Seasons := preload("res://games/fishing_lake/seasons.gd")
+const Lake := preload("res://games/fishing_lake/lake.gd")
+const StoryCard := preload("res://core/story_card.gd")
+const TestTime := preload("res://tests/test_time.gd")
 
 var fails := 0
 
@@ -27,7 +31,7 @@ func _initialize() -> void:
 			if LakeGen.unlocked(k, level):
 				wishes.append(k)
 		for w in wishes:
-			var opts := {"level": level, "wish": w}
+			var opts := {"level": level, "wish": w, "season": Seasons.SEASONS[(level + int(w) + 4) % 4]}
 			var r := Seeded.validate(func(s: int) -> Dictionary: return LakeGen.generate(s, opts),
 				func(l: Dictionary) -> Array: return _check_wish(l, int(w)), seeds / 4 + 3, 11 + level, [0, 999999], "LAKE l%d w%d" % [level, w])
 			total += int(r.checked)
@@ -79,11 +83,11 @@ func _initialize() -> void:
 			var sd := Seeded.daily_seed("fishing_lake", date)
 			var out := {"lakes": []}
 			for lvl in 4:
-				var l := LakeGen.generate(sd, {"level": lvl, "daily": true})
+				var l := LakeGen.generate(sd, {"level": lvl, "daily": true, "season": Seeded.season(date)})
 				l.wish = Book.pick_daily_wish({}, l)
 				(out.lakes as Array).append(l)
-			out["koi"] = LakeGen.generate(sd, {"level": 3, "daily": true, "wish": LakeGen.KOI})
-			out["pike"] = LakeGen.generate(sd, {"level": 3, "daily": true, "wish": LakeGen.PIKE})
+			out["koi"] = LakeGen.generate(sd, {"level": 3, "daily": true, "wish": LakeGen.KOI, "season": Seeded.season(date)})
+			out["pike"] = LakeGen.generate(sd, {"level": 3, "daily": true, "wish": LakeGen.PIKE, "season": Seeded.season(date)})
 			return out,
 		func(out: Dictionary) -> Array:
 			var why: Array = []
@@ -107,6 +111,59 @@ func _initialize() -> void:
 			habs[sp.hab] = true
 	_expect(wx.size() == 3 and habs.size() == 5, "every weather and spot turns up (%s %s)" % [str(wx.keys()), str(habs.keys())])
 	_expect(LakeGen.generate(5, {"level": 0}).weather == "sunny", "the first day is sunny")
+	# THIRD PASS: seasons and flock visits. Every season's lakes are fair (check() includes the flocks), the
+	# weather leans the season's way, flocks come from the second lake on and grow with the level, a mode's flocks
+	# are the lake's first ones, and the shore garden's spots all stand on the bank.
+	for sn in Seasons.SEASONS:
+		var wxs := {}
+		var nv := [0.0, 0.0, 0.0, 0.0]
+		var n := 0
+		for i in Seeded.test_count(80):
+			n += 1
+			for lvl in 4:
+				var l := LakeGen.generate(i + 5000, {"level": lvl, "season": sn})
+				for w in LakeGen.check(l):
+					_fail("%s level %d seed %d: %s" % [sn, lvl, i, w])
+				nv[lvl] += float((l.visits as Array).size()) / float(n)
+		_expect(nv[0] == 0.0 and nv[1] >= 0.9 and nv[3] >= nv[1], "%s: flocks grow with the level (%s)" % [sn, str(nv)])
+		var ww: Array = Seasons.WEATHER_W[sn]
+		var lean_i := ww.find(ww.max())
+		var lean: String = ["sunny", "rain", "evening"][lean_i]
+		for i in 200:
+			var lw := String(LakeGen.generate(20000 + i, {"level": 3, "season": sn}).weather)
+			wxs[lw] = int(wxs.get(lw, 0)) + 1
+		var share := float(wxs.get(lean, 0)) / 200.0
+		_expect(share >= 0.7 * float(ww[lean_i]) / float(ww.reduce(func(a, b): return a + b, 0)), "%s leans %s (%s)" % [sn, lean, str(wxs)])
+	var same_a := LakeGen.generate(77, {"level": 3, "season": "winter"})
+	var same_b := LakeGen.generate(77, {"level": 3, "season": "winter"})
+	_expect(var_to_str(same_a) == var_to_str(same_b), "the same seed and season give the same lake (flocks too)")
+	var worst := 0.0
+	for i in 40:
+		var sd := 9000 + i
+		var gen := func() -> void: LakeGen.check(LakeGen.generate(sd, {"level": 3, "season": "autumn"}))
+		var t4 := Time.get_ticks_usec()
+		gen.call()
+		worst = TestTime.worst(worst, (Time.get_ticks_usec() - t4) / 1000.0, gen)
+	_expect(worst < 20.0, "a seasonal lake + check in under 20 ms (worst %.2f ms)" % worst)
+	var badv := LakeGen.generate(12, {"level": 3, "season": "spring"}).duplicate(true)
+	if not (badv.visits as Array).is_empty():
+		(badv.visits[0] as Dictionary).pos = LakeGen.JETTY_END + Vector3(0, 0, 1.0)
+		_expect(not LakeGen.check(badv).is_empty(), "a flock on the jetty is caught")
+	var badw := LakeGen.generate(13, {"level": 3, "season": "spring"}).duplicate(true)
+	badw.visits = [{"at": 0.3, "pos": LakeGen.JETTY_END + Vector3(0, 0, -10), "r": Seasons.VISIT_R},
+		{"at": 0.35, "pos": LakeGen.JETTY_END + Vector3(2, 0, -10), "r": Seasons.VISIT_R}]
+	_expect(not LakeGen.check(badw).is_empty(), "two flocks at once are caught")
+	_expect(not LakeGen.check(LakeGen.generate(14, {"level": 0, "season": "summer"}).merged({"visits": [{"at": 0.5, "pos": LakeGen.JETTY_END + Vector3(0, 0, -10), "r": 2.6}]}, true)).is_empty(), "flocks on a first lake are caught")
+	for m in ["gentle", "brave", "hard"]:
+		_expect(int(Tackle.num(m).visits) >= 1 and float(Tackle.num(m).visit_tell) >= 2.2, "%s: flocks told %.1f s ahead" % [m, float(Tackle.num(m).visit_tell)])
+	var ks := Seasons.keepsake_spots()
+	for w in Seasons.check_spots(ks):
+		_fail("garden: " + w)
+	_expect(ks.size() == Seasons.MAX_KEEPSAKES, "the shore garden has %d spots" % ks.size())
+	_expect(not Seasons.check_spots([Lake.POND_C]).is_empty() and not Seasons.check_spots([Vector3(0, 0, 13), Vector3(0.5, 0, 13)]).is_empty(), "the garden check catches a keepsake in the pond or on the path")
+	for sn in Seasons.SEASONS:
+		_expect(Seasons.FLOCKS.has(sn) and Seasons.CARDS.has(sn) and Seasons.DRIFT.has(sn), "%s is dressed" % sn)
+		_expect(StoryCard.has_picture(String(Seasons.CARDS[sn][1])) and StoryCard.has_picture(String(Seasons.FLOCKS[sn].pic)), "%s pictures exist" % sn)
 	# Hand checks: the checker catches broken lakes.
 	var g := LakeGen.generate(42, {"level": 3, "wish": LakeGen.KOI})
 	var bad := g.duplicate(true)
@@ -168,6 +225,7 @@ func _initialize() -> void:
 	_expect(Book.save_defaults().book.is_empty(), "a new book is empty")
 	print("lake gen: %d lakes checked, %d failures" % [total, fails])
 	print("BOT RESULT: %s" % ("PASS" if fails == 0 else "FAIL"))
+	print("FISHING_LAKE_GEN: %s" % ("PASS" if fails == 0 else "FAIL"))
 	quit(0 if fails == 0 else 1)
 
 

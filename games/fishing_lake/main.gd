@@ -53,6 +53,9 @@ const StoryCard := preload("res://core/story_card.gd")
 const Tackle := preload("res://games/fishing_lake/tackle.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const WarnRings := preload("res://core/warn_rings.gd")
+const SeasonKit := preload("res://core/season_kit.gd")
+const Seasons := preload("res://games/fishing_lake/seasons.gd")
+const FlockScript := preload("res://games/fishing_lake/flock.gd")
 const ORB_ROW := Vector3(0.0, 0.0, Lake.JETTY_END_Z - 8.0)  # the pick orbs float over the water in front of the jetty
 const ORB_GAP := 3.6
 const ORB_Y := 2.2
@@ -244,6 +247,16 @@ var whiskers_pulls: Array = []  # this day's Old Whiskers pulls (tackle.gd boss_
 var journal_shiny := PackedInt32Array()
 var shiny_today := 0
 var tackle_days := 0  # days fished (clients: from the sticky "tackle" event, for Ollie's pond)
+# Third pass (seasons.gd): the season, today's flock visits (host), Ollie's shore garden.
+var season := "summer"
+var season_told := false
+var visit_state: Array = []  # per lake visit: 0 waiting, 1 told (birds flying in), 2 landed, 3 gone; -1 not today (mode)
+var visit_t: Array = []  # seconds left in the visit's current step
+var flocks_today := 0
+var spooked_today := 0  # bobbers caught in a flock's splash
+var dodged_today := 0  # bobbers reeled out of a told ring in time
+var _lure_in_ring: Array = []  # per visit: the bobber was in the ring when it was told
+var keepsakes_net := ""  # clients: the garden from the "tackle" event (season initials)
 
 
 func _ready() -> void:
@@ -1253,6 +1266,7 @@ func _start_day(n: int) -> void:
 	lure_pick_done = false
 	_end_pick_quietly()
 	whiskers_pulls = Tackle.boss_pulls(int(lake_desc.seed) + day, game_mode)
+	_reset_visits()
 	extend_t = 0.0
 	last_fish_said = false
 	awards_text = ""
@@ -1294,6 +1308,7 @@ func _start_day(n: int) -> void:
 	_send_tackle()
 	if not practice:
 		_queue_pick(2.2)  # the mode (once a visit), then the day's lure; Ollie's wish after it
+		_season_card()
 	print("Day %d started (%s, target %d, %d boats, %.0f s) lake seed %d level %d %s spots %s wish %s%s" % [n, str(th["name"]), target,
 		active_boats().size(), round_time, int(lake_desc.seed), int(lake_desc.level), str(lake_desc.weather),
 		",".join(PackedStringArray((lake_desc.spots as Array).map(func(s: Dictionary) -> String: return str(s.hab)))),
@@ -1305,28 +1320,32 @@ func _start_day(n: int) -> void:
 func _new_lake(n: int) -> void:
 	var days := int(save.data.days)
 	var lvl := Book.level(days)
+	season = SeasonKit.override(GAME_ID, Seeded.season(), Seasons.SEASONS)
 	var today_due := n == 1 and not (save.data.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
 	var desc: Dictionary
 	if today_due:
-		desc = LakeGen.generate(Seeded.daily_seed(GAME_ID), {"level": lvl, "daily": true})
+		desc = LakeGen.generate(Seeded.daily_seed(GAME_ID), {"level": lvl, "daily": true, "season": season})
 		desc.wish = Book.pick_daily_wish(save.data.book, desc)
 	else:
 		var sd := Seeded.derive(int(save.data.world), "day%d" % days) if not OS.has_environment("FISH_SEED") else int(OS.get_environment("FISH_SEED"))
-		desc = LakeGen.generate(sd, {"level": lvl, "wish": Book.pick_wish(save.data.book, lvl, sd, int(save.data.last_wish))})
+		desc = LakeGen.generate(sd, {"level": lvl, "season": season, "wish": Book.pick_wish(save.data.book, lvl, sd, int(save.data.last_wish))})
 	save.data.last_wish = int(desc.wish)
 	save.mark_dirty()
-	_apply_lake([int(desc.seed), lvl, int(desc.wish), today_due])
+	_apply_lake([int(desc.seed), lvl, int(desc.wish), today_due, Seasons.index(season)])
+	net.state_set("season", season)
 
 
-## Every machine: build the lake from its compact description [seed, level, wish, daily].
+## Every machine: build the lake from its compact description [seed, level, wish, daily, season index].
 func _apply_lake(key: Array) -> void:
 	if key == lake_key:
 		return
 	lake_key = key.duplicate()
-	lake_desc = LakeGen.generate(int(key[0]), {"level": int(key[1]), "wish": int(key[2]), "daily": bool(key[3])})
+	season = Seasons.SEASONS[clampi(int(key[4]) if key.size() > 4 else 1, 0, 3)]
+	lake_desc = LakeGen.generate(int(key[0]), {"level": int(key[1]), "wish": int(key[2]), "daily": bool(key[3]), "season": season})
 	lake_desc.wish = int(key[2])
 	theme = int(lake_desc.theme)
 	lake.set_spots(lake_desc.spots)
+	lake.set_season(season)
 
 
 func _wish_spot():
@@ -1451,7 +1470,8 @@ func _log_day(end: String) -> void:
 		"days": int(save.data.days), "boats": active_boats().size(), "vr": players.size() > 0 and bool(players[0].vr),
 		"mode": str(net.mode), "practice": practice, "secs": int(day_play_t),
 		"round": int(round_time), "snaps": int(stat_get(0, "snap")), "game_mode": game_mode, "lure": lure_id,
-		"shiny": shiny_today, "pond": Book.pond_level(int(save.data.days)), "whiskers_pulls": players[0].boss_i if legend_state != 0 else 0})
+		"shiny": shiny_today, "pond": Book.pond_level(int(save.data.days)), "whiskers_pulls": players[0].boss_i if legend_state != 0 else 0,
+		"season": season, "flocks": flocks_today, "spooked": spooked_today, "dodged": dodged_today, "garden": _keepsakes().size()})
 
 
 ## Everybody gets a fun award for the day (the best thing they did).
@@ -1525,6 +1545,7 @@ func _process(delta: float) -> void:
 	lake.set_wish(int(lake_desc.wish) if ws != null else -1, ws.pos if ws != null else Vector3.ZERO)
 	lake.update_tank(catches, delta)
 	lake.update_pond(_found_kinds(), _shiny_dict(), Book.pond_level(_days_fished()))
+	lake.update_garden(_keepsakes())
 	var bp: Vector3 = players[0].body_pos
 	lake.rain_near.position = Vector3(bp.x, 9.0, bp.z - 1.5)
 	_update_rain_sound()
@@ -1678,6 +1699,7 @@ func _events(delta: float) -> void:
 			legend_t = 20.0
 		elif randf() < delta * 0.6 and lf.state != "hooked":
 			ripple(lf.position, 2.2)
+	_visits_update(delta)
 	# A treasure map that's been marked but never found: nudge the boats.
 	if map_state == 1:
 		map_wait += delta
@@ -2305,6 +2327,7 @@ func _check_wish(kind: int) -> void:
 	get_tree().create_timer(0.6).timeout.connect(func() -> void:
 		story({"who": "OLLIE", "line": "Thank you!", "pic": "otter", "color": Book.OLLIE, "duration": 3.5}))
 	print("Ollie's wish caught: %s" % str(FishScript.TYPES[kind]["name"]))
+	_plant_keepsake()
 
 
 func fish_caught() -> int:
@@ -2631,6 +2654,17 @@ func debug_event(what: String) -> void:
 		"golden":
 			lake_desc.golden_at = 0.0
 			golden_done = false
+		"flock":  # the next flock comes now (a lake with none gets one over open water)
+			var vs: Array = lake_desc.get("visits", [])
+			if vs.is_empty():
+				vs.append({"at": 0.0, "pos": _castable_point(8.0, 12.0), "r": Seasons.VISIT_R})
+				lake_desc.visits = vs
+				_reset_visits()
+			for i in visit_state.size():
+				if int(visit_state[i]) <= 0:
+					visit_state[i] = 0
+					(vs[i] as Dictionary).at = 0.0
+					break
 
 
 # --- Networked co-op (see docs/GAME_DEV_GUIDE.md) ------------------------------------
@@ -2739,9 +2773,9 @@ func make_snapshot() -> Array:
 	var ex := PackedFloat32Array([rain, daylight, frenzy_t, frenzy_pos.x, frenzy_pos.z, float(map_state), map_pos.x, map_pos.z,
 		legend_stamina, float(streak), float(theme), float(legend_state),
 		float(practice_step + 1) if practice else 0.0, practice_pos.x, practice_pos.z,
-		float(lake_key[0]) if lake_key.size() == 4 else -1.0, float(lake_key[1]) if lake_key.size() == 4 else 0.0,
-		float(lake_key[2]) if lake_key.size() == 4 else -1.0, (1.0 if bool(lake_key[3]) else 0.0) if lake_key.size() == 4 else 0.0,
-		1.0 if wish_done else 0.0])
+		float(lake_key[0]) if lake_key.size() >= 5 else -1.0, float(lake_key[1]) if lake_key.size() >= 5 else 0.0,
+		float(lake_key[2]) if lake_key.size() >= 5 else -1.0, (1.0 if bool(lake_key[3]) else 0.0) if lake_key.size() >= 5 else 0.0,
+		1.0 if wish_done else 0.0, float(lake_key[4]) if lake_key.size() >= 5 else 1.0])
 	# Boat positions: each machine rows its own boats; the others' boats are mirrored from here.
 	var bp := PackedFloat32Array()
 	for i in range(1, players.size()):
@@ -2841,7 +2875,7 @@ func apply_snapshot(s: Array) -> void:
 		practice_step = maxi(0, int(ex[12]) - 1)
 		practice_pos = Vector3(ex[13], 0.0, ex[14])
 	if ex.size() >= 20 and ex[15] >= 0.0:  # the host's seeded lake: rebuild it here
-		_apply_lake([int(ex[15]), int(ex[16]), int(ex[17]), ex[18] > 0.5])
+		_apply_lake([int(ex[15]), int(ex[16]), int(ex[17]), ex[18] > 0.5, int(ex[20]) if ex.size() > 20 else 1])
 		wish_done = ex[19] > 0.5
 
 
@@ -2887,12 +2921,18 @@ func apply_event(kind: String, args: Array) -> void:
 			_take_fx(int(args[0]), int(args[1]))
 		"warn":
 			rings.warn(args[0], float(args[1]), args[2], float(args[3]))
+		"flock_land":  # [pos, r]: this machine's own boats bob out of the splash
+			_bump_boats(args[0], float(args[1]))
+		"flock":  # [pos, r, season, tell secs]
+			_spawn_flock(args[0], float(args[1]), String(args[2]), float(args[3]))
 		"tackle":  # [mode, lure, days fished]
 			if String(args[0]) != game_mode:
 				whiskers_pulls = []  # Old Whiskers' pulls were made in this machine's own mode: again in the host's (2026-11-12)
 			game_mode = String(args[0])
 			lure_id = String(args[1])
 			tackle_days = int(args[2])
+			if args.size() > 3:
+				keepsakes_net = String(args[3])
 		"remote_pause":
 			get_tree().paused = args[0]
 			_set_pause_banner(args[0], "The VR player paused the game")
@@ -3583,7 +3623,7 @@ func _shiny_dict() -> Dictionary:
 ## Host: the mode, the lure and the days fished to every machine (sticky: a late machine catches up).
 func _send_tackle() -> void:
 	if net != null and net.mode == "host":
-		net.event("tackle", [game_mode, lure_id, int(save.data.days)])
+		net.event("tackle", [game_mode, lure_id, int(save.data.days), "".join(PackedStringArray(_keepsakes().map(func(k: String) -> String: return k.substr(0, 2))))])
 		net.state_set("mode", game_mode)  # (the shared host-difficulty check reads it; TV machines use "tackle", 2026-11-12)
 
 
@@ -3755,7 +3795,7 @@ func boss_strength() -> float:
 
 ## Host: Old Whiskers is about to pull: a ring on the water where he'll swim, on every machine.
 func on_boss_tell(pos: Vector3, secs: float) -> void:
-	var col := Color(1.0, 0.6, 0.2)
+	var col := Seasons.WHISKERS_RING
 	rings.warn(pos, 2.4, col, secs)
 	if net.mode == "host":
 		net.event("warn", [pos, 2.4, col, secs])
@@ -3781,3 +3821,155 @@ func _shiny_catch(kind: int, tip: Vector3) -> void:
 		story({"who": nm.to_upper(), "line": "A shiny one!", "pic": "fish", "color": Color(1.0, 0.82, 0.25), "duration": 3.0}))
 	_send_journal()
 	print("SHINY %s! (%d today)" % [nm, shiny_today])
+
+
+# --- THIRD PASS: seasons, flock visits, Ollie's shore garden (seasons.gd) -----------------
+
+## Ollie's shore garden: the seasons of the wishes granted (host: the save; clients: the "tackle" event).
+func _keepsakes() -> Array:
+	if net != null and net.mode == "client":
+		var out: Array = []
+		for i in keepsakes_net.length() / 2:
+			var two := keepsakes_net.substr(i * 2, 2)
+			for sn in Seasons.SEASONS:
+				if sn.begins_with(two):
+					out.append(sn)
+		return out
+	return save.data.get("keepsakes", [])
+
+
+## Host: Ollie plants a keepsake of the season on the shore for a granted wish.
+func _plant_keepsake() -> void:
+	var ks: Array = save.data.get("keepsakes", [])
+	if ks.size() >= Seasons.MAX_KEEPSAKES:
+		return
+	ks.append(season)
+	save.data.keepsakes = ks
+	save.mark_dirty()
+	_send_tackle()
+	net.state_set("garden", ks.size())
+	var lines := {"spring": "Tulips for the shore!", "summer": "Sunflowers for you!", "autumn": "A pumpkin for the shore!",
+		"winter": "A snowman for the shore!"}
+	var pics := {"spring": "wildflowers", "summer": "sunflower", "autumn": "pumpkin", "winter": "snowman"}
+	get_tree().create_timer(4.4).timeout.connect(func() -> void:
+		story({"who": "OLLIE", "line": String(lines[season]), "pic": String(pics[season]), "color": Seasons.CARDS[season][2], "duration": 3.5}))
+	var at: Vector3 = Seasons.keepsake_spots(ks.size())[ks.size() - 1]
+	get_tree().create_timer(4.6).timeout.connect(func() -> void:
+		burst(at + Vector3(0, 1.2, 0), Seasons.CARDS[season][2], 24))
+	print("Ollie's garden: a %s keepsake (%d)" % [season, ks.size()])
+
+
+func _reset_visits() -> void:
+	var vs: Array = lake_desc.get("visits", [])
+	var n := int(Tackle.num(game_mode).visits)
+	visit_state.clear()
+	visit_t.clear()
+	_lure_in_ring.clear()
+	for i in vs.size():
+		visit_state.append(0 if i < n else -1)
+		visit_t.append(0.0)
+		_lure_in_ring.append(false)
+	flocks_today = 0
+	spooked_today = 0
+	dodged_today = 0
+
+
+func _lure_inside(v: Dictionary) -> bool:
+	var a = players[0]
+	return (a.line_state == "waiting" or a.line_state == "bite") and _flat_dist(a.lure_pos, v.pos) < float(v.r)
+
+
+## Host: the day's flocks. A pink ring TELLS where they land (Tackle visit_tell s, by mode) while they fly in, then
+## SPLASH: fish in the ring swim off, a nibble there is lost, boats bob out of it. Never during Old Whiskers' fight.
+func _visits_update(delta: float) -> void:
+	var vs: Array = lake_desc.get("visits", [])
+	if visit_state.size() != vs.size():
+		_reset_visits()
+	var frac := day_frac()
+	for i in vs.size():
+		var v: Dictionary = vs[i]
+		match int(visit_state[i]):
+			0:
+				var busy: bool = players[0].hooked_kind() == FishScript.LEGEND
+				if frac >= float(v.at) and not busy and time_left > minf(15.0, round_time * 0.15):
+					var secs := float(Tackle.num(game_mode).visit_tell)
+					visit_state[i] = 1
+					visit_t[i] = secs
+					_lure_in_ring[i] = _lure_inside(v)
+					rings.warn(v.pos, float(v.r), Seasons.RING, secs)
+					net.event("warn", [v.pos, float(v.r), Seasons.RING, secs])
+					net.event("flock", [v.pos, float(v.r), season, secs])
+					_spawn_flock(v.pos, float(v.r), season, secs)
+					sound("quack", -2.0, 0.8 if season == "winter" else 1.0, true)
+					flocks_today += 1
+					if flocks_today == 1:
+						var f := Seasons.flock(season)
+						story({"who": "MAMA DUCK", "line": "%s coming!" % String(f.name), "pic": String(f.pic), "color": f.body, "duration": 2.5})
+					net.state_set("flock", "%d:%d:told" % [day, i])
+					print("Flock %d told: %s land at %s in %.1f s" % [i, Seasons.flock(season).name, str(v.pos), secs])
+			1:
+				visit_t[i] = float(visit_t[i]) - delta
+				if float(visit_t[i]) <= 0.0:
+					visit_state[i] = 2
+					visit_t[i] = Seasons.SIT_SECS
+					_flock_splash(i, v)
+			2:
+				visit_t[i] = float(visit_t[i]) - delta
+				if float(visit_t[i]) <= 0.0:
+					visit_state[i] = 3
+					if treasures.any(func(t) -> bool: return t.kind < 0):
+						_spawn_treasure(-1, v.pos)  # they leave a little something bubbling up
+					ripple(v.pos, 2.0)
+					net.state_set("flock", "%d:%d:gone" % [day, i])
+
+
+func _flock_splash(i: int, v: Dictionary) -> void:
+	var pos: Vector3 = v.pos
+	var r := float(v.r)
+	ripple(pos, r + 1.0)
+	burst(pos + Vector3(0, 0.3, 0), Color(0.85, 0.95, 1.0), 26)
+	sound("splash", 0.0, 0.8, true)
+	sound("quack", -3.0, 1.1, true)
+	for f in fish:
+		if f.kind >= 0 and f.kind != FishScript.LEGEND and _flat_dist(f.position, pos) < r + 0.5:
+			f.scare(pos, -1)
+	if _lure_inside(v):
+		spooked_today += 1
+		popup(pos + Vector3(0, 1.2, 0), "SPLASH!", Seasons.RING)
+		players[0].nibbling = false
+		players[0].wait_t = 0.0
+	elif _lure_in_ring[i]:
+		dodged_today += 1
+		popup(players[0].lure_pos + Vector3(0, 1.0, 0), "PHEW!", Color(0.6, 1.0, 0.6))
+	_bump_boats(pos, r)
+	net.event("flock_land", [pos, r])
+	net.state_set("flock", "%d:%d:landed" % [day, i])
+	print("Flock %d lands (bobber %s)" % [i, "splashed" if _lure_inside(v) else ("dodged" if _lure_in_ring[i] else "clear")])
+
+
+func _spawn_flock(pos: Vector3, r: float, s: String, secs: float) -> void:
+	var fl := FlockScript.new()
+	add_child(fl)
+	fl.setup(pos, r, s, secs)
+
+
+## Every machine: its own boats bob out of a flock's splash (other machines' boats are mirrored here).
+func _bump_boats(pos: Vector3, r: float) -> void:
+	for b in active_boats():
+		if b.ghost:
+			continue
+		var off: Vector3 = b.position - pos
+		off.y = 0.0
+		if off.length() < r + 0.6:
+			var out := off.normalized() if off.length() > 0.05 else Vector3.RIGHT
+			b.position = Vector3(pos.x, b.position.y, pos.z) + out * (r + 0.7)
+			ripple(b.position, 1.2, false)
+
+
+## Ollie's season card, once a visit, when the first real day starts (after the practice on a first visit).
+func _season_card() -> void:
+	if season_told:
+		return
+	season_told = true
+	var card: Array = Seasons.CARDS[season]
+	story({"who": "OLLIE", "line": String(card[0]), "pic": String(card[1]), "color": card[2], "duration": 2.0})
