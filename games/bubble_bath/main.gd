@@ -1857,5 +1857,5 @@ func _magnet(at: Vector3, v: Vector3, delta: float) -> Vector3:
 
 
 func _exit_tree() -> void:
-	if ready_to_play and not results_showing() and round_t > 3.0:
+	if ready_to_play and String(net.state_get("phase", "")) == "play" and round_t > 3.0:
 		_log_round("quit")

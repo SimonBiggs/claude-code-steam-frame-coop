@@ -92,8 +92,8 @@ const POND_SPOTS: Array[Vector2] = [Vector2(-0.6, 0.35), Vector2(1.9, 0.55), Vec
 const POND_IN := {"lily": true, "fountain": true, "boat": true}  # pieces that float in the water
 ## The pick row: three orbs just over the near rim, an arm's reach in front of the splasher (clear of the tap at x -1.1).
 const ROW_X: Array[float] = [-0.45, 0.05, 0.55]
-const ROW_Y := 1.2
-const ROW_Z := 2.5
+const ROW_Y := 1.25
+const ROW_Z := 2.35  # (a resting VR hand, 0.3 m ahead of the eyes, sits well behind the row: picks are on purpose)
 const ORB_SCALE := 0.3
 const HAND_R := 0.1  # a glove this near an orb's edge is in it
 const DWELL := 0.3  # seconds a glove must stay in an orb (a hand sweeping past never picks)

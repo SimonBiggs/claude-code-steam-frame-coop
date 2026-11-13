@@ -69,7 +69,8 @@ func _ready() -> void:
 		kit.at(43.0, "host checks (the TV machine is still connected)", _checks)
 		kit.at(47.0, "finish", kit.finish)
 	else:
-		kit.at(42.0 if client else 45.0, "finish", func() -> void:
+		var late := float(OS.get_environment("BOT_LATE")) if OS.has_environment("BOT_LATE") else 0.0  # (a late joiner leaves before the host)
+		kit.at(maxf(28.0, 42.0 - late) if client else 45.0, "finish", func() -> void:
 			_checks()
 			kit.finish())
 	kit.every(2.0, _report)
