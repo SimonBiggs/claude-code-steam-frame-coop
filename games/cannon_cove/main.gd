@@ -9,7 +9,7 @@ const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV p
 ## SIMPLE_MODE (the family: "all of the games have become too complicated", "everything's being driven
 ## by text"): the VR gunner aims and fires at pirate ships; the deckhands carry cannonballs to the cannons.
 ##  - TARGET PRACTICE first, exactly as before (Simon's favourite), plus a see-through ghost hand
-##    (ghost_hand.gd) that shows reach, squeeze, swing, let go instead of the hint text.
+##    (core/ghost_hand.gd) that shows reach, squeeze, swing, let go instead of the hint text.
 ##  - One new thing per wave: 1-2 a few slow ships whose shots don't hurt, 3 shots make LEAKS (one at a
 ##    time: a glowing ring, the deckhands' arrow), 4 BOARDERS (one at a time), 5 the SEA MONSTER's
 ##    tentacles, 6 the KRAKEN. Bonus seas after that bring back the bomb boats.
@@ -86,7 +86,7 @@ const ParrotScript := preload("res://games/cannon_cove/parrot.gd")
 const GuideScript := preload("res://games/cannon_cove/guide.gd")
 const HudScript := preload("res://games/cannon_cove/hud.gd")
 const PropsScript := preload("res://games/cannon_cove/props.gd")
-const GhostHandScript := preload("res://games/cannon_cove/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const SfxScript := preload("res://core/sfx.gd")
 const MusicScript := preload("res://core/music.gd")
 const NetScript := preload("res://core/net.gd")
@@ -205,7 +205,7 @@ var view_count := 0
 var say_t := 0.0
 var simple := SIMPLE_MODE  # other scripts read main.simple
 var props: Node3D  # simple mode: touchable things beside each cannon (props.gd)
-var ghost_hand: Node3D  # simple mode: the practice ghost hand (VR gunner only)
+var ghost_hand: GhostHand  # simple mode: the practice ghost hand (VR gunner only, core/ghost_hand.gd)
 # --- Polly's treasures + the seeded voyage (host / local own them; TV machines get the treasures + cards) ---
 var save: Node
 var voyage_seed := 0
@@ -2548,19 +2548,56 @@ func _update_ghost_hand(p, c, vr: bool, holding: bool, focus: Array) -> void:
 	if not vr:
 		return
 	if ghost_hand == null:
-		ghost_hand = GhostHandScript.new()
+		ghost_hand = GhostHand.new()
+		ghost_hand.layers = p.viewmodel_layer()
 		add_child(ghost_hand)
-		p._set_layers(ghost_hand, p.viewmodel_layer())
 	var want: bool = not game_over and not holding and stats[0].shots < 3 and c.ammo > 0 and phase == "practice"
 	var aim := Vector3.ZERO
 	if not focus.is_empty():
 		var fp: Vector3 = focus[0]
 		aim = fp
+	var dt := get_process_delta_time()
 	if coach_let_go and holding and not game_over:
-		ghost_hand.show_release(true, c, get_process_delta_time())
+		_ghost_release(c, dt)
 		return
-	ghost_hand.show_release(false, c, 0.0)
-	ghost_hand.show_demo(want, c, aim, get_process_delta_time())
+	if ghost_hand.mode == "release":
+		ghost_hand.hide_demo()
+	_ghost_demo(want, c, aim, dt)
+
+
+## The loop: reach to the cannon's glowing handle, squeeze, swing towards the target (aim, or ZERO), let go.
+## Fades in after the gunner has been idle for a moment.
+func _ghost_demo(want: bool, c, aim: Vector3, delta: float) -> void:
+	if not ghost_hand.gate(want, delta, 1.5):
+		return
+	var t := ghost_hand.play("demo", 3.0, delta)
+	var handle: Vector3 = c.handle_world()
+	var out: Vector3 = c.outboard
+	var start := handle - out * 0.4 + Vector3.UP * 0.2
+	# Swing: the handle end moves the opposite way to the muzzle (towards the target means the hand
+	# goes the other way across, and down to lift the barrel).
+	var swing := Vector3.DOWN * 0.06
+	if aim != Vector3.ZERO:
+		var to: Vector3 = aim - c.global_position
+		var across: Vector3 = out.cross(Vector3.UP)
+		swing += -across * clampf(to.dot(across) / maxf(1.0, to.length()), -1.0, 1.0) * 0.2
+	var k := GhostHand.track([[0.0, start], [0.9, handle, 0.0], [1.2, handle, 1.0], [2.1, handle + swing, 1.0],
+		[2.4, handle + swing, 0.0]], t)  # ...let go: BOOM
+	ghost_hand.set_alpha(ghost_hand.fade(2.9))
+	# Palm down, fingers pointing out to sea, sitting just above the handle.
+	ghost_hand.pose(Transform3D(UiKit.aim(out, Vector3.UP), k.p + Vector3.UP * 0.03), k.grip)
+
+
+## The gunner holds c's handle and should let go now: squeezed, then the fingers spring open, over and
+## over, just above (and a little behind) their own hand so it doesn't hide it.
+func _ghost_release(c, delta: float) -> void:
+	var t := ghost_hand.play("release", 1.2, delta)
+	var open := clampf((t - 0.45) / 0.15, 0.0, 1.0)  # squeezed ... pop!
+	ghost_hand.set_alpha(0.6 if t < 0.95 else 0.6 * maxf(0.0, 1.0 - (t - 0.95) / 0.25))
+	ghost_hand.visible = true
+	var out: Vector3 = c.outboard
+	var p: Vector3 = c.handle_world() + Vector3.UP * (0.12 + 0.04 * open) - out * 0.05
+	ghost_hand.pose(Transform3D(UiKit.aim(out, Vector3.UP), p), (1.0 - open) - open * 0.19)  # fingers flick open
 
 
 ## Where a deckhand's guide arrow points: the most useful job for them right now, or null.

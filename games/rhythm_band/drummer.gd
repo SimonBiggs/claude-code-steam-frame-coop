@@ -56,12 +56,12 @@ func _update_practice() -> void:
 ## Visual teaching (simple mode): a glowing arrow bobs over the drum to hit (the practice drum on every
 ## screen; on the host / local machine also the next ball's drum until that drum has been hit twice,
 ## main.cue_learned); the flat drummer's view puts the drum's button over it (highway.gd). Between songs
-## the VR drummer sees the shared ghost hand (games/cannon_cove/ghost_hand.gd) reach for a maraca,
+## the VR drummer sees the shared ghost hand (core/ghost_hand.gd) reach for a maraca,
 ## squeeze and shake it, until they have picked one up twice.
 
 const MeshKit := preload("res://games/rhythm_band/mesh_kit.gd")
 const PropsScript := preload("res://games/rhythm_band/props.gd")
-const GhostHandScript := preload("res://games/cannon_cove/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 
 const HIT_R := 0.13  # metres from the stick tip to a drum's centre
 const REARM_R := 0.17
@@ -830,7 +830,7 @@ func _update_ghost_hand(delta: float) -> void:
 	if gh_idle < 1.0:
 		return
 	if ghost_hand == null:
-		ghost_hand = GhostHandScript.new()
+		ghost_hand = GhostHand.new()
 		ghost_hand.name = "GhostHand"
 		main.add_child(ghost_hand)
 	# The maraca nearest the right hand.

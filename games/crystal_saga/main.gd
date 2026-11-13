@@ -52,7 +52,7 @@ const World := preload("res://games/crystal_saga/world.gd")
 const Monsters := preload("res://games/crystal_saga/monsters.gd")
 const Hero := preload("res://games/crystal_saga/hero.gd")
 const VrHands := preload("res://games/crystal_saga/vr_hands.gd")
-const GhostHand := preload("res://games/crystal_saga/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const Seeded := preload("res://core/seeded.gd")
 const SagaGen := preload("res://games/crystal_saga/sagagen.gd")
 const Saga := preload("res://games/crystal_saga/saga.gd")
@@ -89,7 +89,8 @@ var world: World
 var monsters: Monsters
 var heroes := {}  ## slot -> Hero (every machine)
 var hands: VrHands
-var ghost: GhostHand
+var ghost: GhostHand  ## practice, VR hero: the see-through glove + sword (core/ghost_hand.gd)...
+var ghost_left: GhostHand  ## ...and the left glove with its little flame
 var avatar: VrRig.Avatar
 var arrow: Node3D  ## glowing arrow on the ground towards the open barrier
 var beam: MeshInstance3D  ## the crystal's beam of light (dim purple -> gold)
@@ -230,7 +231,14 @@ func _setup(mode: String) -> void:
 		add_child(hands)
 		hands.setup(self, vr_rig)
 		ghost = GhostHand.new()
+		ghost.look = GhostHand.Look.GLOVE
 		add_child(ghost)
+		ghost.prop(VrHands.sword_mesh())
+		ghost_left = GhostHand.new()
+		ghost_left.look = GhostHand.Look.GLOVE
+		ghost_left.left = true
+		add_child(ghost_left)
+		ghost_left.prop(VrHands.flame_mesh())
 		_build_blink()
 	sky = SkyKit.apply(self, SKIES[0], vr_rig != null)
 	_build_arrow()
@@ -1168,7 +1176,45 @@ func _ghost(delta: float, phase: String) -> void:
 				best = d
 				target = c
 		mode = "swing" if best < 4.0 else ""
-	ghost.show_demo(mode, target, vr_rig.head_position(), vr_rig.head_yaw(), delta)
+	_ghost_demo(mode, target, vr_rig.head_position(), vr_rig.head_yaw(), delta)
+
+
+## Practice for the VR hero: the see-through glove SHOWS the move instead of text, on a loop:
+##   "swing"   - holding a see-through sword, it slices through the target (GhostHand.slash);
+##   "fire"    - the LEFT glove with its little flame rises from shoulder height to above the head;
+##   "thunder" - the RIGHT glove with the sword rises above the head, the blade pointing at the sky.
+## The raise demos float ~0.8 m in front of the hero's eyes (head, yaw) so they're easy to see.
+func _ghost_demo(mode: String, target: Vector3, head: Vector3, yaw: float, delta: float) -> void:
+	if not ghost.gate(mode != "", delta):
+		ghost_left.hide_demo()
+		return
+	ghost_left.play(mode, 2.4, delta)
+	var cycle := 2.4
+	var t := ghost.play(mode, cycle, delta)
+	var a := ghost.fade(cycle, 0.3, 0.3)
+	ghost.set_alpha(a)
+	ghost_left.set_alpha(a)
+	ghost.hand.visible = mode != "fire"  # the right glove + sword (swing, thunder)...
+	ghost_left.visible = mode == "fire"  # ...or the left glove with its flame
+	if mode == "swing":
+		ghost.pose(GhostHand.slash(t, target, head, cycle))
+		return
+	# Raise: from shoulder height up above the head, in front of the hero.
+	var b := Basis(Vector3.UP, yaw)
+	var side := -0.25 if mode == "fire" else 0.25
+	var low := head + b * Vector3(side, -0.45, -0.85)
+	var high := head + b * Vector3(side * 1.2, 0.3, -0.95)
+	var k := 0.0
+	if t < 0.5:
+		k = 0.0
+	elif t < 1.1:
+		k = ease((t - 0.5) / 0.6, -2.0)
+	elif t < 1.9:
+		k = 1.0
+	else:
+		k = 1.0 - (t - 1.9) / (cycle - 1.9)
+	# Point the glove forward when low and up at the sky when raised.
+	(ghost_left if mode == "fire" else ghost).pose(Transform3D(b * Basis(Vector3.RIGHT, lerpf(0.0, PI * 0.5, k)), low.lerp(high, k)))
 
 
 ## Host: a monster was hit (slot 0 = the VR hero / a local knight, 1+ = a TV hero). src: what hit it

@@ -28,7 +28,7 @@ const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV p
 ##    an icon, CUES: swaying arrows = walk, RT + sword = bonk, LT + arrow = shoot the balloon, A + up
 ##    arrow = jump, a pulsing heart while you're down) that fade once the knight has done it twice, and
 ##    a glowing arrow in the knight's colour bobs over the goblin to bonk (only in that knight's view).
-##    The Giant gets the shared Cannon Cove ghost hand (practice grab-and-throw, rain umbrella).
+##    The Giant gets the shared ghost hand (core/ghost_hand.gd) (practice grab-and-throw, rain umbrella).
 ## STORY + DEPTH (raidgen.gd, table_story.gd, story_pictures.gd): SPARKY, the campfire's little flame (a face in the
 ## fire), tells the story on picture cards. Every wave's goblins come up LADDERS on the table edge (seeded: they appear
 ## in the break before the wave, the first always on the Giant's side), and tests/giants_table_gen_test.gd proves every

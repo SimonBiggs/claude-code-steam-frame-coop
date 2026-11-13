@@ -21,7 +21,7 @@ extends Node3D
 ## SIMPLE_MODE (Defs.SIMPLE_MODE; the family: "all of the games have become too complicated"): no island
 ## select, coins, needs, events, goals or awards. The mayor starts with ROAD + HOUSE and one new block
 ## sparkles into the tray at a time as the town grows. PRACTICE: a glowing spot and a ghost hand
-## (ghost_hand.gd) show the mayor how to draw a road and put a house beside it; a house blueprint waits
+## (core/ghost_hand.gd) show the mayor how to draw a road and put a house beside it; a house blueprint waits
 ## by the town hall so the drivers' first job is one glowing delivery (bricks from the hall to the new
 ## house). Everything on the table reacts to touch (props.gd). Text: one short headline at the start.
 ## VISUAL TEACHING (SIMPLE_MODE, no how-to words): low in each TV player's view a pulsing glowing button
@@ -68,7 +68,7 @@ const MayorVrScript := preload("res://games/tiny_town_tycoon/mayor_vr.gd")
 const MayorFlatScript := preload("res://games/tiny_town_tycoon/mayor_flat.gd")
 const HudScript := preload("res://games/tiny_town_tycoon/hud.gd")
 const PropsScript := preload("res://games/tiny_town_tycoon/props.gd")
-const GhostHandScript := preload("res://games/tiny_town_tycoon/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const CueScript := preload("res://games/tiny_town_tycoon/cue.gd")
 const IslandGen := preload("res://games/tiny_town_tycoon/islandgen.gd")
 const Wishes := preload("res://games/tiny_town_tycoon/wishes.gd")
@@ -152,7 +152,12 @@ var _mood := ""
 var _last_veh := {}  ## host: slot -> the vehicle they drove (given back when they reconnect)
 # SIMPLE_MODE
 var props: Node3D  ## touchable toys (every machine)
-var ghost_hand: Node3D  ## the mayor's practice (host / local)
+var ghost_hand: GhostHand  ## the mayor's practice (host / local): the see-through hand (core/ghost_hand.gd)...
+var ghost_carried: MeshInstance3D  ## ...the road / house piece it carries...
+var ghost_t := 0.0
+var pmark_spot: MeshInstance3D  ## ...and the practice marks every host view sees: the glowing spot,
+var pmark_tiles: Array[MeshInstance3D] = []  ## the see-through road tiles beyond it,
+var pmark_house: MeshInstance3D  ## and the see-through house beside the new road
 var practice := 2  ## host: 0 = draw a road, 1 = put a house by it, 2 = done
 var practice_road: Array[Vector2i] = []
 var practice_house := Vector2i(-1, -1)
@@ -310,10 +315,7 @@ func _setup(mode: String) -> void:
 		props.set("main", self)
 		add_child(props)
 		if mode != "client":
-			ghost_hand = GhostHandScript.new()
-			ghost_hand.name = "GhostHand"
-			ghost_hand.set("main", self)
-			add_child(ghost_hand)
+			_build_practice_marks()
 			# the glowing arrows: built once now, sharing the practice spot's glowing material
 			var amat := MeshKit.material(Color(1.0, 0.9, 0.35), 2.5)
 			spot_arrow = CueScript.make_arrow(amat, 0.05)
@@ -1300,7 +1302,7 @@ func _update_arrows() -> void:
 			(ar as Node3D).visible = true
 			(ar as Node3D).global_position = Defs.CENTER + Vector3(0.0, 0.06, 0.0)
 		return
-	var spot: Node3D = ghost_hand.get("spot")
+	var spot: Node3D = pmark_spot
 	spot_arrow.visible = spot != null and spot.visible and playing()
 	if spot_arrow.visible:
 		spot_arrow.global_position = spot.global_position + Vector3(0.0, 0.035 + 0.02 * bob, 0.0)
@@ -1401,7 +1403,7 @@ func _process(delta: float) -> void:
 		flat.call("tick", delta, is_play)
 	hud.call("tick", delta)
 	if ghost_hand != null:
-		ghost_hand.call("update_demo", delta)
+		_ghost_demo(delta)
 	if spot_arrow != null:
 		var _pc := Time.get_ticks_usec()
 		_update_arrows()
@@ -2092,3 +2094,148 @@ func _exit_tree() -> void:
 		save_town()
 		save.save_now()
 	XRServer.world_scale = 1.0
+
+
+# --- SIMPLE_MODE practice for the mayor: SHOWS how to build instead of text (host only) ----------------
+##   step 0: a glowing spot at the end of the first street and see-through road tiles beyond it. On the
+##           VR host the see-through hand reaches to the ROAD in the tray, pinches it, and draws the
+##           road from the glowing spot along the tiles. Done when the mayor draws any road.
+##   step 1: a glowing spot beside the new road; the hand takes a HOUSE from the tray and puts it
+##           down there. Done when the mayor places a house.
+## practice owns the step and the cells. The hand loops while the mayor's hand is empty; the spot stays
+## until the step is done.
+
+func _build_practice_marks() -> void:
+	ghost_hand = GhostHand.new()
+	ghost_hand.name = "GhostHand"
+	ghost_hand.world_space = false  # placed in this node's space (hand.position)
+	add_child(ghost_hand)
+	ghost_hand.visible = true
+	ghost_carried = ghost_hand.prop(null, Color(1.0, 0.95, 0.5, 0.6), false)
+	pmark_spot = MeshInstance3D.new()
+	var tm := TorusMesh.new()
+	tm.inner_radius = Defs.CELL * 0.36
+	tm.outer_radius = Defs.CELL * 0.5
+	tm.rings = 20
+	tm.ring_segments = 6
+	pmark_spot.mesh = tm
+	pmark_spot.material_override = MeshKit.material(Color(1.0, 0.9, 0.35), 2.5)
+	pmark_spot.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(pmark_spot)
+	var bm := BoxMesh.new()
+	bm.size = Vector3(Defs.CELL * 0.9, 0.003, Defs.CELL * 0.9)
+	for i in 3:
+		var tile := MeshInstance3D.new()
+		tile.mesh = bm
+		tile.material_override = Art.ghost_mat(Color(1.0, 0.95, 0.6, 0.45))
+		tile.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		add_child(tile)
+		pmark_tiles.append(tile)
+	pmark_house = MeshInstance3D.new()
+	pmark_house.mesh = Art.building_mesh("house", 0, 1, false)
+	pmark_house.material_override = Art.ghost_mat(Color(1.0, 0.95, 0.6, 0.45))
+	pmark_house.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	pmark_house.scale = Vector3.ONE * Defs.CELL
+	add_child(pmark_house)
+	_hide_practice_marks()
+
+
+func _hide_practice_marks() -> void:
+	ghost_hand.hand.visible = false
+	ghost_carried.visible = false
+	pmark_spot.visible = false
+	pmark_house.visible = false
+	for tile in pmark_tiles:
+		tile.visible = false
+
+
+func _ghost_demo(delta: float) -> void:
+	var step: int = practice
+	if step >= 2 or not playing() or practice_road.is_empty():
+		_hide_practice_marks()
+		ghost_t = 0.0
+		return
+	ghost_t += delta
+	var pulse := 1.0 + sin(ghost_t * 6.0) * 0.12
+	# the glowing spot and see-through targets (every host view: VR and the flat mayor)
+	var road: Array = practice_road
+	var a: Vector2i = road[0]
+	var target_cell: Vector2i = a if step == 0 else practice_house
+	var sc := Defs.cell_center(target_cell.x, target_cell.y)
+	pmark_spot.visible = true
+	pmark_spot.position = sc + Vector3(0, 0.003, 0)
+	pmark_spot.scale = Vector3(pulse, 0.3, pulse)
+	for i in pmark_tiles.size():
+		var tile := pmark_tiles[i]
+		tile.visible = step == 0 and i < road.size()
+		if tile.visible:
+			var c: Vector2i = road[i]
+			tile.position = Defs.cell_center(c.x, c.y) + Vector3(0, 0.002, 0)
+	pmark_house.visible = step == 1 and practice_house.x >= 0
+	if pmark_house.visible:
+		pmark_house.position = sc + Vector3(0, 0.001, 0)
+		pmark_house.rotation.y = int(town.auto_rot("house", target_cell.x, target_cell.y)) * PI * 0.5
+	# the hand (VR mayor only, while their hand is empty)
+	var hand := ghost_hand.hand
+	if mayor == null or String(mayor.get("held")) != "" or (props != null and props.holding()):
+		hand.visible = false
+		ghost_carried.visible = false
+		return
+	var kind := "road" if step == 0 else "house"
+	var tray: Vector3 = mayor.call("tray_point", kind)
+	if tray == Vector3.ZERO:
+		hand.visible = false
+		ghost_carried.visible = false
+		return
+	ghost_hand.shown = true
+	hand.visible = true
+	var ph := fposmod(ghost_t, 5.0)
+	var start := tray + Vector3(0, 0.1, 0)
+	var over := sc + Vector3(0, 0.03, 0)
+	var pos := start
+	var grip := 0.0
+	var holding := false
+	if ph < 1.0:
+		pos = start.lerp(tray + Vector3(0, 0.015, 0), smoothstep(0.0, 1.0, ph))
+	elif ph < 1.3:
+		pos = tray + Vector3(0, 0.015, 0)
+		grip = (ph - 1.0) / 0.3
+		holding = ph > 1.15
+	elif ph < 2.4:
+		var k := smoothstep(1.3, 2.4, ph)
+		pos = (tray + Vector3(0, 0.015, 0)).lerp(over, k) + Vector3(0, sin(k * PI) * 0.08, 0)
+		grip = 1.0
+		holding = true
+	elif ph < 3.9:
+		grip = 1.0
+		holding = true
+		if step == 0:
+			var k2 := (ph - 2.4) / 1.5 * float(road.size() - 1)
+			var i0 := clampi(int(k2), 0, road.size() - 1)
+			var i1 := clampi(i0 + 1, 0, road.size() - 1)
+			var c0: Vector2i = road[i0]
+			var c1: Vector2i = road[i1]
+			pos = Defs.cell_center(c0.x, c0.y).lerp(Defs.cell_center(c1.x, c1.y), k2 - i0) + Vector3(0, 0.03, 0)
+		else:
+			var k3 := smoothstep(2.4, 3.0, ph)
+			pos = over.lerp(sc + Vector3(0, 0.012, 0), k3)
+			if ph > 3.0:
+				grip = 0.0
+				holding = false
+				pos = (sc + Vector3(0, 0.012, 0)).lerp(sc + Vector3(0, 0.08, 0), smoothstep(3.0, 3.9, ph))
+	else:
+		pos = hand.position.lerp(sc + Vector3(0, 0.12, 0), 0.1)
+		hand.visible = ph < 4.6
+	var head: Vector3 = vr_rig.head_position() if vr_rig != null else Defs.CENTER + Vector3(0, 0.6, 1.0)
+	var to := pos - head
+	hand.position = pos
+	hand.rotation = Vector3(-0.35, atan2(-to.x, -to.z), 0.0)
+	ghost_hand.set_grip(grip * 0.85)
+	ghost_carried.visible = holding and hand.visible
+	if ghost_carried.visible:
+		if ghost_carried.get_meta("kind", "") != kind:
+			ghost_carried.set_meta("kind", kind)
+			ghost_carried.mesh = Art.piece_mesh(kind, false)
+		ghost_carried.position = pos + Vector3(0, -0.012, 0)
+		ghost_carried.scale = Vector3.ONE * 0.04
+

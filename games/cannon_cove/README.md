@@ -3,7 +3,7 @@
 Pirate co-op: one VR gunner on a Steam Frame plus 1–6 deckhands on the TV (split screen when there's no headset).
 
 **SIMPLE_MODE** (`main.gd`, on): the gunner aims and fires; the deckhands carry cannonballs to the cannons.
-- Target practice first, unchanged, plus a see-through ghost hand (`ghost_hand.gd`) that shows reach,
+- Target practice first, unchanged, plus a see-through ghost hand (`core/ghost_hand.gd`) that shows reach,
   squeeze, swing, let go. The bouncing arrows teach the rest; no hint text or help panel.
 - One new thing per wave: 1–2 a few slow ships whose shots only rock the boat, 3 LEAKS (one at a time:
   a glowing ring, the deckhands' arrow), 4 BOARDERS (one at a time), 5 the SEA MONSTER's tentacles,

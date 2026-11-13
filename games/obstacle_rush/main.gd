@@ -20,7 +20,7 @@ extends Node3D
 ##   get built, and the stands get flags, balloons, a band, fireworks, a trophy and gold as they fill.
 ##   Story cards (a picture + a few words) tell it. One RUN telemetry line per course (and on quit).
 ## - PRACTICE (the first course): the TV runners get a glowing ring over the first gap; the giant gets
-##   a glowing target on the course and a see-through ghost glove that shows the throw (ghost_hand.gd).
+##   a glowing target on the course and a see-through ghost glove that shows the throw (core/ghost_hand.gd).
 ## - Text: the TV shows one short line at most (A Jump!, the course name); VR gets one short headline.
 ## - CPU runners fill up to three runners (solo VR: the giant plays with three CPU runners).
 ## - SECOND PASS (deep.gd): GENTLE / BRAVE / HARD picked on pick orbs before the first seeded course of a session,
@@ -52,7 +52,7 @@ const Runner := preload("res://games/obstacle_rush/runner.gd")
 const RunnerLook := preload("res://games/obstacle_rush/runner_look.gd")
 const CpuBrain := preload("res://games/obstacle_rush/cpu_brain.gd")
 const Giant := preload("res://games/obstacle_rush/giant.gd")
-const GhostHand := preload("res://games/obstacle_rush/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const CourseGen := preload("res://games/obstacle_rush/coursegen.gd")
 const Story := preload("res://games/obstacle_rush/story.gd")
 const Stands := preload("res://games/obstacle_rush/stands.gd")
@@ -96,7 +96,8 @@ var sky: SkyKit.SkyRig
 
 var course: Course
 var giant: Giant
-var ghost: GhostHand
+var ghost: GhostHand  # practice, VR giant: the see-through glove (core/ghost_hand.gd)...
+var ghost_ball: MeshInstance3D  # ...and the ball it throws
 var runners := {}  ## rid -> Runner (slot 0..6 people, 10+ CPU)
 var brains := {}  ## rid -> CpuBrain (host)
 var cams := {}  ## slot -> CameraRig
@@ -203,8 +204,15 @@ func _setup(mode: String) -> void:
 	giant.setup(self, vr_rig, mode != "client")
 	if vr_rig != null:
 		ghost = GhostHand.new()
-		ghost.giant = giant
+		ghost.look = GhostHand.Look.GLOVE
+		ghost.size = giant.S
 		add_child(ghost)
+		var sm := SphereMesh.new()
+		sm.radius = 0.5
+		sm.height = 1.0
+		sm.radial_segments = 12
+		sm.rings = 6
+		ghost_ball = ghost.prop(sm, Color(1.0, 0.95, 0.5, 0.6), false)
 	if mode != "host" or vr_rig == null:
 		split = SplitView.new()
 		split.camera_far = 900.0
@@ -1037,7 +1045,33 @@ func _ghost(delta: float) -> void:
 	var idle := giant.throws > 0 and giant.last_throw_t > 30.0
 	var on := playing and giant.held < 0 and (first or idle) and course_t > 1.5
 	var to := course.target_pos if course.target != null else Vector3(vr_rig.head_position().x, 0.3, 0.0)
-	ghost.show_demo(on, giant._home_spot(0), to, delta)
+	_ghost_demo(on, giant._home_spot(0), to, delta)
+
+
+## Practice for the VR giant: SHOWS the move instead of text. The see-through glove dips into the ball
+## bucket (from), picks up a ball, swings and throws it in an arc onto the glowing target (to). It loops
+## on the first course until the giant throws a ball, and comes back when they haven't for a while.
+func _ghost_demo(on: bool, from: Vector3, to: Vector3, delta: float) -> void:
+	if not ghost.gate(on, delta):
+		return
+	var cycle := 3.6
+	var t := ghost.play("throw", cycle, delta)
+	var wind := from + Vector3(0.0, 3.0, 2.0)  # back towards you
+	var rel := from.lerp(to, 0.25) + Vector3(0.0, 4.0, 0.0)
+	# Reach down into the bucket, grab, lift and wind back, swing forward...
+	var p: Vector3 = GhostHand.track([[0.0, from + Vector3(0.0, 2.5, 0.0)], [0.6, from, 0.0, 0.5], [0.9, from],
+		[1.5, wind, 0.0, -2.0], [1.9, rel, 0.0, 2.0]], t).p
+	var bp := p
+	if t >= 1.9:  # ...let go: the ball flies to the target
+		p = rel + Vector3(0.0, 0.3, 0.0) * (t - 1.9)
+		var k := clampf((t - 1.9) / 1.0, 0.0, 1.0)
+		bp = rel.lerp(to, k) + Vector3(0.0, sin(k * PI) * 2.0, 0.0)
+	elif t < 0.75:
+		bp = from  # still in the bucket
+	ghost.set_alpha(ghost.fade(cycle, 0.3, 0.5))
+	ghost.pose(Transform3D(GhostHand.yaw_to(to - from), p + Vector3(0.0, 0.2, 0.0)))
+	ghost_ball.visible = t > 0.75 or t < 0.6
+	ghost_ball.global_position = bp
 
 
 ## VR: one short headline, far away over the course, facing the giant (turned on Y only).

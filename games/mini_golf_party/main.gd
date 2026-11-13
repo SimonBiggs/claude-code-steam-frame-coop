@@ -43,7 +43,7 @@ const SkyKit := preload("res://core/sky_kit.gd")
 const Course := preload("res://games/mini_golf_party/course.gd")
 const Ball := preload("res://games/mini_golf_party/ball.gd")
 const Putter := preload("res://games/mini_golf_party/putter.gd")
-const GhostHand := preload("res://games/mini_golf_party/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const Props := preload("res://games/mini_golf_party/props.gd")
 const HoleGen := preload("res://games/mini_golf_party/holegen.gd")
 const Garden := preload("res://games/mini_golf_party/garden.gd")
@@ -85,7 +85,9 @@ var course: Course
 var props: Props
 var balls := {}  # slot -> Ball
 var putter: Putter  # host: the VR golfer's club; TV machine: a copy drawn from the snapshot
-var ghost: GhostHand
+var ghost: GhostHand  # practice, VR golfer: the see-through hand (core/ghost_hand.gd)...
+var ghost_club: MeshInstance3D  # ...its see-through putter...
+var ghost_ring: MeshInstance3D  # ...and the glowing ring pulsing under the ball
 var vr_avatar: VrRig.Avatar
 var board: Node3D  # the flag / star board over the hole (every machine)
 var arrows := {}  # slot -> Node3D
@@ -214,6 +216,14 @@ func _setup(mode: String) -> void:
 		add_child(putter)
 		ghost = GhostHand.new()
 		add_child(ghost)
+		var cb := MeshKit.Builder.new()
+		cb.cylinder(0.012, 0.012, 1.0, MeshKit.at(Vector3(0.0, 0.5, 0.0)), Color.WHITE, 6)
+		cb.box(Vector3(0.14, 0.05, 0.05), MeshKit.at(Vector3.ZERO), Color.WHITE)
+		ghost_club = ghost.prop(cb.build(), Color(0, 0, 0, 0), false)
+		var rb := MeshKit.Builder.new()
+		rb.torus(0.11, 0.015, MeshKit.at(Vector3.ZERO), Color(1.0, 0.95, 0.5), 20, 4, true)
+		ghost_ring = MeshKit.instance(rb.build(), false)
+		ghost.add_child(ghost_ring)
 		_make_fade()
 	_build_world(vr_rig != null)
 	if mode != "host" or vr_rig == null:
@@ -753,7 +763,36 @@ func _vr_golfer(delta: float) -> void:
 		vr_idle = 0.0
 	var demo := playing and b.resting() and not holding and (
 		(int(net.state_get("hole", 0)) == 0 and not putted.has(0)) or vr_idle > 25.0)
-	ghost.show_demo(demo, b.position, fwd, delta)
+	_ghost_demo(demo, b.position, fwd, delta)
+
+
+## PRACTICE for the VR golfer: SHOWS the putting swing instead of telling it. The see-through hand holding
+## a see-through putter appears behind the ball, swings back slowly, then through the ball, again and
+## again, while a glowing ring pulses under the ball. fwd: the flat direction to putt.
+func _ghost_demo(want: bool, ball: Vector3, fwd: Vector3, delta: float) -> void:
+	if not ghost.gate(want, delta):
+		return
+	var cycle := 2.6
+	var t := ghost.play("putt", cycle, delta)
+	var ground := ball - Vector3.UP * Course.BALL_R
+	ghost_ring.global_position = ground + Vector3.UP * 0.01
+	ghost_ring.scale = Vector3.ONE * (1.0 + 0.15 * sin(t * TAU / cycle * 2.0))
+	# Swing: back slowly, then smoothly through the ball, then fade.
+	var sw := 0.0
+	if t < 1.1:
+		sw = -0.3 * ease(t / 1.1, -1.6)
+	elif t < 1.6:
+		sw = lerpf(-0.3, 0.25, ease((t - 1.1) / 0.5, 1.6))
+	else:
+		sw = 0.25
+	ghost.set_alpha(ghost.fade(cycle, 0.0001, 0.6, 0.5))
+	var head := ball + fwd * (sw - 0.09)
+	var grip := ball - fwd * 0.45 + Vector3.UP * 0.75 + fwd * sw * 0.4
+	var d := head - grip
+	var y := -d.normalized()
+	var x := y.cross(fwd).normalized()
+	ghost_club.global_transform = Transform3D(Basis(x, y, x.cross(y)).orthonormalized().scaled_local(Vector3(1.0, d.length(), 1.0)), head)
+	ghost.pose(Transform3D(UiKit.face(d, Vector3.UP, fwd), grip), 1.0)
 
 
 func on_spare_grabbed() -> void:

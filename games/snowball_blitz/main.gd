@@ -9,7 +9,7 @@ const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV p
 ## games", "everything's being driven by text"): defend the snow fort from waddling snowmen by
 ## throwing snowballs - the VR player with real hands, the TV players with one press.
 ##  - PRACTICE first: the VR player gets glowing target snowmen close by, one at a time, and a
-##    see-through ghost hand (ghost_hand.gd) that scoops snow and throws; each TV player gets one
+##    see-through ghost hand (core/ghost_hand.gd) that scoops snow and throws; each TV player gets one
 ##    glowing target in front of them, with a bobbing glowing arrow over it.
 ##  - One new thing per wave: 1 a few slow plain snowmen that don't throw, 2 they throw (harmless
 ##    splats; the pan lid still blocks), 3 sled riders, 4 snow bunnies, 5 giants (MEGA SNOWBALL drops),
@@ -78,7 +78,7 @@ const GAME_ID := "snowball_blitz"
 const VILLAGE_CHEERS := {1: "Our first igloo!", 5: "Five igloos!", 10: "Ten igloos!", 24: "A whole village!"}
 const KIND_PICS := {"snowman": "snowman", "sled": "sledman", "bunny": "bunny", "giant": "snowman", "balloon": "balloon", "king": "snowking", "yeti": "yeti"}
 const PropsScript := preload("res://games/snowball_blitz/props.gd")
-const GhostHandScript := preload("res://games/snowball_blitz/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const VR_PRACTICE := 3  # glowing targets the VR player knocks over before the snowmen come
 ## Simple mode: the one new kind each wave brings (it joins the mix from the next wave on).
 const SIMPLE_NEW := {3: "sled", 4: "bunny", 5: "giant", 6: "balloon"}
@@ -196,7 +196,10 @@ var vr_hurt_mat: StandardMaterial3D
 var vr_hurt := 0.0
 var simple := SIMPLE_MODE  # other scripts read main.simple
 var props: Node3D  # simple mode: touchable things beside the VR player (props.gd)
-var ghost_hand: Node3D  # simple mode: the practice ghost hand (VR player only)
+var ghost_hand: GhostHand  # simple mode: the practice ghost hand (VR player only)
+var ghost_ball: MeshInstance3D  # the ghost snowball it makes and throws
+var ghost_fly_from := Vector3.ZERO
+var ghost_fly_vel := Vector3.ZERO
 var practice := SIMPLE_MODE  # simple mode: target practice before wave 1 (mirrored to the TV)
 var practice_t := 0.0
 var vr_hits := 0
@@ -1246,7 +1249,7 @@ func _end_practice() -> void:
 	in_break = true
 	break_timer = 2.0
 	if ghost_hand:
-		ghost_hand.show_demo(false, Vector3.ZERO, Vector3.ZERO, 0.0)
+		ghost_hand.hide_demo()
 	print("Practice over (VR hits %d, %.0f s)" % [vr_hits, practice_t])
 	if SIMPLE_MODE and wave == 0 and not Engine.has_meta("sb_mode_set") and net.forced_mode("SB_MODE") == "":
 		_begin_pick("mode")
@@ -1267,10 +1270,51 @@ func _update_ghost_hand(delta: float) -> void:
 	if ghost_hand == null:
 		if aim == Vector3.ZERO:
 			return
-		ghost_hand = GhostHandScript.new()
+		ghost_hand = GhostHand.new()
+		ghost_hand.layers = p.viewmodel_layer()
 		add_child(ghost_hand)
-		p._set_layers(ghost_hand, p.viewmodel_layer())
-	ghost_hand.show_demo(aim != Vector3.ZERO, p.xr_camera.global_position, aim, delta)
+		var sm := SphereMesh.new()
+		sm.radius = 0.09
+		sm.height = 0.18
+		sm.radial_segments = 10
+		sm.rings = 5
+		ghost_ball = ghost_hand.prop(sm, Color(1.0, 1.0, 1.0, 0.6), false)
+	_ghost_demo(aim != Vector3.ZERO, p.xr_camera.global_position, aim, delta)
+
+
+## The ghost hand's loop: reach down to the snow, squeeze (a snowball appears), lift it back over the
+## shoulder, swing towards the glowing target (aim) and let go (the ghost snowball flies off). It fades
+## in after the thrower has been idle for a moment. head: the headset position.
+func _ghost_demo(want: bool, head: Vector3, aim: Vector3, delta: float) -> void:
+	if not ghost_hand.gate(want, delta, 1.5):
+		return
+	var t := ghost_hand.play("throw", 3.2, delta)
+	var fwd := Vector3(aim.x - head.x, 0.0, aim.z - head.z)
+	fwd = fwd.normalized() if fwd.length() > 0.1 else Vector3.FORWARD
+	var right := fwd.cross(Vector3.UP)
+	var feet_y := maxf(head.y - 1.15, 0.25)
+	var low := head + fwd * 0.4 + right * 0.2 + Vector3.UP * (feet_y - head.y)  # down at the snow
+	var back := head + right * 0.25 - fwd * 0.12 + Vector3.UP * 0.02  # wound up beside the ear
+	var out := head + right * 0.15 + fwd * 0.55 + Vector3.UP * 0.12  # arm out towards the target
+	var k := GhostHand.track([[0.0, low + Vector3.UP * 0.35], [0.7, low, 0.0], [1.0, low, 1.0], [1.8, back, 1.0],
+		[2.15, out, 1.0, 0.4], [2.35, out, 0.0]], t)  # ...swing! let go
+	var holding := t > 0.85 and t < 2.15
+	if t >= 2.15 and ghost_fly_vel == Vector3.ZERO:
+		ghost_fly_from = out + fwd * 0.08
+		ghost_fly_vel = (aim - ghost_fly_from).normalized() * 9.0 + Vector3.UP * 2.0
+	ghost_hand.set_alpha(ghost_hand.fade(2.85))
+	# Palm down, fingers pointing at the target.
+	ghost_hand.pose(Transform3D(UiKit.aim(fwd, Vector3.UP), k.p), k.grip)
+	if holding:
+		ghost_fly_vel = Vector3.ZERO
+		ghost_ball.visible = true
+		ghost_ball.global_position = k.p + Vector3.DOWN * 0.03 - ghost_hand.hand.global_basis.z * 0.05
+	elif ghost_fly_vel != Vector3.ZERO and t >= 2.15:
+		var ft := t - 2.15
+		ghost_ball.visible = ft < 0.9
+		ghost_ball.global_position = ghost_fly_from + ghost_fly_vel * ft + Vector3.DOWN * 4.0 * ft * ft
+	else:
+		ghost_ball.visible = false
 
 
 ## Simple mode picture cues: a player has done `key` once more ("throw", "turn"); its cue goes after two.

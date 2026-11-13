@@ -49,7 +49,7 @@ const MarbleScript := preload("res://games/marble_maze/marble.gd")
 const TilterScript := preload("res://games/marble_maze/tilter.gd")
 const JoinListenerScript := preload("res://games/marble_maze/join_listener.gd")
 const PropsScript := preload("res://games/marble_maze/props.gd")
-const GhostHandScript := preload("res://games/marble_maze/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const CueScript := preload("res://games/marble_maze/cue.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
@@ -179,7 +179,9 @@ var vr_center: Label3D
 var vr_board: Label3D
 var simple := SIMPLE_MODE
 var props: Node3D
-var ghost_hand: Node3D
+var ghost_hands: Array[GhostHand] = []  # simple mode: the see-through hands (core/ghost_hand.gd), left and right
+var ghost_hand: GhostHand  # the right one (bots: it's showing)
+var ghost_marble: MeshInstance3D  # the glowing ghost marble (every screen: it teaches the TV players too)
 var practiced := false
 var ring_node: MeshInstance3D
 var ring_hit := {}  # marble index -> true once it rolled through the practice ring
@@ -509,10 +511,24 @@ func _build_world() -> void:
 		props.name = "Props"
 		props.main = self
 		add_child(props)
-		ghost_hand = GhostHandScript.new()
-		ghost_hand.name = "GhostHand"
-		ghost_hand.main = self
-		add_child(ghost_hand)
+		for side in 2:
+			var gh := GhostHand.new()
+			gh.name = "GhostHand%d" % side
+			gh.left = side == 0
+			add_child(gh)
+			ghost_hands.append(gh)
+		ghost_hand = ghost_hands[1]
+		var sm := SphereMesh.new()
+		sm.radius = 0.028
+		sm.height = 0.056
+		sm.radial_segments = 10
+		sm.rings = 5
+		ghost_marble = MeshInstance3D.new()
+		ghost_marble.mesh = sm
+		ghost_marble.material_override = GhostHand.make_mat(Color(1.0, 1.0, 0.6, 0.6))
+		ghost_marble.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		ghost_marble.visible = false
+		board.add_child(ghost_marble)
 		town = TownScript.new()
 		town.name = "Town"
 		town.main = self
@@ -1241,7 +1257,44 @@ func _update_simple(delta: float) -> void:
 	if ghost_hand != null and not players.is_empty() and not board.starts.is_empty():
 		var tl = players[0]
 		var busy: bool = tl.vr and (tl.grabbing or tl.want_tilt.length() > 0.2)
-		ghost_hand.show_demo(practice, tl.vr, busy, board.starts[0], spot, delta)
+		_ghost_demo(practice, tl.vr, busy, board.starts[0], spot, delta)
+
+
+## SIMPLE_MODE practice: SHOWS how to play instead of text. The two see-through hands come down onto the
+## board's handles, curl their fingers round them (grip) and tilt the board the way the practice ring is
+## (one hand up, one down / both pushed), while the ghost marble rolls from the start (from) into the ring
+## (to, board-local). Loops until the giant grabs a handle (busy). The hands only show for a VR giant.
+func _ghost_demo(on: bool, vr: bool, busy: bool, from: Vector2, to: Vector2, delta: float) -> void:
+	if not ghost_hand.gate(on, delta, 1.0, busy):
+		ghost_hands[0].hide_demo()
+		ghost_marble.visible = false
+		return
+	var t := ghost_hand.play("tilt", 3.6, delta)
+	var alpha := ghost_hand.fade(3.6, 0.4, 0.5)
+	var p := from.lerp(to, ease(clampf((t - 1.1) / 1.8, 0.0, 1.0), -1.6))
+	ghost_marble.visible = true
+	ghost_marble.position = Vector3(p.x, 0.03, p.y)
+	(ghost_marble.material_override as StandardMaterial3D).albedo_color.a = alpha / GhostHand.ALPHA * 0.7
+	if not vr:
+		for gh in ghost_hands:
+			gh.visible = false
+		return
+	# Tilt: to roll marbles +x, the right hand goes down and the left hand up; to roll them towards the
+	# giant (+z), both hands pull back (see tilter.gd).
+	var dir := (to - from).normalized()
+	var tilt_k := ease(clampf((t - 0.9) / 0.8, 0.0, 1.0), -1.6)
+	var grip := clampf((t - 0.45) / 0.4, 0.0, 1.0)
+	var down := 1.0 - clampf(t / 0.45, 0.0, 1.0)  # hands come down onto the handles
+	for side in 2:
+		var s := -1.0 if side == 0 else 1.0
+		var off := Vector3(0, 0.012 + down * 0.1, down * 0.08)
+		off.y += -s * dir.x * 0.05 * tilt_k
+		off.z += dir.y * 0.05 * tilt_k
+		# Palm on top of the handle, fingers pointing out past it so they curl round under it.
+		var hb: Basis = board.global_basis * Basis(Vector3.UP, -s * PI * 0.5)
+		ghost_hands[side].visible = true
+		ghost_hands[side].set_alpha(alpha)
+		ghost_hands[side].pose(Transform3D(hb, board.handle_world(side) + off + hb * Vector3(0, 0.03, 0.03)), grip)
 
 
 ## Host / local: every marble that rolls through the practice ring gets a ding; once they all have

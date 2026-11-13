@@ -32,7 +32,7 @@ extends Node3D
 ##    keeper gets A / SPACE + an arrow the way to dive. A glowing 3D arrow bobs over the practice glove
 ##    spot (every screen) and, in the strikers' views, over the practice ring; after a miss one points
 ##    into the goal (or at the ring) from where the ball went. The VR keeper sees the shared ghost hand
-##    (games/cannon_cove/ghost_hand.gd) reach out to the glowing glove spot in practice. Each cue fades
+##    (core/ghost_hand.gd) reach out to the glowing glove spot in practice. Each cue fades
 ##    once that player has done it twice (cue_did / cue_learned). The FIREBALL button next to the power
 ##    bar is the player's own Y / F / ' with a flame. No view shows its own striker's name tag.
 ## Everything cut is only switched off: SIMPLE_MODE = false brings the full cup game back.
@@ -65,7 +65,7 @@ const SimpleFxScript := preload("res://games/penalty_shootout/simple_fx.gd")
 const PropsScript := preload("res://games/penalty_shootout/props.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 const HudKit := preload("res://core/hud_kit.gd")
-const GhostHandScript := preload("res://games/cannon_cove/ghost_hand.gd")
+const GhostHand := preload("res://core/ghost_hand.gd")
 const MatchGen := preload("res://games/penalty_shootout/matchgen.gd")
 const LeoCornerScript := preload("res://games/penalty_shootout/leo_corner.gd")
 const Save := preload("res://core/save.gd")
@@ -2672,7 +2672,7 @@ func _miss_arrow(to: Vector3) -> void:
 	net.event("fx", ["miss", from, to])
 
 
-## Simple mode, VR keeper practice: the shared see-through hand (games/cannon_cove/ghost_hand.gd) loops
+## Simple mode, VR keeper practice: the shared see-through hand (core/ghost_hand.gd) loops
 ## reaching out to the glowing glove spot and catching, until the keeper has saved two practice balls.
 func _update_ghost_hand(delta: float) -> void:
 	var want: bool = keeper_in_vr() and practice == "keeper" and (state == "kready" or state == "flight") \
@@ -2683,7 +2683,7 @@ func _update_ghost_hand(delta: float) -> void:
 			ghost_hand.visible = false
 		return
 	if ghost_hand == null:
-		ghost_hand = GhostHandScript.new()
+		ghost_hand = GhostHand.new()
 		ghost_hand.name = "GhostHand"
 		add_child(ghost_hand)
 	gh_t = fmod(gh_t + delta, 2.2)

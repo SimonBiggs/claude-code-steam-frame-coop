@@ -529,7 +529,7 @@ func _checks() -> void:
 		kit.assert_true(not main.log_regions.is_empty(), "%s: a region was picked on the map (%s)" % [mode, str(main.log_regions)])
 	if main.vr_rig != null:
 		if first == 0:
-			kit.assert_true(main.ghost.shown.has("swing") and main.ghost.shown.has("fire"), "the ghost hand showed swing and fire (%s)" % str(main.ghost.shown))
+			kit.assert_true(main.ghost.seen.has("swing") and main.ghost.seen.has("fire"), "the ghost hand showed swing and fire (%s)" % str(main.ghost.seen))
 		kit.assert_true(main.hands.swings > 0, "the hero's sword hit monsters (%d)" % main.hands.swings)
 		kit.assert_true(main.hands.fires > 0, "the hero cast fireballs (%d)" % main.hands.fires)
 		if first <= 2 and not short:  # (the cave orb's thunder comes late in a journey)
