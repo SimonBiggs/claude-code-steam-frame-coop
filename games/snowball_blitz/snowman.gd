@@ -169,8 +169,9 @@ func _build() -> void:
 		_part(main.sphere_mesh(0.05), main.mat("gem"), Vector3(0, y0 + 1.95, -0.22))
 	elif kind != "bunny":
 		var brim := CylinderMesh.new()
-		brim.top_radius = 0.3
-		brim.bottom_radius = 0.3
+		var wide: float = preload("res://games/snowball_blitz/seasons.gd").BRIM.get(main.season, 1.0)  # (summer: straw sun hats)
+		brim.top_radius = 0.3 * wide
+		brim.bottom_radius = 0.3 * wide
 		brim.height = 0.04
 		brim.radial_segments = 12
 		_part(brim, main.mat("hat"), Vector3(0, y0 + 1.84, 0))

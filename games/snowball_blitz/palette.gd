@@ -6,6 +6,7 @@ const Contrast := preload("res://core/contrast.gd")
 const Looks := preload("res://games/snowball_blitz/looks.gd")
 const Bosses := preload("res://games/snowball_blitz/bosses.gd")
 const Snowman := preload("res://games/snowball_blitz/snowman.gd")
+const Tricks := preload("res://games/snowball_blitz/tricks.gd")
 
 
 static func _outlined(c: Color) -> Dictionary:
@@ -24,6 +25,8 @@ static func key_colors() -> Dictionary:
 	for k in Bosses.LIST:
 		for a in Bosses.LIST[k].attacks:
 			out["%s %s ring" % [k, a]] = Bosses.tell_color(k, a)
+	for k in Tricks.COLORS:  # the warned surprises' shapes on the snow (tricks.gd)
+		out["%s warning" % k] = Tricks.COLORS[k]
 	return out
 
 
