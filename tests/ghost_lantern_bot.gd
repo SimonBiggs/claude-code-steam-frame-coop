@@ -337,7 +337,7 @@ func _second_pass(_delta: float) -> void:
 	if not spawned_new and main.night >= 2 and not main.in_break and t > 38.0:
 		spawned_new = true
 		var b = main._spawn_ghost("boing")
-		b.global_position = Vector3(-18.0 if p1.global_position.x > 0.0 else 18.0, 1.3, -6.0)  # far from everyone: it hops on its own
+		b.global_position = _far_spot()  # far from everyone (6 players' vacuums too): it hops on its own
 		b.hop_wait = 0.3
 		var pf = main._spawn_ghost("puff")
 		pf.global_position = p1.global_position + Vector3(0, 1.4, -3.0)
@@ -363,6 +363,22 @@ func _second_pass(_delta: float) -> void:
 			"OK" if errs.is_empty() else "FAIL", str(main.picks.history), main.game_mode, main.upgrades, main.lantern_angle(),
 			main.lantern_range(), saw_rings, pufflings_seen, saw_boing_land, main.house.get("wing", {}).get("id", "-")])
 		BotEnd.check(errs.is_empty(), "second pass (picks, gifts, new ghosts): %s" % str(errs))
+
+
+## The corner of the house farthest from every player (a Boing there hops before any vacuum reaches it).
+func _far_spot() -> Vector3:
+	var best := Vector3(18.0, 1.3, -6.0)
+	var best_d := -1.0
+	for x in [-18.0, -9.0, 0.0, 9.0, 18.0]:
+		for z in [-6.0, 0.0, 6.0]:
+			var d := INF
+			for p in main.players:
+				if p.active:
+					d = minf(d, Vector2(p.global_position.x - x, p.global_position.z - z).length())
+			if d > best_d:
+				best_d = d
+				best = Vector3(x, 1.3, z)
+	return best
 
 
 ## Granny Boo's house: hiding ghosts seen hiding (eyes showing, body hidden) and coming out.

@@ -132,6 +132,52 @@ static func gift_choices(unlocked: Array, last: String, seed_value: int) -> Arra
 	return Seeded.shuffled(Seeded.rng(seed_value, "gift order"), out)
 
 
+## A VR row of picks in front of the head must never stand behind scenery (a wall, a bookcase: Ghost Lantern's lantern
+## gifts' names behind the hall's table, 2026-11-14; core/vr_view_check.gd pick_hidden fails it). `places` are the
+## orbs' floor points (y ignored), `y` their height, `scale` / `label_y` as passed to show_orbs (the name hangs
+## under the orb, so a table top can hide it while the orb shows). Clear: the same places. Blocked: the whole row turned about the head
+## (25 / 50 / 75 degrees either way, the first clear way wins), else the clearest way pulled nearer the head until it is
+## clear (never nearer than `near` m). Returns the new floor points.
+static func vr_clear_row(cam: Camera3D, places: Array, y: float, scale := 1.0, label_y := -0.95, near := 0.8) -> Array:
+	if cam == null or not cam.is_inside_tree() or places.is_empty():
+		return places
+	var head := cam.global_position
+	var best: Array = places
+	var best_k := -1.0
+	for deg in [0.0, 25.0, -25.0, 50.0, -50.0, 75.0, -75.0]:
+		var row: Array = []
+		for p in places:
+			var off := Vector3(p.x - head.x, 0.0, p.z - head.z).rotated(Vector3.UP, deg_to_rad(deg))
+			row.append(Vector3(head.x + off.x, 0.0, head.z + off.z))
+		var k := _row_clear_k(cam, row, y, label_y * scale, 0.35 * scale)
+		if k >= 0.999:
+			return row
+		if k > best_k:
+			best_k = k
+			best = row
+	var out: Array = []
+	for p in best:
+		var off := Vector3(p.x - head.x, 0.0, p.z - head.z)
+		var d := off.length()
+		var kk := clampf(best_k, minf(1.0, near / maxf(d, 0.01)), 1.0)
+		out.append(Vector3(head.x + off.x * kk, 0.0, head.z + off.z * kk))
+	return out
+
+
+## How far (0..1) towards its row the nearest blocker lets every orb (its middle, its name's middle and ends) come.
+static func _row_clear_k(cam: Camera3D, row: Array, y: float, label_dy: float, half_name: float) -> float:
+	var k := 1.0
+	var head := cam.global_position
+	for p in row:
+		var side: Vector3 = Vector3(p.x - head.x, 0.0, p.z - head.z).cross(Vector3.UP).normalized() * half_name
+		for off in [Vector3(0.0, 0.0, 0.0), Vector3(0.0, label_dy, 0.0), Vector3(side.x, label_dy, side.z), Vector3(-side.x, label_dy, -side.z)]:
+			var aim: Vector3 = Vector3(p.x, y, p.z) + off
+			var hit: Dictionary = preload("res://core/vr_view_check.gd").first_hit(cam, head.lerp(aim, 1.08), null, [], true)
+			if hit.node != null:
+				k = minf(k, maxf(0.0, float(hit.f) * 1.08 - 0.25 / maxf(head.distance_to(aim), 0.01)))
+	return k
+
+
 static func spot(i: int, n: int, origin: Vector3, gap: float, y: float) -> Vector3:
 	return origin + Vector3((i - (n - 1) * 0.5) * gap, y, 0.0)
 

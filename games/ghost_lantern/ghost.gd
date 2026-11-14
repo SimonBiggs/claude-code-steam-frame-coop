@@ -808,6 +808,8 @@ func scare(from: Vector3) -> void:
 
 ## Host: a vacuum at `from` is pulling this (revealed) ghost.
 func suck(from: Vector3, amount: float, by) -> void:
+	if hop_t >= 0.0:
+		return  # in the air (a Boing hop, a puffling floating down): it lands in its warning ring first, dizzy: catch it then
 	sucked_t = 0.15
 	pull_from = from
 	capture += amount * (1.8 if stun_t > 0.0 else 1.0) * (1.5 if main.director().event_name == "party" else 1.0) / tough
