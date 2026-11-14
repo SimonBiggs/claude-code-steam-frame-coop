@@ -16,7 +16,8 @@
 //   machine joining a game already running; it gets BOT_LATE=S and a deadline S shorter, so it still leaves before
 //   the host)  --allow-no-result REASON (a machine may end without a BOT RESULT: only
 //   for bots on brepl dev.ts NET_NO_RESULT_OK)  --expect-late KIND,KIND (default with --late: story) the late joiner must catch up on these sticky
-//   events (core/net.gd sticky_event: "Net: got <kind> <ms> ms after joining" within 4 s), or it FAILs. Needs a bot
+//   events (core/net.gd sticky_event: "Net: got <kind> <ms> ms after joining" within 4 s), or it FAILs.
+//   A bot that needs more names it in its header: "## multibot: seconds=240 late=20" raises --seconds / --late (never lowers). Needs a bot
 //   whose host stays long enough (bubble_bath_bot's host finishes at 38 s, before a late joiner's checks: use
 //   snowball_blitz / dragon_rider / rocket_workshop bots)
 //
@@ -129,6 +130,16 @@ async function pruneOldRuns(maxAgeMs = 2 * 86400_000) {
   }
 }
 
+/** A bot's own minimum run settings: a header line "## multibot: seconds=240 late=20" in tests/<bot>.gd. */
+export async function botNeeds(project: string, scene: string): Promise<{ seconds?: number; late?: number }> {
+  const gd = join(project, scene.replace(/^res:\/\//, "").replace(/\.tscn$/, ".gd"));
+  const src = await Bun.file(gd).text().catch(() => "");
+  const line = src.match(/^## multibot:(.*)$/m)?.[1] ?? "";
+  const out: { seconds?: number; late?: number } = {};
+  for (const [, k, v] of line.matchAll(/(seconds|late)=(\d+)/g)) out[k as "seconds" | "late"] = Number(v);
+  return out;
+}
+
 export async function runGroup(o: GroupOpts): Promise<GroupResult> {
   const joiners = Math.max(1, Math.min(6, o.joiners ?? 3));
   const project = resolve(o.project ?? join(dirname(import.meta.path), ".."));
@@ -142,8 +153,12 @@ export async function runGroup(o: GroupOpts): Promise<GroupResult> {
   await mkdir(dir, { recursive: true });
   await pruneOldRuns();
   const t0 = Date.now() + joiners * stagger + 5000;
-  const late = Math.max(0, o.late ?? 0);
-  const seconds = o.seconds ?? 180;
+  // A bot's own needs (its header "## multibot: seconds=S late=L") raise the asked-for values: Party Board's networked
+  // game needs 240 s, Dragon Rider's late joiner must come 20 s in (2026-11-13: both failed with the usual 150 s / 12 s).
+  const need = await botNeeds(project, scene);
+  const late = o.late ? Math.max(o.late, need.late ?? 0) : 0;
+  const seconds = Math.max(o.seconds ?? 180, need.seconds ?? 0);
+  if (late !== (o.late ?? 0) || seconds !== (o.seconds ?? 180)) log(`multibot: the bot's header asks for --seconds ${seconds}${late ? ` --late ${late}` : ""} (raised from ${o.seconds ?? 180}${o.late ? ` / ${o.late}` : ""})`);
   if (late && seconds - late < 60) throw new Error(`--late ${late} leaves the late joiner under 60 s of its --seconds ${seconds}`);
   const expectLate = late ? (o.expectLate?.length ? o.expectLate : ["story"]) : [];
   const names = ["host", ...Array.from({ length: joiners }, (_, i) => `join${i + 1}${late && i + 1 === joiners ? "(late)" : ""}`)];

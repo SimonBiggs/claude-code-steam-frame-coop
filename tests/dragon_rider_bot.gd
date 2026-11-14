@@ -22,6 +22,7 @@ extends Node
 ## the pick phase the rider flies into a different orb each pick (left, right, middle...) unless a gunner bubbles one
 ## first; checks the mode is picked once, a gift before every stage, sky events are told (and every machine draws
 ## them), the baby dragons match the save, and nothing in the deep test's fairness rules is broken in play.
+## multibot: late=20  (a late joiner before 20 s arrives before the first story/orbs: tools/multibot.ts reads this)
 
 const FAKE_PAD := 40
 

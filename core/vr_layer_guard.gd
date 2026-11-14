@@ -40,8 +40,11 @@ func _dev_tool(n: Node) -> bool:
 
 
 ## A camera driven from an XR camera is a mirror of the VR view.
-func _check_follow(rt: RemoteTransform3D) -> void:
-	if not is_instance_valid(rt) or not rt.is_inside_tree() or not rt.get_parent() is XRCamera3D:
+func _check_follow(n: Variant) -> void:  # (untyped: a node freed before its deferred call arrives as a freed Object)
+	if not is_instance_valid(n) or not n is RemoteTransform3D:
+		return
+	var rt := n as RemoteTransform3D
+	if not rt.is_inside_tree() or not rt.get_parent() is XRCamera3D:
 		return
 	var target := rt.get_node_or_null(rt.remote_path)
 	if target is Camera3D:

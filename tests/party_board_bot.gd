@@ -24,6 +24,7 @@ extends Node
 ## TV players), Mango's gift pick from round 2 (only the player furthest behind; CPUs take their own), the warned
 ## surprises told on the spaces at a round's start and going off at its end, the gift tags over the tokens, the season
 ## on the island and Mango's party hall growing after a party.
+## multibot: seconds=240  (a networked party game runs past 150 s: tools/multibot.ts reads this)
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const Boards := preload("res://games/party_board/boards.gd")

@@ -77,7 +77,7 @@ func _on_node_added(n: Node) -> void:
 ## the depth test too, or the panel shows as a dark bar with the words hidden behind the scenery (Fruit Catch
 ## 2026-11-12, TODAY'S HARVEST in front of a low branch). Their priority stays above the panel's.
 ## core/vr_view_check.gd text_problems() fails a VR bot when this doesn't hold.
-func _match_panel(l: GeometryInstance3D) -> bool:
+func _match_panel(l: Variant) -> bool:  # (untyped: a node freed before its deferred call arrives as a freed Object)
 	if not is_instance_valid(l) or not (l is Label3D or l is SpriteBase3D):
 		return false
 	var p := VrViewCheck.panel_of(l)
@@ -99,9 +99,10 @@ func _sweep(n: Node) -> void:
 		_sweep(c)
 
 
-func _fix(l: Label3D) -> void:
-	if not is_instance_valid(l):
+func _fix(n: Variant) -> void:  # (untyped: a node freed before its deferred call arrives as a freed Object)
+	if not is_instance_valid(n) or not n is Label3D:
 		return
+	var l := n as Label3D
 	l.no_depth_test = false
 	# A raised render priority draws text over see-through things (light beams, glass) even when
 	# it's behind them; let transparent sorting by distance decide instead.
