@@ -327,6 +327,27 @@ func check_host_mode(net: Node, mine: String, key := "mode") -> bool:
 	return assert_true(why == "", why if why != "" else "this machine plays at the host's difficulty ('%s': %s)" % [key, mine])
 
 
+## EVERYONE-VOTES picks (core/pick_flow.gd vote mode): "" once a net "pick_result" this machine saw had two or more
+## players voting for different orbs and its winner follows the game's vote rule (picks.winner_of: the most votes,
+## its tie rule), else what is missing or wrong. Needs watch_state(net) first; any machine (the TV sees the host's).
+func vote_problem(picks: Node) -> String:
+	var split := 0
+	for r in seen_values("pick_result"):
+		if not (r is Array) or (r as Array).size() < 5:
+			continue
+		var vs: Dictionary = r[2]
+		var differ := {}
+		for s in vs:
+			differ[int(vs[s])] = true
+		if vs.size() < 2 or differ.size() < 2:
+			continue
+		split += 1
+		var want: int = picks.winner_of(String(r[0]), r[1], vs, int(r[4]))
+		if want != int(r[3]):
+			return "the %s vote %s chose orb %d, the rule says %d" % [r[0], str(vs), int(r[3]), want]
+	return "" if split > 0 else "no pick had two players voting differently (%d results)" % seen_values("pick_result").size()
+
+
 ## The same check for bots without a BotKit (they record it their own way): "" = fine, else what's wrong.
 static func host_mode_problem(net: Node, mine: String, key := "mode") -> String:
 	if net == null or not (net.mode in ["host", "client"]):

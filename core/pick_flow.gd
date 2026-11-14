@@ -35,8 +35,8 @@ extends Node
 ##   wait runs out; the most votes wins, a tie goes to tie_pick() (tie_rule "middle": the default orb if tied, else
 ##   the tied one nearest it; "gentler": the gentlest mode on a "mode" stage). Nobody voted: the default as always.
 ##   One player alone: their vote ends it after vote_hold. No voters at all for empty_wait seconds (>= 0): the default.
-##   history gets [stage, option, slot, {slot: orb}], net state "pick_result" [stage, options, votes, winner] (bots:
-##   BotKit.check_votes). A game never counts votes itself (tests/shared_picks_test.gd).
+##   history gets [stage, option, slot, {slot: orb}], net state "pick_result" [stage, options, votes, winner, default] (bots:
+##   BotKit.vote_problem). A game never counts votes itself (tests/shared_picks_test.gd).
 
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const Party := preload("res://core/party.gd")
@@ -294,7 +294,7 @@ func _vote_tick(delta: float, picks: Array, points: Dictionary) -> void:
 			if int(votes[s]) == win and (by < 0 or int(s) < by):
 				by = int(s)
 		if main.net.mode != "client":
-			main.net.state_set("pick_result", [stage, options.duplicate(), votes.duplicate(), win])
+			main.net.state_set("pick_result", [stage, options.duplicate(), votes.duplicate(), win, default_pick()])
 		print("PICK %s: votes %s -> %d (%s)" % [stage, str(votes), win, str(options[win])])
 		take(win, by)
 
@@ -349,9 +349,15 @@ func _share_votes() -> void:
 		main.net.state_set("pick_votes", votes.duplicate())
 
 
+## Every machine: the orbs showing now are this flow's vote (default yes). A game whose own per-player picks share
+## the row (make_orbs) says which stages vote, e.g. orbs.stage == "mode", so their own dots stay.
+func vote_row() -> bool:
+	return true
+
+
 ## Every machine, every frame (vote mode): the vote dots from net state "pick_votes".
 func _show_votes() -> void:
-	if not is_instance_valid(orbs) or orbs.orbs.is_empty() or main == null or main.net == null:
+	if not is_instance_valid(orbs) or orbs.orbs.is_empty() or main == null or main.net == null or not vote_row():
 		_vote_key = ""
 		return
 	var vs: Dictionary = main.net.state_get("pick_votes", {})
