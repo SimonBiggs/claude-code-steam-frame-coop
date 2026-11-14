@@ -135,8 +135,10 @@ def main() -> None:
         index(db, quiet=True)
         sql = ("SELECT m.id, m.ts, m.role, m.session, m.agent, snippet(messages_fts, 0, '[', ']', '…', 24) "
                "FROM messages_fts JOIN messages m ON m.id = messages_fts.rowid WHERE messages_fts MATCH ?")
-        # FTS5 reads "steamos-add-to-steam" as column filters and crashes: quote any bare word with punctuation.
-        q = re.sub(r'(?<!")\b([\w.]+(?:[-/:][\w.]+)+)\b(?!")', r'"\1"', a.query)
+        # FTS5 reads "steamos-add-to-steam" as column filters and "boing_landed=false" as a syntax error (2026-11-14):
+        # quote every bare word with anything but letters, digits, _ or a trailing * (AND / OR / NOT / "phrases" kept).
+        q = " ".join(w if w.startswith('"') or w in ("AND", "OR", "NOT") or re.fullmatch(r"[\w]+\*?", w)
+                     else '"' + w.replace('"', '""') + '"' for w in re.findall(r'"[^"]*"|\S+', a.query))
         args: list = [q]
         if a.role:
             sql += " AND m.role = ?"; args.append(a.role)
