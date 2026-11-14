@@ -38,6 +38,7 @@ const RaidGen := preload("res://games/giants_table/raidgen.gd")
 const MechRoundGen := preload("res://games/mech_titans/roundgen.gd")
 const HoleGen := preload("res://games/mini_golf_party/holegen.gd")
 const RushCourseGen := preload("res://games/obstacle_rush/coursegen.gd")
+const SkyBotsGen := preload("res://games/sky_bots/levelgen.gd")
 const PaintGen := preload("res://games/paint_and_guess/paintgen.gd")
 const PlaneStory := preload("res://games/paper_planes/story.gd")
 const SnowStory := preload("res://games/snowman_maker/story.gd")
@@ -153,6 +154,9 @@ func _entries() -> Array:
 	# --- obstacle_rush: CourseGen.make(story desc) == CourseGen.generate(seed, tier).
 	out.append(["obstacle_rush", "coursegen.gd", "CourseGen.generate (top tiers)",
 		func(s: int) -> Variant: return RushCourseGen.generate(s, RushCourseGen.tier_count() - 1 - s % 2)])
+	# --- sky_bots: LevelGen.generate(desc) on every machine when an island starts (Crab Cove HARD: the most pieces).
+	out.append(["sky_bots", "levelgen.gd", "LevelGen.generate (Crab Cove, hard)",
+		func(s: int) -> Variant: return SkyBotsGen.generate({"i": 3, "s": s, "m": "hard"})])
 	# --- paint_and_guess: PaintGen.build(plan_code) per game.
 	out.append(["paint_and_guess", "paintgen.gd", "PaintGen.build (all themes)",
 		func(s: int) -> Variant: return PaintGen.build(PaintGen.code_of(s, PaintGen.BASE_THEMES + 2 + s % 2, false))])

@@ -78,6 +78,8 @@ const GAMES := [
 		"blurb": "Steer tiny boats to round up rubber ducks and sail them down the plug-hole, while the giant splashes up waves."},
 	{"id": "snowman_maker", "multi": true, "cat": "cosy", "name": "SNOWMAN MAKER", "scene": "res://games/snowman_maker/main.tscn",
 		"blurb": "Help Tumble the penguin get the village ready for the Winter Fair! Roll, stack and dress snowmen - give the visitors the hat they wish for."},
+	{"id": "sky_bots", "multi": true, "cat": "adventure", "name": "SKY BOTS", "scene": "res://games/sky_bots/main.tscn",
+		"blurb": "Hop, hover and punch through floating sky islands as little robots - the VR giant lifts platforms and flicks grumbles!"},
 	{"id": "dodge_ball", "multi": true, "cat": "party", "name": "SOFT DODGEBALL", "scene": "res://games/dodge_ball/main.tscn",
 		"blurb": "A friendly VR giant throws squishy balls; dodge them and bop the target on his belly!"},
 	# Finished 2026-10-24 but reading-based: hidden until the family says yes (.backlog.md). Uncomment to show.
@@ -110,7 +112,7 @@ const SOLO := {
 	"bee_garden": 2, "block_builders": 2, "dodge_ball": 2, "dragon_rider": 2, "duo_arena": 2, "elemental_bender": 2,
 	"ghost_lantern": 2, "giants_table": 2, "kart_race": 2, "kitchen_rush": 2, "marble_maze": 2, "obstacle_rush": 2,
 	"party_board": 2, "penalty_shootout": 2, "rocket_workshop": 2, "roller_coaster": 2, "snowball_blitz": 2,
-	"snowman_maker": 2, "starship_crew": 2, "treasure_dig": 2, "paper_planes": 2,
+	"snowman_maker": 2, "starship_crew": 2, "treasure_dig": 2, "paper_planes": 2, "sky_bots": 2,
 	"balloon_pop": 1, "bubble_bath": 1, "cannon_cove": 1, "crystal_saga": 1, "dungeon_delve": 1, "fishing_lake": 1,
 	"fruit_catch": 1, "mech_titans": 1, "mini_golf_party": 1, "rhythm_band": 1,
 	"sheep_round_up": 1, "tiny_town_tycoon": 1, "tower_stack": 1, "whack_a_mole": 1, "quiz_show": 1, "mystery_manor": 1,
