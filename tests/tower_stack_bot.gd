@@ -45,6 +45,8 @@ var gift_want := ""  # host: the gift the bot walked to
 var gift_ok := 0  # host: gifted jobs that started with the gift on and its effect in force
 var gift_bad := 0
 var gift_poles := 0  # every machine: frames the gift pennant showed with a gift on
+var gift_bonus_max := 0  # host: the most bonus the gold roof gave in a round
+var gift_uses_max := 0
 
 
 func _ready() -> void:
@@ -134,6 +136,8 @@ func _physics_process(delta: float) -> void:
 	_watch_picks()
 	if main.gifts.gift != "" and main.gifts.pole.visible:
 		gift_poles += 1
+	gift_bonus_max = maxi(gift_bonus_max, main.gift_bonus)
+	gift_uses_max = maxi(gift_uses_max, main.gift_uses + main.specials.mortar_glues if main.specials != null else 0)
 	var slots: Array[int] = main.party.local_slots()
 	jump_t -= delta
 	if not main.picks.orbs.orbs.is_empty() and not slots.is_empty():
@@ -151,6 +155,10 @@ func _orb_target() -> int:
 	var row: Array = main.picks.orbs.orbs
 	if row.is_empty():
 		return -1
+	if main.picks.orbs.stage == "gift" and OS.has_environment("BOT_GIFT") and main.net.mode != "client":  # (BOT_GIFT=capstone ...)
+		var k: int = main.picks.options.find(OS.get_environment("BOT_GIFT"))
+		if k >= 0 and k < row.size():
+			return k
 	return row.size() / 2 if main.picks.orbs.stage == "mode" else 0
 
 
@@ -455,7 +463,9 @@ func _checks() -> void:
 	var pick_pending: bool = main.picks.active() or pick_want != "" or gift_want != ""
 	if cheers_done >= 1:
 		kit.assert_true(pick_ok + gift_ok >= 1 or pick_pending, "%s: after a tower the team chose the next building or a gift (%d + %d)" % [mode, pick_ok, gift_ok])
-	kit.info("%s: gifts %s, uses %d, bonus %d, mortar glues %d" % [mode, str(main.round_gifts), main.gift_uses, main.gift_bonus, main.specials.mortar_glues])
+	kit.info("%s: gifts %s, most uses in a round %d, most gold roof bonus %d" % [mode, str(main.round_gifts), gift_uses_max, gift_bonus_max])
+	if OS.get_environment("BOT_GIFT") == "capstone" and main.try_gifts and main.total_built >= 1:  # (TS_TRY=gifts: job 1 has the gift)
+		kit.assert_true(gift_bonus_max > 0, "%s: the gold roof gave every builder bonus blocks (%d)" % [mode, gift_bonus_max])
 	kit.assert_true(gift_bad == 0, "%s: the gift taken is on for the next job with its effect in force (%d ok, %d wrong)" % [mode, gift_ok, gift_bad])
 	if cheers_done >= 1 and not main.picks.active():
 		kit.assert_true(gift_ok >= 1 or pick_ok >= 1, "%s: a pick after a finished tower started its job" % mode)

@@ -940,6 +940,8 @@ func _start_round() -> void:
 	round_rolls = 0
 	round_gifts = []
 	gift_uses = 0
+	if specials != null:
+		specials.mortar_glues = 0
 	gift_bonus = 0
 	_set_gift("")
 	rollers.clear()
