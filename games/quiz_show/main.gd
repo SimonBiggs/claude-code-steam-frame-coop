@@ -6,6 +6,7 @@ extends Node3D
 ## A show: LEVEL vote (KIDS / FAMILY / BRAINIACS / SURPRISE ME: teaches the buttons by doing) ->
 ## WARM-UP -> PICTURE PUZZLE (tiles drop away) -> TRUE OR FALSE (streaks) -> THE BIG FINAL (double
 ## points) -> results with awards; A / the trigger starts the next show.
+## shared-picks-ok: _reveal (the LEVEL vote is an answer on the quiz's four coloured buttons, counted with the question it teaches: no pick orbs to dwell in)
 ## Questions: question_bank.gd (bank_a/b/c.gd, bank_tf.gd, pictures.gd). Rounds: rounds.gd. Points: scoring.gd.
 ## Engine: core/party.gd seats, core/split_view.gd (one shared view), core/camera_rig.gd shots,
 ## core/vr_rig.gd, the state store (everything the screens show), net.request (answers from any

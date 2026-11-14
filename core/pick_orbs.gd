@@ -291,6 +291,15 @@ func take(i: int, color: Color) -> Vector3:
 	return o.global_position if o.is_inside_tree() else o.position
 
 
+## Every machine: orb i won (a vote: its voters' dots are on it already): the picture pops. Returns where it is.
+func cheer(i: int) -> Vector3:
+	if i < 0 or i >= orbs.size() or not is_instance_valid(orbs[i]):
+		return Vector3.INF
+	var o: Orb = orbs[i]
+	_punch(o)
+	return o.global_position if o.is_inside_tree() else o.position
+
+
 ## Every machine: show who took which orb from shared state. taken: {slot: orb index}, colors: {slot: Color}.
 ## Cheap to call every frame (only redraws an orb whose takers changed).
 func show_takers(taken: Dictionary, colors: Dictionary) -> void:
