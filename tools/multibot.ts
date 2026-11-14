@@ -158,11 +158,11 @@ export async function runGroup(o: GroupOpts): Promise<GroupResult> {
   const need = await botNeeds(project, scene);
   const late = o.late ? Math.max(o.late, need.late ?? 0) : 0;
   const seconds = Math.max(o.seconds ?? 180, need.seconds ?? 0);
-  if (late !== (o.late ?? 0) || seconds !== (o.seconds ?? 180)) log(`multibot: the bot's header asks for --seconds ${seconds}${late ? ` --late ${late}` : ""} (raised from ${o.seconds ?? 180}${o.late ? ` / ${o.late}` : ""})`);
   if (late && seconds - late < 60) throw new Error(`--late ${late} leaves the late joiner under 60 s of its --seconds ${seconds}`);
   const expectLate = late ? (o.expectLate?.length ? o.expectLate : ["story"]) : [];
   const names = ["host", ...Array.from({ length: joiners }, (_, i) => `join${i + 1}${late && i + 1 === joiners ? "(late)" : ""}`)];
   const log = (s: string) => { if (!o.quiet) console.error(s); };
+  if (late !== (o.late ?? 0) || seconds !== (o.seconds ?? 180)) log(`multibot: the bot's header asks for --seconds ${seconds}${late ? ` --late ${late}` : ""} (raised from ${o.seconds ?? 180}${o.late ? ` / ${o.late}` : ""})`);
   log(`multibot: ${scene}, host + ${joiners} on DUO_PORT ${port}, logs in ${dir}`);
   const runs: Promise<MachineResult>[] = [];
   for (let k = 0; k <= joiners; k++) {
