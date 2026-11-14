@@ -29,6 +29,7 @@ const Bosses := preload("res://games/duo_arena/bosses.gd")
 const Picks := preload("res://games/duo_arena/picks.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const ZoneScript := preload("res://games/duo_arena/zone.gd")
+const TeamPicksScript := preload("res://games/duo_arena/team_picks.gd")
 const ProgressScript := preload("res://games/duo_arena/progress.gd")
 const Save := preload("res://core/save.gd")
 const Seeded := preload("res://core/seeded.gd")
@@ -211,6 +212,7 @@ var pick_stage := ""  # host / local: "mode", "hero", "perk" while orbs are up
 var pick_ids: Array = []
 var pick_t := 0.0
 var picked := {}  # slot -> orb index (this stage)
+var team_picks: Node  # team_picks.gd: MODE and NOVA'S GIFTS, everyone votes (core/pick_flow.gd)
 var heroes := {}  # slot -> hero id
 var perks := {}  # slot -> [perk ids]
 var story_queue: Array = []
@@ -243,6 +245,9 @@ func _ready() -> void:
 	net.main = self
 	add_child(net)
 	net.state_changed.connect(_on_state_changed)
+	team_picks = TeamPicksScript.new()
+	team_picks.main = self
+	add_child(team_picks)
 	for k in ["zone", "keep", "orbs", "season", "gifts"]:
 		net.sticky_event(k)
 	seats = ClassicSeats.new(self, {
@@ -2473,9 +2478,12 @@ func _begin_pick(stage: String) -> void:
 	pick_stage = stage
 	pick_t = float(Picks.WAIT[stage]) * (1.6 if game_mode == "gentle" and stage != "mode" else 1.0)
 	picked = {}
-	zone.show_orbs(stage, ids)
-	if net.mode == "host":
-		net.event("orbs", [stage, ids])
+	if Picks.TEAM_STAGES.has(stage):  # everyone votes (team_picks.gd)
+		team_picks.begin(stage, ids, _team_voted)
+	else:
+		zone.show_orbs(stage, ids)
+		if net.mode == "host":
+			net.event("orbs", [stage, ids])
 	net.state_set("da_phase", "pick:" + stage)
 	var mid := Picks.find(stage, Picks.default_pick(ids))
 	var line := {"mode": "Pick how brave!", "hero": "Pick your hero!", "perk": "Pick a power!", "gift": "Nova's gift! Pick one!"}
@@ -2485,6 +2493,9 @@ func _begin_pick(stage: String) -> void:
 
 
 func _pick_tick(delta: float) -> void:
+	if team_picks.active():  # MODE / NOVA'S GIFT: everyone votes (team_picks.gd); it calls _team_voted
+		team_picks.tick(delta)
+		return
 	pick_t -= delta
 	for tch in zone.touches(players):
 		on_orb_hit(int(tch[0]), tch[1])
@@ -2494,7 +2505,7 @@ func _pick_tick(delta: float) -> void:
 	for p in _pick_players():
 		if not picked.has(p.index):
 			all = false
-	if (Picks.TEAM_STAGES.has(pick_stage) and not picked.is_empty()) or all or pick_t <= 0.0:
+	if all or pick_t <= 0.0:
 		_finish_pick()
 
 
@@ -2502,7 +2513,10 @@ func _pick_tick(delta: float) -> void:
 func on_orb_hit(i: int, p) -> void:
 	if pick_stage == "" or net.mode == "client" or i < 0 or i >= pick_ids.size() or not (p in players):
 		return
-	if picked.has(p.index) or (Picks.TEAM_STAGES.has(pick_stage) and not picked.is_empty()):
+	if team_picks.active():
+		team_picks.choose(i, p.index)  # MODE / NOVA'S GIFT: a vote (team_picks.gd)
+		return
+	if picked.has(p.index):
 		return
 	picked[p.index] = i
 	zone.take(i, p.index)
@@ -2511,10 +2525,6 @@ func on_orb_hit(i: int, p) -> void:
 	sound("pickup", 0.0, 1.0 + 0.1 * i)
 	var id := String(pick_ids[i])
 	match pick_stage:
-		"mode":
-			game_mode = id  # (the setter tells zone and the TV machines)
-			save.data.mode = id
-			save.mark_dirty()
 		"hero":
 			heroes[p.index] = id
 			Picks.apply(p, "hero", id)
@@ -2526,17 +2536,30 @@ func on_orb_hit(i: int, p) -> void:
 			mine.append(id)
 			perks[p.index] = mine
 			Picks.apply(p, "perk", id)
-		"gift":
-			deep.add_gift(id)
 	print("PICK %s: P%d took %s" % [pick_stage, p.index + 1, id])
 
 
+## Host / local: the team's vote is in (team_picks.gd: the most votes; a tie stays gentler / the middle; nobody:
+## the middle orb).
+func _team_voted(st: String, value: Variant, _by: int) -> void:
+	var id := String(value)
+	match st:
+		"mode":
+			game_mode = id  # (the setter tells zone and the TV machines)
+			save.data.mode = id
+			save.mark_dirty()
+		"gift":
+			deep.add_gift(id)
+	print("PICK %s: the team voted %s" % [st, id])
+	_finish_pick()
+
+
 func _finish_pick() -> void:
+	if team_picks.active():  # (cut short: the votes so far / the middle orb; it calls _team_voted)
+		team_picks.finish_now()
+		return
 	var di := pick_ids.find(Picks.default_pick(pick_ids))
-	if Picks.TEAM_STAGES.has(pick_stage):
-		if picked.is_empty() and not players.is_empty():
-			on_orb_hit(di, players[0])
-	else:
+	if not Picks.TEAM_STAGES.has(pick_stage):
 		for p in _pick_players():
 			if not picked.has(p.index):
 				on_orb_hit(di, p)
@@ -2658,7 +2681,10 @@ func _apply_deep_event(kind: String, args: Array) -> bool:
 			else:
 				zone.show_orbs(String(args[0]), args[1])
 		"take":
-			zone.take(int(args[0]), int(args[1]))
+			if team_picks.vote_row():
+				team_picks.take_fx(int(args[0]), int(args[1]))  # (a team vote's winner)
+			else:
+				zone.take(int(args[0]), int(args[1]))
 		"pad":
 			zone.tell(int(args[0]), float(args[1]))
 		"padburst":

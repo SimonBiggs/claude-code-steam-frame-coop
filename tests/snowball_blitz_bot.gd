@@ -299,7 +299,8 @@ func _orb_for(p):
 	if main.orbs == null or main.orbs.orbs.is_empty():
 		return null
 	var list: Array = main.orbs.orbs
-	var o = list[(p.index + main.wave) % list.size()]
+	var k: int = p.index % 2 if main.orbs.stage == "mode" else p.index  # (the MODE vote: odd and even players split, so 3+ make a majority)
+	var o = list[(k + main.wave) % list.size()]
 	return o if is_instance_valid(o) and o.is_inside_tree() else null
 
 
@@ -400,6 +401,12 @@ func _look_away(p, best) -> bool:
 func _note_cues() -> void:
 	if main.pick_stage == "gift":
 		saw["gift_pick"] = true
+	if main.picks.active() and main._pick_players().size() >= 2:
+		saw["vote_pool"] = true  # (two or more vote on the MODE: the split vote must show up)
+	elif saw.has("vote_pool") and not saw.has("vote_checked") and Engine.has_meta("sb_mode_set"):
+		saw["vote_checked"] = true  # (checked as soon as it is in: a game over reloads this bot and its watch)
+		var why: String = watch.vote_problem(main.picks)
+		_bot_check(why == "", "everyone voted on the MODE, the most votes / a tie stays gentler" + ("" if why == "" else ": " + why))
 	if main.orbs.orbs.size() > 0:
 		saw["orbs"] = true
 	if main.rings.count() > 0:

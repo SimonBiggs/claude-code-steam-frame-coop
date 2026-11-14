@@ -4,10 +4,11 @@ extends RefCounted
 ## who took it. Nobody chooses? When the time runs out, the middle orb (it glows brightest) is taken for whoever
 ## hasn't, so little ones are never stuck.
 ##   MODE   (team, the first game of a visit): GENTLE (a heart: for little ones), BRAVE (a star), HARD (a flame).
-##          The first orb shot decides for everyone; the family's last choice is the middle orb next time.
+##          Everyone votes (team_picks.gd on core/pick_flow.gd's vote mode: the most votes, a tie stays gentler);
+##          the family's last choice is the middle orb next time.
 ##   HERO   (each player, before wave 1): a loadout for the whole run (BLASTER, SPRAYER, BOOMER, TANK, ZOOMER).
 ##   PERK   (each player, after every wave): three of the unlocked perks, seeded per run and wave; they stack.
-##   GIFT   (team, after every boss instead of a perk): NOVA'S GIFTS (deep.gd), the first orb shot decides.
+##   GIFT   (team, after every boss instead of a perk): NOVA'S GIFTS (deep.gd), everyone votes (team_picks.gd).
 ## Unlocks for good as the family clears waves (saved "waves"): unlocked().
 ## Effects are [stat, "mul"|"add", amount] on the player's personal stats (player.gd add_personal, synced).
 
@@ -19,7 +20,7 @@ const OFFER := 3
 ## core/ui_kit.gd icon kinds the orbs use as pictures (StoryCard draws any of them; the gen test checks they exist).
 const UI_ICONS: Array[String] = ["heart", "star", "bolt", "play", "shield", "clock", "gem"]  # ("fireball" is Elemental Bender's story picture)
 const WAIT := {"mode": 10.0, "hero": 12.0, "perk": 12.0, "gift": 12.0}
-## Stages the whole team picks together (the first orb taken decides for everyone).
+## Stages the whole team votes on together (team_picks.gd: everyone votes, core/pick_flow.gd).
 const TEAM_STAGES: Array[String] = ["mode", "gift"]
 const MAX_NAME := 9
 ## Caps so stacked perks never break the game.

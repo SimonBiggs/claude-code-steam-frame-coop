@@ -445,6 +445,16 @@ func closed() -> void:
 	orbs.clear()
 
 
+## Host / local: end the pick at once (a game skipping ahead): the votes so far (vote mode) or the default orb.
+func finish_now() -> void:
+	if stage == "":
+		return
+	if chosen < 0:
+		take(winner_of(stage, options, votes, default_pick()) if vote else default_pick(), -1)
+	if chosen >= 0:
+		_finish()
+
+
 func _finish() -> void:
 	var st := stage
 	var opt: Variant = options[chosen]
