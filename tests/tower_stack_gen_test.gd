@@ -16,6 +16,8 @@ extends SceneTree
 ## announced in time and stay inside the tipping limit; DIFFICULTY rises smoothly job by job in every mode and over
 ## the days (districts open more special blocks), gentle <= brave <= hard; the builder pick always has 3 buildings;
 ## the districts open every special block, in order, standing clear of the town; old 3-long town entries rebuild.
+## Fourth pass: Wren's gifts only ever help (never windier, wobblier, slower or a smaller snap) and every job the host
+## plays with a gift on (wind and sway calmed) still passes the validator; the gift pick always offers three.
 
 const G := preload("res://games/tower_stack/towergen.gd")
 const Looks := preload("res://games/tower_stack/looks.gd")
@@ -24,6 +26,7 @@ const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Districts := preload("res://games/tower_stack/districts.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
+const Gifts := preload("res://games/tower_stack/gifts.gd")
 const MAX_STEP := 4.5  # difficulty never jumps more than this from one job to the next
 
 var fails := 0
@@ -81,6 +84,7 @@ func _initialize() -> void:
 	_difficulty_curve()
 	_specials()
 	_districts_and_picks()
+	_gifts()
 	_expect(float(avg_top[G.MAX_LEVEL]) > float(avg_top[1]) + 0.6, "top towers are clearly taller than warm-ups")
 	for b in G.BUILDINGS:
 		_expect(seen.has("b:" + b), "building %s shows up" % b)
@@ -256,6 +260,41 @@ func _districts_and_picks() -> void:
 		_expect(offer.size() == G.CHOICES, "the builder pick finds three buildings (session %d)" % sd)
 		for st in offer:
 			_expect(G.check(st).is_empty(), "every building on the pick is buildable")
+
+
+## Wren's gifts: gentle, valid, three on every pick, the newest always offered, pictures and short names.
+func _gifts() -> void:
+	for id in Gifts.ids():
+		var gd := Gifts.of(String(id))
+		_expect(StoryCard.has_picture(String(gd.pic)), "gift %s has a picture" % id)
+		_expect(String(gd.name).length() <= 14, "gift %s has a short name" % id)
+		_expect(Gifts.calm(String(id)) <= 1.0 and Gifts.calm(String(id)) > 0.0, "gift %s never makes the wind stronger" % id)
+		_expect(Gifts.snap_r(String(id), Main.SNAP_R) >= Main.SNAP_R, "gift %s never shrinks the snap" % id)
+		_expect(Gifts.pad_help(String(id), G.PAD_HELP) <= G.PAD_HELP, "gift %s never slows Wren's help" % id)
+		_expect(Gifts.bonus(String(id)) >= 0, "gift %s never takes score away" % id)
+	_expect(Gifts.calm("") == 1.0 and Gifts.snap_r("", Main.SNAP_R) == Main.SNAP_R and Gifts.pad_help("", G.PAD_HELP) == G.PAD_HELP,
+		"no gift: the job plays exactly as towergen made it")
+	for built in [0, 2, 3, 10]:
+		for sd in 60:
+			var offer := Gifts.choices(built, "" if sd % 2 == 0 else "flag", sd)
+			_expect(offer.size() == 3, "the gift pick offers three (built %d)" % built)
+			var un := Gifts.unlocked(built)
+			_expect(offer.has(un[un.size() - 1]) or un[un.size() - 1] == ("" if sd % 2 == 0 else "flag"), "the newest gift is offered")
+	_expect(Gifts.unlocked(0).size() == 3 and Gifts.unlocked(Gifts.CAPSTONE_AT).has("capstone"), "three gifts from the start, the gold roof as the town grows")
+	_expect(Gifts.unlocked(0, true).size() == Gifts.GIFTS.size(), "TS_TRY=gifts opens every gift")
+	var n := 0
+	for md in G.MODE_IDS:
+		for lv in range(1, int(G.tune(md).max) + 1):
+			for sd in Seeded.test_count(40):
+				var st := G.site(Seeded.derive(sd, "gift"), lv, false, md, G.OPEN_ALL)
+				if not G.check(st).is_empty():
+					continue
+				for id in Gifts.ids():
+					var calmed := Gifts.calmed(st, String(id))
+					n += 1
+					_expect(G.check(calmed).is_empty(), "%s level %d seed %d with gift %s: %s" % [md, lv, sd, id, str(G.check(calmed))])
+					_expect(G.worst_lean(calmed) <= G.worst_lean(st) + 0.0001, "gift %s never makes a job lean more" % id)
+	print("tower gifts: %d gifted jobs checked" % n)
 
 
 func _expect(ok: bool, what: String) -> void:

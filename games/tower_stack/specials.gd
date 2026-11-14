@@ -7,6 +7,8 @@ extends Node
 ##           so nothing tips or slides where it sits. Grabbing / lifting a glued block unglues it.
 ##   BALLOON lifted by (1 - HEAVY) of its weight every physics frame while it's free, so it is light and the wind
 ##           pushes it about more (main.gd's wind pushes every free block by its whole mass).
+##   MORTAR  (Wren's STICKY MORTAR gift, gifts.gd) any block main.gd marks with mortar(id) - one resting in its plan
+##           spot - glues down exactly like honey.
 ##   specials.setup(rb, kind, id)    tick(main)    unglue(id)    glued(id) -> Array of ids (-1 = the stage)
 
 const G := preload("res://games/tower_stack/towergen.gd")
@@ -17,6 +19,8 @@ const GLUE_SPEED := 0.4  # honey glues once it moves slower than this
 
 var joints := {}  # id -> {other id: Joint3D} (both ends listed)
 var glues_made := 0  # telemetry
+var mortared := {}  # id -> true: glues like honey (the STICKY MORTAR gift)
+var mortar_glues := 0  # glue joints the mortar made (telemetry, bots)
 var _g := 9.8
 
 
@@ -48,14 +52,15 @@ func tick(main: Node) -> void:
 	var blocks: Dictionary = main.blocks
 	for id in blocks:
 		var kind := int(main.bkind.get(id, 0))
-		if kind != G.K_BALLOON and kind != G.K_STICKY:
+		if kind != G.K_BALLOON and kind != G.K_STICKY and not mortared.has(id):
 			continue
 		var rb: RigidBody3D = blocks[id]
 		var st := String(main.bstate.get(id, ""))
 		if kind == G.K_BALLOON:
 			if st == "free" and not rb.freeze:
 				rb.apply_central_force(Vector3.UP * rb.mass * _g * (1.0 - G.HEAVY[kind]))
-			continue
+			if not mortared.has(id):
+				continue
 		if st != "free" or rb.freeze or rb.linear_velocity.length() > GLUE_SPEED:
 			continue
 		for body in rb.get_colliding_bodies():
@@ -87,6 +92,8 @@ func _glue(main: Node, id: int, rb: RigidBody3D, other: int, body: PhysicsBody3D
 		theirs[id] = j
 		joints[other] = theirs
 	glues_made += 1
+	if mortared.has(id):
+		mortar_glues += 1
 	if main.has_method("_poke"):
 		main._poke(id, 0.3)
 
@@ -113,3 +120,18 @@ func glued(id: int) -> Array:
 func clear() -> void:
 	for id in joints.keys():
 		unglue(int(id))
+	mortared = {}
+
+
+## Authority: this block (resting in its plan spot with the STICKY MORTAR gift on) glues down like honey from now on.
+func mortar(id: int, rb: RigidBody3D) -> void:
+	if mortared.has(id):
+		return
+	mortared[id] = true
+	rb.contact_monitor = true
+	rb.max_contacts_reported = maxi(rb.max_contacts_reported, 6)
+
+
+## The gift is over (a new job): blocks glued so far stay glued, nothing new glues.
+func end_mortar() -> void:
+	mortared = {}
