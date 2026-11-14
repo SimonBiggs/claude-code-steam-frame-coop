@@ -12,8 +12,9 @@ extends Node
 ## Third pass: Rolo rolls a ball early in every job (try_rolls): its lane is told on every machine before the ball
 ## rolls, nobody is ever bowled over by a ball whose lane showed too briefly, the green shows Wren's neighbours, and
 ## every machine dresses for the host's season.
-## Fourth pass: WREN'S GIFTS. The first finished tower leads to a gift pick (gift_parity 0); once a gift worked the bot
-## flips gift_parity so job 2 is a builder pick again (both picks run). The host checks the gift the team took
+## Fourth pass: WREN'S GIFTS. The first finished tower leads to a gift pick (gift_parity 0: gifts before even jobs, the
+## builder pick before odd ones); a round that only saw gifts makes the bot swap gift_parity at the next round's start
+## so the builder pick runs too. The host checks the gift the team took
 ## is on for the next job with its real effect in force (calm wind, wider snap, quicker basket, gold roof bonus), and
 ## every machine sees it in the "gift" state (kit.seen_values) with its pennant beside the stage.
 
@@ -170,9 +171,9 @@ func _watch_picks() -> void:
 	if cheer_was >= 0.0 and main.done_t < 0.0 and rn == cheer_round and not main.results_showing():
 		cheers_done += 1
 	cheer_was = main.done_t
+	if rn != cheer_round and gift_ok >= 1 and pick_ok == 0:  # a new round (jobs count from 1 again), only gifts so far:
+		main.gift_parity = 1 - int(main.gift_parity)  # swap which jobs get the builder pick so both picks run
 	cheer_round = rn
-	if gift_ok >= 1 and main.gift_parity == 0:
-		main.gift_parity = 1  # once a gift worked, job 2 is a builder pick again (both picks run)
 	if main.picks.stage == "gift" and main.picks.chosen >= 0 and gift_want == "":
 		gift_want = String(main.picks.options[main.picks.chosen])
 	if gift_want != "" and main.job_n != job_seen and main.picks.stage == "":
@@ -347,12 +348,16 @@ func _drive_vr(delta: float) -> void:
 		kit.vr_trigger(rig, 1.0 if int(kit.t * 2.0) % 2 == 0 else 0.0)  # the giant pulls the trigger: play again
 		vr_phase = "find"
 		return
-	if main.picks.stage != "" and main.picks.chosen < 0 and main.held_id < 0:  # the giant touches an orb
+	if main.picks.stage != "" and main.picks.chosen < 0:  # the giant lets go of any block and touches an orb
 		kit.vr_trigger(rig, 0.0)
 		var o: Node3D = main.picks.orbs.orbs[_orb_target()]
 		kit.vr_reach(rig, VrRig.LEFT, o.global_position, 4.0, delta)
 		vr_phase = "find"
 		return
+	# Not picking: the left glove drops back to its resting place. (Left in the orb it touched, it sat RESTING inside the
+	# same spot when the next pick popped up there and never chose: core/pick_flow.gd - a 10 s wait each time.)
+	var rest: Vector3 = VrRig.fake_pose(float(rig.world_scale), -1.0)[1]
+	rig.hand_l.position = rig.hand_l.position.move_toward(rest, 4.0 * delta)
 	match vr_phase:
 		"find":
 			kit.vr_trigger(rig, 0.0)
