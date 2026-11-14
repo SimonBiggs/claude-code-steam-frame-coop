@@ -130,8 +130,6 @@ var hole_log_from := 0  # sink_log index where this hole's sinks start
 var hole_stats: Array = []  # per hole: {"g", "shape", "par", "putts": [...], "secs", "seed"}
 var course_running := false
 var greeted := false
-var story_queue: Array = []
-var story_t := 0.0
 # Second pass (deep.gd): modes and Gus's gifts on the pick green, warned surprises, seasons, the garden corner.
 var lawn: MeshInstance3D
 var picks: Node  # picks.gd
@@ -833,7 +831,6 @@ func _process(delta: float) -> void:
 	if not ready_to_play:
 		return
 	_tv_input(delta)
-	_update_story(delta)
 	if hazards != null:
 		hazards.show_now(hz_now, hz_key)  # every machine: the surprise's tell (steady rings), the gust, the mole
 	if net.mode != "client" and course_running:
@@ -1378,17 +1375,17 @@ func _story_for_all(line: String, pic: String, color: Color) -> void:
 
 
 func _story(line: String, pic: String, color: Variant) -> void:
-	if story_queue.size() < 4:
-		story_queue.append([line, pic, color if color is Color else Color.WHITE])
+	_show_story([line, pic, color if color is Color else Color.WHITE])
 
 
-func _update_story(delta: float) -> void:
-	story_t -= delta
-	if story_t > 0.0 or story_queue.is_empty():
+## Show a beat now: StoryCard's shared queue paces the cards (each waits its turn behind one still being read).
+func _show_story(b: Array, urgent: bool = false, now: bool = false) -> void:
+	if not now:
+		StoryCard.later(self, 0, _show_story.bind(b, urgent, true))  # next frame (its views are built)
 		return
-	var b: Array = story_queue.pop_front()
-	story_t = 2.8
 	var opts := {"who": "GUS", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.6}
+	if urgent:
+		opts["urgent"] = true
 	if hud != null and is_instance_valid(hud):
 		StoryCard.show([hud], opts)
 	if vr_rig != null:

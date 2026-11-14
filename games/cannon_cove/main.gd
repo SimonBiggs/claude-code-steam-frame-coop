@@ -217,8 +217,6 @@ var treasure_days := 0
 var treasure_crowned := false
 var treasure_root: Node3D
 var treasure_count := -1
-var story_queue: Array = []
-var story_t := 0.0
 # Second pass (deep.gd): the session's mode, this wave's gift, the season, warned deck events, Polly's harbour, solo.
 var picks: Picks
 var hazards: Hazards
@@ -1314,7 +1312,6 @@ func _process(delta: float) -> void:
 			mirror_vp.render_target_update_mode = SubViewport.UPDATE_ONCE
 	_update_hud()
 	_update_guides()
-	_update_story(delta)
 	_deep_animate(delta)
 	if props:
 		props.tick(delta)
@@ -3639,17 +3636,19 @@ func _story_for_all(line: String, pic: String, color: Color) -> void:
 
 
 func _story(line: String, pic: String, color: Color) -> void:
-	if story_queue.size() < 4:
-		story_queue.append([line, pic, color])
+	_show_story([line, pic, color])
 
 
-func _update_story(delta: float) -> void:
-	story_t -= delta
-	if story_t > 0.0 or story_queue.is_empty() or players.is_empty():
+## Show a beat now: StoryCard's shared queue paces the cards (each waits its turn behind one still being read).
+func _show_story(b: Array, urgent: bool = false, now: bool = false) -> void:
+	if not now:
+		StoryCard.later(self, 0, _show_story.bind(b, urgent, true))  # next frame (its views are built)
 		return
-	var b: Array = story_queue.pop_front()
-	story_t = 2.6
+	if players.is_empty():
+		return
 	var opts := {"who": "POLLY", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.4}
+	if urgent:
+		opts["urgent"] = true
 	var huds: Array = []
 	for p in players:
 		if p.hud != null and is_instance_valid(p.hud) and p.hud is Control and p.hud.is_visible_in_tree():

@@ -722,17 +722,10 @@ func _round_story() -> void:
 	_story_queue(lines, 3.0)
 
 
-## Host: show story beats one after another (`first` seconds from now, then 3.6 s apart).
+## Host: story beats from `first` seconds from now, one after another (StoryCard's shared queue gives each its turn).
 func _story_queue(beats: Array, first: float = 0.0) -> void:
-	for i in beats.size():
-		var beat: Dictionary = beats[i]
-		var wait := first + i * 3.6
-		if wait <= 0.0:
-			_story(beat)
-		else:
-			get_tree().create_timer(wait).timeout.connect(func() -> void:
-				if is_inside_tree():
-					_story(beat))
+	for beat in beats:
+		StoryCard.later(self, Time.get_ticks_msec() + int(first * 1000.0), _story.bind(beat))
 
 
 ## A story beat: Bo (or a sheep / farm picture) and a few words, on every machine.

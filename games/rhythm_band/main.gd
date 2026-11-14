@@ -188,8 +188,6 @@ var vr_msg_t := 0.0
 var save: Save
 var fan_club: FanClubScript
 var session_seed := 0
-var story_queue: Array = []  # [line, pic, color] waiting to show
-var story_t := 0.0
 var song_live := false  # host: a song is being played (a RUN line is due)
 var songs_played := 0  # this session
 var story_shown: Array[String] = []  # pictures of the story cards shown (bots check them)
@@ -1559,7 +1557,6 @@ func _process(delta: float) -> void:
 	var beat_pos: float = song_t / float(song.spb) if song != null and state == "play" else state_t * 1.6
 	stage.update(delta, beat_pos, crowd, state == "play", 1.0 if star_active() else 0.0)
 	fan_club.update(delta, beat_pos, crowd if state == "play" else 0.35, song != null and song.daily)
-	_update_story(delta)
 	_update_vr_text(delta)
 	hazards.update(delta)
 	festival.update(delta, crowd if state == "play" else 0.0)
@@ -2228,17 +2225,18 @@ func _run_line(end: String) -> void:
 func _story(line: String, pic: String, color: Color, broadcast: bool = true) -> void:
 	if broadcast and net != null and net.mode == "host":
 		net.event("story", [line, pic, color])
-	story_queue.append([line, pic, color])
+	_show_story([line, pic, color])
 
 
-func _update_story(delta: float) -> void:
-	story_t -= delta
-	if story_t > 0.0 or story_queue.is_empty():
+## Show a beat now: StoryCard's shared queue paces the cards (each waits its turn behind one still being read).
+func _show_story(b: Array, urgent: bool = false, now: bool = false) -> void:
+	if not now:
+		StoryCard.later(self, 0, _show_story.bind(b, urgent, true))  # next frame (its views are built)
 		return
-	var b: Array = story_queue.pop_front()
-	story_t = 2.6
 	story_shown.append(str(b[1]))
 	var opts := {"who": "DOODLE", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.5}
+	if urgent:
+		opts["urgent"] = true
 	var huds: Array = []
 	for p in players:
 		if p.active and p.has_meta("view") and p.hud != null and is_instance_valid(p.hud):
@@ -2272,8 +2270,7 @@ func warn_secs() -> float:
 
 ## A picture card straight away (a change's tell: never waits behind other cards). Every machine, local.
 func story_now(line: String, pic: String, color: Color) -> void:
-	story_queue.push_front([line, pic, color])
-	story_t = minf(story_t, 0.0)
+	_show_story([line, pic, color], true)
 
 
 ## The player who has the spotlight solo (the drummer when the soloist has left).

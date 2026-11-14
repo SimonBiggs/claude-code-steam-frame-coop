@@ -215,8 +215,7 @@ var wave_plan := {}
 var wave_lost := 0  # embers that got away this wave (telemetry)
 var game_lost := 0
 var night_saved := false
-var story_queue: Array = []
-var story_t := 0.0
+var story_hold_ms := 0  # story cards said with the title wait until then (StoryCard.later)
 var vr_story: Node3D
 var game_t := 0.0
 var run_logged := false
@@ -938,7 +937,6 @@ func _process(delta: float) -> void:
 	clock += delta
 	game_t += delta
 	_update_fire(delta)
-	_update_story(delta)
 	table_story.update_face(delta, clampf(float(embers) / MAX_EMBERS, 0.0, 1.0), embers > 0, _giant_eyes())
 	if net.mode != "client":
 		ladder_wave = (wave if not in_break else wave + 1) if practice_done and not game_over else 0
@@ -2611,7 +2609,7 @@ func _start_raid() -> void:
 	_load_keepsakes()
 	print("Giant's Table: raid seed %d%s | %d gifts, %d nights, day %d" % [raid_seed, " (TODAY'S RAID)" if raid_daily else "",
 		(save.data.gifts as Array).size(), int(save.data.nights), int(save.data.days)])
-	story_t = 2.5  # after the title
+	story_hold_ms = Time.get_ticks_msec() + 2500  # after the title
 	if not Engine.has_meta("gt_said_hi"):
 		Engine.set_meta("gt_said_hi", true)  # (once per session: a game over restarts the scene)
 		_story_for_all("Hi Giant! I'm Sparky!", "sparky", SPARKY_COLOR)
@@ -2668,18 +2666,18 @@ func _story_for_all(line: String, pic: String, color: Color) -> void:
 
 
 func _story(line: String, pic: String, color: Color) -> void:
-	if story_queue.size() < 5:
-		story_queue.append([line, pic, color])
+	_show_story([line, pic, color])
 
 
 ## One card at a time, on every view this machine shows (and in front of the VR Giant).
-func _update_story(delta: float) -> void:
-	story_t -= delta
-	if story_t > 0.0 or story_queue.is_empty():
+## Show a beat now: StoryCard's shared queue paces the cards (each waits its turn behind one still being read).
+func _show_story(b: Array, urgent: bool = false, now: bool = false) -> void:
+	if not now:
+		StoryCard.later(self, story_hold_ms, _show_story.bind(b, urgent, true))  # next frame (its views are built), after the title
 		return
-	var b: Array = story_queue.pop_front()
-	story_t = 2.8
 	var opts := {"who": SPARKY, "line": b[0], "pic": b[1], "color": b[2], "duration": 2.6}
+	if urgent:
+		opts["urgent"] = true
 	var roots: Array = []
 	for p in players:
 		if p.has_meta("view") and (p.get_meta("view") as Control).visible:

@@ -355,9 +355,9 @@ func _report(mode: String) -> void:
 		kinds[e.kind] = int(kinds.get(e.kind, 0)) + 1
 	var d = main.director()
 	if main.zone != null:
-		print("BOT   zone=%s pillars=%d pads=%d orbs=%d stage=%s mode=%s heroes=%s perks=%s story=%d" % [main.zone.zone_id,
+		print("BOT   zone=%s pillars=%d pads=%d orbs=%d stage=%s mode=%s heroes=%s perks=%s stories=%d" % [main.zone.zone_id,
 			main.zone.lay.get("pillars", []).size(), main.zone.lay.get("pads", []).size(), main.zone.orbs.size(), main.pick_stage,
-			main.game_mode, main.heroes, main.perks, main.story_queue.size()])
+			main.game_mode, main.heroes, main.perks, main.story_shown])
 	print("BOT %s t=%.0f wave=%d score=%d enemies=%d slots=%d active=%s views=%d" % [mode, t, main.wave, main.score,
 		get_tree().get_nodes_in_group("enemies").size(), main.players.size(), ", ".join(act), views])
 	print("BOT   kinds=%s combo=%d best=%d event=%s mood=%s boss=%s %.2f left=%d fish=%s" % [kinds, d.combo, d.best_combo,

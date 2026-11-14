@@ -112,8 +112,6 @@ var rd := {}  # this round (CourtGen.build): every machine rebuilds it from the 
 var save: Save  # host / local only
 var park: Node3D
 var session_seed := 0
-var story_queue: Array = []
-var story_t := 0.0
 var story_shown: Array[String] = []  # pictures shown (bots check)
 var aimed := {}  # host: runner id -> throws the CPU giant made at them this round (fair shares)
 var throw_k := 0
@@ -697,7 +695,6 @@ func _process(delta: float) -> void:
 	if not ready_to_play:
 		return
 	clock += delta
-	_update_story(delta)
 	if split != null:
 		_move_local_players(delta)
 	_follow_remote(delta)
@@ -1544,17 +1541,18 @@ func _exit_tree() -> void:
 func _story(line: String, pic: String, color: Color, broadcast: bool = true) -> void:
 	if broadcast and net != null and net.mode == "host":
 		net.event("story", [line, pic, color])
-	story_queue.append([line, pic, color])
+	_show_story([line, pic, color])
 
 
-func _update_story(delta: float) -> void:
-	story_t -= delta
-	if story_t > 0.0 or story_queue.is_empty():
+## Show a beat now: StoryCard's shared queue paces the cards (each waits its turn behind one still being read).
+func _show_story(b: Array, urgent: bool = false, now: bool = false) -> void:
+	if not now:
+		StoryCard.later(self, 0, _show_story.bind(b, urgent, true))  # next frame (its views are built)
 		return
-	var b: Array = story_queue.pop_front()
-	story_t = 2.6
 	story_shown.append(str(b[1]))
 	var opts := {"who": "TUMTUM", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.5}
+	if urgent:
+		opts["urgent"] = true
 	if split != null:
 		var views: Array = []  # each local player's view; the shared view when nobody plays here yet
 		for k in huds:

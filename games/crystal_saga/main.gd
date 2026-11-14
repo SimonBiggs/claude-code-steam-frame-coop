@@ -121,8 +121,6 @@ var journey_t := 0.0
 var journey_shards := 0
 var picks: Array = []  ## host: skills picked this journey (telemetry)
 var spin_cd := 0.0
-var story_q: Array = []  ## host: story beats waiting their turn
-var story_t := 0.0
 var stories_shown := 0
 var runs_logged := 0
 var tel_open := false  ## a journey is under way (a RUN line is owed)
@@ -955,10 +953,6 @@ func _host_step(delta: float) -> void:
 	journey_t += delta
 	spin_cd = maxf(0.0, spin_cd - delta)
 	knock_cd = maxf(0.0, knock_cd - delta)
-	story_t -= delta
-	if story_t <= 0.0 and not story_q.is_empty():
-		story_t = 3.6
-		_story(story_q.pop_front())
 	for k in poke_cd.keys():
 		poke_cd[k] = float(poke_cd[k]) - delta
 		if float(poke_cd[k]) <= 0.0:
@@ -2432,13 +2426,13 @@ func _lumi(line: String, pic: String = "lumi") -> Dictionary:
 	return {"who": Saga.LUMI, "line": line, "pic": pic, "color": Saga.LUMI_COLOR, "duration": 3.5}
 
 
-## Host: a story beat in its turn (now: straight away, ahead of the rest).
+## Host: a story beat in its turn (StoryCard's shared queue paces them on every machine; now: straight away, replacing
+## the card showing). Next frame, so views built this frame get it.
 func _say(beat: Dictionary, now: bool = false) -> void:
+	var b := beat.duplicate()
 	if now:
-		story_q.push_front(beat)
-		story_t = 0.0
-	else:
-		story_q.append(beat)
+		b["urgent"] = true
+	StoryCard.later(self, 0, _story.bind(b))
 
 
 ## Host: show a beat on every machine.

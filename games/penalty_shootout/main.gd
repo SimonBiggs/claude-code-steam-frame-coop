@@ -239,8 +239,7 @@ var leo_goal_hit := false
 var star_kicks := 0
 var stars_said := false
 var match_secs := 0.0
-var story_queue: Array = []
-var story_t := 0.0
+var story_hold_ms := 0  # story cards said with the title wait until then (StoryCard.later)
 # Second pass (deep.gd): modes, Leo's gifts on pick orbs in the goal mouth, warned weather, seasons, the trophy corner.
 var picks: Node  # picks.gd
 var hazards: Node3D  # hazards.gd
@@ -1867,7 +1866,6 @@ func _process(delta: float) -> void:
 	_update_vr_text(delta)
 	if SIMPLE_MODE:
 		_update_ghost_hand(delta)
-		_update_story(delta)
 		if leo != null:
 			leo.set_tally(leo_stars, leo_goal)
 		if practice == "" and state != "over" and state != "wait":
@@ -2740,7 +2738,7 @@ func _start_cup() -> void:
 	if season_node != null:
 		season_node.set_season(season)
 	mode = Deep.mode_of(String(save.data.mode)) if String(save.data.mode) != "" else mode  # (also shares it: the setter)
-	story_t = 2.8  # after the title
+	story_hold_ms = Time.get_ticks_msec() + 2800  # after the title
 	_story_for_all("Hi! I'm Leo!", "lion", LEO_COLOR)
 	_story_for_all(String(Deep.season_data(season).line), String(Deep.season_data(season).pic), Deep.season_data(season).drift)
 	if cup_daily:
@@ -2956,18 +2954,19 @@ func _story_for_all(line: String, pic: String, color: Color) -> void:
 
 
 func _story(line: String, pic: String, color: Color) -> void:
-	if story_queue.size() < 5:
-		story_queue.append([line, pic, color])
+	_show_story([line, pic, color])
 
 
 ## Every machine: show the next card when nothing is flying at the keeper.
-func _update_story(delta: float) -> void:
-	story_t -= delta
-	if story_t > 0.0 or story_queue.is_empty() or state == "runup" or state == "flight":
+## Show a beat now: StoryCard's shared queue paces the cards (each waits its turn behind one still being read).
+func _show_story(b: Array, urgent: bool = false, now: bool = false) -> void:
+	if not now:
+		StoryCard.later(self, story_hold_ms, _show_story.bind(b, urgent, true))  # next frame (its views are built), after the title
 		return
-	var b: Array = story_queue.pop_front()
-	story_t = 2.6
 	var opts := {"who": LEO, "line": b[0], "pic": b[1], "color": b[2], "duration": 2.4}
+	if urgent:
+		opts["urgent"] = true
+	opts["hold"] = func() -> bool: return state == "runup" or state == "flight"  # never while a ball flies at the keeper
 	var views: Array = []
 	for p in players:
 		if p.hud != null and is_instance_valid(p.hud) and (p.hud as Control).is_visible_in_tree():

@@ -158,9 +158,7 @@ var game_secs := 0.0
 var hung_entries := {}  # gallery slot -> its entry in save.gallery (the MASTERPIECE turns gold)
 var family: Array = []  # every machine: [[thing, day, golden, packed strokes], ...] (host: save.gallery)
 var family_days := 0
-var story_queue: Array = []
 var family_on_easel := false
-var story_t := 0.0
 var time_left := 60.0
 var word := ""  # host only (the client learns it at the reveal, or at the start of a TEAM PAINT round)
 var team_word := ""  # TEAM PAINT: the word the TV players paint (sent to the TV machine)
@@ -1142,7 +1140,6 @@ func _process(delta: float) -> void:
 	_lift_low_cards()
 	_update_easel_text()
 	_update_vr_text(delta)
-	_update_story(delta)
 	if state == "draw":
 		game_secs += delta
 	var a = players[0]
@@ -2347,18 +2344,18 @@ func _story_for_all(line: String, pic: String, color: Color) -> void:
 
 
 func _story(line: String, pic: String, color: Color) -> void:
-	if story_queue.size() < 4:
-		story_queue.append([line, pic, color])
+	_show_story([line, pic, color])
 
 
 ## Every machine: the next card, one at a time.
-func _update_story(delta: float) -> void:
-	story_t -= delta
-	if story_t > 0.0 or story_queue.is_empty():
+## Show a beat now: StoryCard's shared queue paces the cards (each waits its turn behind one still being read).
+func _show_story(b: Array, urgent: bool = false, now: bool = false) -> void:
+	if not now:
+		StoryCard.later(self, 0, _show_story.bind(b, urgent, true))  # next frame (its views are built)
 		return
-	var b: Array = story_queue.pop_front()
-	story_t = 3.0
 	var opts := {"who": SMUDGE, "line": b[0], "pic": b[1], "color": b[2], "duration": 2.8, "y": 0.2}
+	if urgent:
+		opts["urgent"] = true
 	# Smudge's card: under the easel in the artist's view (it covered the word sign there); in guessers' views just
 	# below their top lines (their answers fill the bottom).
 	var low := []

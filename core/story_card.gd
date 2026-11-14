@@ -55,6 +55,32 @@ const SHORT_META := "story_card_short"
 const MAX_WAITING := 3
 
 
+## opts.hold: a Callable; while it returns true a card waits its turn (Penalty Shootout: never while a ball flies at
+## the keeper). Games never keep their own story queue or timer: tests/story_queue_test.gd.
+static func _held(opts: Dictionary) -> bool:
+	var h: Variant = opts.get("hold")
+	return h is Callable and (h as Callable).is_valid() and bool((h as Callable).call())
+
+
+## One beat on every local view and the VR head at once (the usual game call; each waits its turn on its own view):
+## huds: the TV / Deck view roots (invalid or hidden ones are skipped), cam: the VR head (null: no VR player).
+static func tell(huds: Array, world: Node, cam: Node3D, opts: Dictionary) -> void:
+	var views := huds.filter(func(h: Variant) -> bool: return h is Control and is_instance_valid(h) and (h as Control).is_inside_tree())
+	if not views.is_empty():
+		show(views, opts)
+	if world != null and cam != null and is_instance_valid(cam) and cam.is_inside_tree():
+		show_vr(world, cam, opts)
+
+
+## Run `call` on the next frame, or at `until_ms` (Time.get_ticks_msec) if that is later: a game's _story defers its
+## card this way so the views built this frame get it, and beats said with the title wait until it has gone. Beats
+## deferred to the same moment keep their order.
+static func later(node: Node, until_ms: int, call: Callable) -> void:
+	if node == null or not node.is_inside_tree():
+		return
+	node.get_tree().create_timer(maxf(0.0, float(until_ms - Time.get_ticks_msec()) / 1000.0)).timeout.connect(call)
+
+
 static func _urgent(opts: Dictionary) -> bool:
 	return bool(opts.get("urgent", false)) or bool(opts.get("replace", false))
 
@@ -164,6 +190,8 @@ static func show_vr(world: Node, cam: Node3D, opts: Dictionary) -> Node3D:
 		{"duration": float(opts.get("duration", 4.0)), "color": opts.get("color", "accent"), "width": 1.0,
 		"height": float(opts.get("vr_height", -0.22)), "title_size": 0.07, "body_size": 0.055})
 	card.add_to_group(VR_GROUP)  # is_story(): bots tell a story card from how-to text by this, not by a game's var
+	if opts.has("hold"):
+		card.set_meta("story_hold", opts.hold)
 	var pic := String(opts.get("pic", ""))
 	if pic != "":
 		card.add_child(StoryCardPics.vr_medallion(pic, UiKit.color_of(opts.get("color", "accent"), UiKit.ACCENT), card))
@@ -202,6 +230,8 @@ static func _vr_try(card: Node) -> bool:
 		if c == card:
 			break
 		prev = c
+	if card.has_meta("story_hold") and _held({"hold": card.get_meta("story_hold")}):
+		return false
 	if prev == null:
 		return true
 	if prev.has_meta("story_waiting") or float(prev.get("t")) < MIN_READ:
@@ -320,6 +350,8 @@ class Card extends Control:
 
 	## Its turn? Yes when no older card on this view is being read; one read for MIN_READ s leaves for it.
 	func _try_start() -> bool:
+		if Outer._held(opts):
+			return false
 		var prev: Card = null
 		for c in get_parent().get_children():
 			if c == self:
