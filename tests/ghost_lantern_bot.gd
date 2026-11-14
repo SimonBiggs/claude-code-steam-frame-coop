@@ -316,7 +316,7 @@ func _second_pass(_delta: float) -> void:
 	# Take an orb a second after it's up: the VR lantern-bearer with a hand, else P2 walks under one. (Standing under
 	# one already when they pop up is never a pick (core/pick_flow.gd RESTING): P2 first steps back to the lantern-bearer.)
 	if main.picks.active() and main.picks.chosen < 0 and main.picks.t < 0.6 and not p1.vr and main.players.size() > 1 \
-			and main.players[1].active:
+			and main.players[1].active and not main.players[1].remote:
 		main.players[1].global_position = Vector3(p1.global_position.x, 0.0, p1.global_position.z)
 	if main.picks.active() and main.picks.chosen < 0 and main.picks.t > 1.2:
 		var row: Array = main.picks.orbs.orbs
@@ -326,7 +326,8 @@ func _second_pass(_delta: float) -> void:
 				p1.hand_l.global_position = o.global_position
 			else:
 				# P2 walks under it; alone (one flat player on a Deck) P1 does.
-				var walker = main.players[1] if main.players.size() > 1 and main.players[1].active else p1
+				# (a LOCAL walker: on a networked host P2 is the TV machine's player, moved by its own machine, 2026-11-14)
+				var walker = main.players[1] if main.players.size() > 1 and main.players[1].active and not main.players[1].remote else p1
 				walker.global_position = Vector3(o.global_position.x, 0.0, o.global_position.z)
 	# After night 1 has run a while, end it so the lantern gift comes up (the bot can't wait a whole night).
 	if not gift_skip and main.night >= 1 and t > 34.0 and not main.in_break:
