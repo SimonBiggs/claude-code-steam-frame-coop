@@ -55,8 +55,8 @@ const SHORT_META := "story_card_short"
 const MAX_WAITING := 3
 
 
-## opts.hold: a Callable; while it returns true a card waits its turn (Penalty Shootout: never while a ball flies at
-## the keeper). Games never keep their own story queue or timer: tests/story_queue_test.gd.
+## opts.hold: a METHOD Callable (game._story_held, never a lambda: a lambda kept in a card's opts / meta corrupted the
+## heap at quit, Penalty Shootout 2026-11-14); while it returns true a card waits its turn (never while a ball flies). Games never keep their own story queue or timer: tests/story_queue_test.gd.
 static func _held(opts: Dictionary) -> bool:
 	var h: Variant = opts.get("hold")
 	return h is Callable and (h as Callable).is_valid() and bool((h as Callable).call())
@@ -103,7 +103,17 @@ static func _note_gone(parent: Node, shown: float, duration: float, line: String
 		print("STORY CARD: \"%s\" knocked off after %.1f s (core/story_card.gd MIN_READ)" % [line, shown]), CONNECT_ONE_SHOT)
 
 
-## The last card shown (its roots and opts), so tests can show it again on demand (replay()).
+## The last card shown (its roots and opts), so tests can show it again on demand (replay()). Only plain values are
+## kept (_plain): a static var holding a game's lambda outlives the game's script at quit and corrupted the heap
+## (Penalty Shootout's opts.hold, 2026-11-14: "double free or corruption", exit 134 after every run).
+static func _plain(opts: Dictionary) -> Dictionary:
+	var out := {}
+	for k in opts:
+		if not (opts[k] is Callable or opts[k] is Object):
+			out[k] = opts[k]
+	return out
+
+
 static var _last_roots: Array = []
 static var _last_opts: Dictionary = {}
 
@@ -111,7 +121,7 @@ static var _last_opts: Dictionary = {}
 ## Show a story card on one view root or an Array of them. Returns the first card made (or null).
 static func show(root: Variant, opts: Dictionary) -> Control:
 	_last_roots = [root]
-	_last_opts = opts.duplicate()
+	_last_opts = _plain(opts)
 	if root is Array:
 		var first: Control = null
 		for r in root:

@@ -15,11 +15,15 @@ func _initialize() -> void:
 		_collect(d, files)
 	var timer_re := RegEx.create_from_string("(?m)^\\s*(story|card|beat)_(t|cd|timer|wait)\\s*-=\\s*delta")
 	var pop_re := RegEx.create_from_string("(story|card|beat)_?(queue|q)\\w*\\.pop_front\\(")
+	var lambda_re := RegEx.create_from_string("\"hold\"\\]?\\s*[:=]\\s*func\\b")
 	for path in files:
 		var src := FileAccess.get_file_as_string(path)
 		var m := timer_re.search(src)
 		if m != null:
 			fails.append("%s counts down its own story timer (%s): call StoryCard.show / show_vr (or StoryCard.later) and let core/story_card.gd pace the cards" % [path, m.get_string().strip_edges()])
+		m = lambda_re.search(src)
+		if m != null:
+			fails.append("%s gives a story card a lambda as opts.hold (%s): pass a method (self._story_held): a lambda kept past its game (StoryCard's static replay copy did) corrupted the heap at quit" % [path, m.get_string()])
 		m = pop_re.search(src)
 		if m != null:
 			fails.append("%s pops its own story queue (%s): StoryCard's shared queue takes turns (opts.urgent / opts.hold / StoryCard.later)" % [path, m.get_string()])

@@ -665,7 +665,8 @@ export const REPO_GUARDS = ["gen_budget_test", "who_test", "who_net_test", "clas
  *  playing to its end, so a frozen tail is a game softlock or a bot that stopped acting: fix whichever it is.
  *  rounds = RUN lines before the BOT RESULT (rounds that really finished). */
 export async function loneRun(id: string, project = STAGE) {
-  const o = (await sh(`DUO_SOLO=1 DUO_MACHINE_KIND=deck BOT_PLAYERS=1 DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 7200 res://tests/${id}_bot.tscn 2>&1`, project)).out;
+  const lr = await sh(`DUO_SOLO=1 DUO_MACHINE_KIND=deck BOT_PLAYERS=1 DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 7200 res://tests/${id}_bot.tscn 2>&1`, project);
+  const o = lr.out;
   const lines = o.split("\n");
   const end = lines.findIndex(l => /BOT RESULT/.test(l));
   const before = lines.slice(0, end < 0 ? lines.length : end);
@@ -674,7 +675,7 @@ export async function loneRun(id: string, project = STAGE) {
   const tail = status.slice(-8);
   const frozen = tail.length >= 8 && tail.every(x => x === tail[0]);
   const rounds = before.filter(l => l.startsWith("RUN: ")).length;
-  const errs = [...lines.filter(l => /SCRIPT ERROR/.test(l)), ...engineErrors(o)];
+  const errs = [...lines.filter(l => /SCRIPT ERROR/.test(l)), ...engineErrors(o), ...(lr.code !== 0 ? [`exit ${lr.code} (crashed at quit?)`] : [])];
   const result = lines.filter(l => /BOT RESULT/.test(l)).pop() ?? "no BOT RESULT";
   const pass = /BOT RESULT: PASS/.test(result) && errs.length === 0 && !frozen && (rounds > 0 || status.length >= 3);
   return { id, pass, rounds, frozen, summary: `${pass ? "ok" : "FAIL"} ${result.trim()} rounds=${rounds}${frozen ? " FROZEN: " + tail[0].slice(0, 100) : ""}${status.length < 3 && !rounds ? " (no status lines and no finished round: can't tell it plays)" : ""}${errs.slice(0, 3).map(e => "\n  " + e).join("")}` };
@@ -832,22 +833,27 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   // nothing, and since BotEnd counts checks (0 checks = FAIL, 2026-11-12) that failed every tools-only landing.
   const isGame = await stat(join(STAGE, "games", botId)).then(() => true, () => false);
   if (isGame) {
-    const deckOut = (await sh(`DECK_BOT_ONLY=${botId} DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 6000 res://tests/deck_bot.tscn 2>&1`, STAGE)).out;
+    const deckRun = await sh(`DECK_BOT_ONLY=${botId} DUO_PORT=${rport()} timeout 300 godot-test --headless --path . --fixed-fps 60 --quit-after 6000 res://tests/deck_bot.tscn 2>&1`, STAGE);
+    const deckOut = deckRun.out;
     out.deck = deckOut.split("\n").filter(l => /BOT RESULT|SCRIPT ERROR/.test(l)).slice(-3).join("\n") + engineErrors(deckOut).slice(0, 3).map(e => `\nSCRIPT ERROR (engine): ${e}`).join("");
     if (/\(0 checks/.test(out.deck)) out.deck += " (no Deck checks ran for this game)";
+    // A run that says PASS but exits non-zero crashed at quit (2026-11-14: Penalty Shootout's heap corruption): FAIL.
+    if (deckRun.code !== 0) out.deck += `\nSCRIPT ERROR (exit): exit ${deckRun.code} (crashed at quit?)`;
     ok &&= /BOT RESULT: PASS/.test(out.deck) && !/SCRIPT ERROR|no Deck checks/.test(out.deck);
   } else out.deck = `not run: ${botId} is not a game (the Deck bot checks games)`;
   // Solo VR: the Frame hosting with no TV machine is a real way the family plays, and new bot checks kept assuming TV
   // players there (2026-11-11: 8 games, then treasure-deep2's "map pieces were dug up"). Run the game's bot that way.
   if (isGame && await stat(join(STAGE, `tests/${botId}_bot.tscn`)).then(() => true, () => false)) {
-    const so = (await sh(`DUO_HOST=1 BOT_VR=1 BOT_END=62 DUO_PORT=${rport()} timeout 200 godot-test --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/${botId}_bot.tscn 2>&1`, STAGE)).out;
-    const soErr = [...so.split("\n").filter(l => /SCRIPT ERROR/.test(l)), ...engineErrors(so)];
+    const soRun = await sh(`DUO_HOST=1 BOT_VR=1 BOT_END=62 DUO_PORT=${rport()} timeout 200 godot-test --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/${botId}_bot.tscn 2>&1`, STAGE);
+    const so = soRun.out;
+    const soErr = [...so.split("\n").filter(l => /SCRIPT ERROR/.test(l)), ...engineErrors(so), ...(soRun.code !== 0 ? [`exit ${soRun.code} (crashed at quit?)`] : [])];
     out.solo_vr = (so.split("\n").filter(l => /BOT RESULT/.test(l)).pop() ?? "no BOT RESULT") + soErr.slice(0, 3).map(e => "\n" + e).join("");
     ok &&= /BOT RESULT: PASS/.test(out.solo_vr) && soErr.length === 0;
     // Seated / short VR player (eyes 1.15 m: the little ones): a pick row sinking into a drum kit and a fake head 0.4 m
     // too low only showed seated (2026-11-12: Rhythm Band, Dodge Ball, Paint and Guess).
-    const se = (await sh(`DUO_HOST=1 BOT_VR=1 BOT_VR_SEATED=1 BOT_END=62 DUO_PORT=${rport()} timeout 200 godot-test --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/${botId}_bot.tscn 2>&1`, STAGE)).out;
-    const seErr = [...se.split("\n").filter(l => /SCRIPT ERROR/.test(l)), ...engineErrors(se)];
+    const seRun = await sh(`DUO_HOST=1 BOT_VR=1 BOT_VR_SEATED=1 BOT_END=62 DUO_PORT=${rport()} timeout 200 godot-test --headless --path . --fixed-fps 60 --quit-after 3600 res://tests/${botId}_bot.tscn 2>&1`, STAGE);
+    const se = seRun.out;
+    const seErr = [...se.split("\n").filter(l => /SCRIPT ERROR/.test(l)), ...engineErrors(se), ...(seRun.code !== 0 ? [`exit ${seRun.code} (crashed at quit?)`] : [])];
     out.seated_vr = (se.split("\n").filter(l => /BOT RESULT/.test(l)).pop() ?? "no BOT RESULT") + seErr.slice(0, 3).map(e => "\n" + e).join("");
     ok &&= /BOT RESULT: PASS/.test(out.seated_vr) && seErr.length === 0;
     // Lone flat player: one Deck player, no VR, nobody else, must reach real play and keep going (loneRun above).

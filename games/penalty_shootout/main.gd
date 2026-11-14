@@ -2957,6 +2957,11 @@ func _story(line: String, pic: String, color: Color) -> void:
 	_show_story([line, pic, color])
 
 
+## Story cards wait while a ball flies at the keeper (StoryCard opts.hold).
+func _story_held() -> bool:
+	return state == "runup" or state == "flight"
+
+
 ## Every machine: show the next card when nothing is flying at the keeper.
 ## Show a beat now: StoryCard's shared queue paces the cards (each waits its turn behind one still being read).
 func _show_story(b: Array, urgent: bool = false, now: bool = false) -> void:
@@ -2966,7 +2971,7 @@ func _show_story(b: Array, urgent: bool = false, now: bool = false) -> void:
 	var opts := {"who": LEO, "line": b[0], "pic": b[1], "color": b[2], "duration": 2.4}
 	if urgent:
 		opts["urgent"] = true
-	opts["hold"] = func() -> bool: return state == "runup" or state == "flight"  # never while a ball flies at the keeper
+	opts["hold"] = _story_held  # never while a ball flies at the keeper (a method: a lambda kept in a card crashed the quit)
 	var views: Array = []
 	for p in players:
 		if p.hud != null and is_instance_valid(p.hud) and (p.hud as Control).is_visible_in_tree():
