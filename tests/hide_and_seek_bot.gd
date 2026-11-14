@@ -368,6 +368,9 @@ func on_frame_limit(_note := "") -> void:
 			BotEnd.check(true, k)
 	if kit.seen("phase", "pick") > 0:
 		BotEnd.check(main.deep.mode != "" or main.phase == "pick", "the mode pick ran (%s)" % main.deep.mode)
+	if has_meta("vote_pool") and main.deep.mode != "":
+		var why: String = kit.vote_problem(main.deep.picks)
+		BotEnd.check(why == "", "everyone voted on the mode, the most votes / the tie rule won" + ("" if why == "" else ": " + why))
 	if main.round_no >= 1:
 		BotEnd.check(kit.check_host_mode(main.net, main.deep.mode if main.deep.mode != "" else main.deep.mode_id()), "this machine plays at the host's mode")
 
@@ -806,17 +809,25 @@ func _fake_vr(delta: float) -> void:
 	s.hand_l.global_position = c if near_t > 2.0 else head + Vector3(-0.2, -0.3, -0.2)
 
 
-## Phase "pick": every local bot that may pick walks under an orb (spread over the three, so the votes differ).
+## Phase "pick": every local bot that may pick walks under an orb: odd and even players to two different ones, so
+## the votes split (two players: a tie -> the middle; three or more: a real majority) and the shared vote's rule is
+## checked (BotKit.vote_problem).
 func _pick(delta: float) -> void:
 	if main.phase != "pick" or main.deep.stage == "":
 		return
 	var spots := Deep.pick_spots(main.md())
 	if spots.size() < 3:
 		return
+	var pool := 0
+	for p in main.players:
+		if main.deep.can_pick(p):
+			pool += 1
+	if pool >= 2 and main.deep.stage == "mode":
+		set_meta("vote_pool", true)  # (two or more could vote on the mode: the split vote must show up)
 	for p in main.players:
 		if not p.active or p.remote or p.ghost or p.vr or not main.deep.can_pick(p):
 			continue
-		var spot: Vector3 = spots[(p.index + main.round_no) % spots.size()]
+		var spot: Vector3 = spots[(p.index % 2 + main.round_no) % spots.size()]
 		p.collision_mask = 0  # (no path finding round the hall's furniture)
 		_walk_to(p, spot, 0.1, delta, 4.0)
 
@@ -860,7 +871,7 @@ func _dodge(p, delta: float) -> bool:
 ## SECOND PASS verdict (once per machine): picks seen as they happened, a gift, a told surprise that went off.
 func _deep_verdict(mode: String) -> void:
 	var d = main.deep
-	if d.orbs.showing() and not has_meta("deep_orbs"):
+	if d.picks.showing() and not has_meta("deep_orbs"):
 		set_meta("deep_orbs", true)
 		print("BOT: pick orbs show (%s: %s)" % [d.stage, str(d.choices)])
 	if d.gift != "" and not has_meta("deep_gift"):

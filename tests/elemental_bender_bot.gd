@@ -180,6 +180,14 @@ func _tv_bot(slot: int, delta: float) -> void:
 	var target := _nearest_target(bp, vr_leave())
 	if target == null and vr_leave() != null:
 		target = vr_leave()
+	if main.altar.stage == "mode" and main.altar.orbs.size() >= 2 and is_instance_valid(main.altar.orbs[slot % 2]):
+		target = main.altar.orbs[slot % 2]  # the mode vote: odd and even bots bend at different stones (a split vote)
+		var tv_slots := {}
+		for f in main.fighters(false):
+			if f != main.master:  # (TV benders: they bend at their stone; the VR master punches whatever is near)
+				tv_slots[int(f.get("slot")) % 2] = true
+		if tv_slots.size() == 2:
+			set_meta("vote_pool", true)  # (two TV bots voting differently: the shared vote's rule is checked)
 	var hold := target != null and target == vr_leave()  # the VR master's raider: don't shoot it, just keep near
 	if target == null or b.dead:
 		kit.pad_trigger(dev, "rt", 0.0)
@@ -439,6 +447,9 @@ func _checks() -> void:
 				kit.assert_true(main.log_tells >= 1, "%s: the island boss told its attacks (%d)" % [mode, main.log_tells])
 		if max_wave >= 1:
 			kit.assert_true(main.log_mode != "", "%s: the team picked a mode on the altar (%s)" % [mode, main.log_mode])
+		if has_meta("vote_pool") and main.log_mode != "":
+			var why: String = kit.vote_problem(main.picks)
+			kit.assert_true(why == "", "%s: everyone voted on the mode stones, the most votes / a tie stays gentler%s" % [mode, "" if why == "" else ": " + why])
 			if BotKit.mode_forced(main.net, "EB_MODE"):
 				kit.assert_eq(main.team_mode, main.Deep.mode_id(BotKit.forced_mode(main.net, "EB_MODE")), "%s: the mode is %s" % [mode, BotKit.forced_mode(main.net, "EB_MODE")])
 		if main.log_runs >= 1:

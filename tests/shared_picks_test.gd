@@ -13,6 +13,9 @@ extends SceneTree
 ##   - PICK FLOW: a game's own dwell / take / finish (RESTING dwell, the nobody-chose middle take, the AFTER wait before
 ##     the orbs go) -> extends "res://core/pick_flow.gd" and override takers() / orb_at() / fx() ... (28 games had
 ##     their own copy of it by 2026-11-13)
+##   - VOTES: a game counting its own votes (a vote / ballot tally += 1 in a func) -> pick_flow's vote mode (`vote = true`
+##     in its picks.gd _init: everyone's dwell or shot is their vote, majority wins, tie_rule / tie_pick(), voters();
+##     four games had their own by 2026-11-14)
 ## A diegetic thing that only looks similar (a hazard vent, a shop sign) is allowed by a line in its file:
 ##   ## shared-picks-ok: <func name> (why)
 ## Every game script must also compile (load() + can_instantiate()).
@@ -33,6 +36,9 @@ const SEASON_COPY := "(?s)\"winter\"\\s*:[^\n]*snowman.{0,1200}\"autumn\"\\s*:[^
 const GIFT_COPY := "Seeded\\.rng\\([^\\n]*\"gift order\""
 ## A game's own copy of the pick flow (core/pick_flow.gd): its RESTING dwell, its nobody-chose take, its AFTER wait.
 const FLOW_COPY := "(?m)(^\\s*[a-z_]+\\[[^\\]\\n]+\\]\\s*=\\s*RESTING\\b|take\\(options\\.size\\(\\) / 2, -1\\)|done_t >= AFTER\\b)"
+## A game's own vote count: a line adding one to a tally near a vote / ballot name (within 3 lines).
+const VOTE_NAME := "(?i)\\b[a-z_]*(vote|ballot)[a-z_]*\\b"
+const VOTE_COUNT := "(\\+=\\s*1\\b|=\\s*int\\(.*\\)\\s*\\+\\s*1\\b)"
 const MODE_LOOK := "\"(gentle|brave|hard|heroic|mega)\"\\s*:\\s*Color\\(|\"name\"\\s*:\\s*\"(GENTLE|BRAVE|HARD|HEROIC)\"|\"kind\"\\s*:\\s*\"mode\"[^}\\n]*\"name\"\\s*:\\s*\""
 
 var fails := 0
@@ -72,6 +78,8 @@ static func scan(path: String, text: String) -> Array:
 			out.append("%s: %s() draws its own warning: use core/warn_rings.gd (warn / shape, style \"rings\" / \"disc\" / \"flash\")" % [path, fname])
 		elif rx_pick.search(fname) and rx_pgeo.search(body) and body.contains("Label3D.new") and not body.contains("PickOrbs"):
 			out.append("%s: %s() builds its own picks: use core/pick_orbs.gd show_orbs(..., opts) (body / icon / at keep your look)" % [path, fname])
+		if _counts_votes(body):
+			out.append("%s: %s() counts its own votes: use core/pick_flow.gd's vote mode (vote = true in a picks.gd _init; voters() / tie_rule / tie_pick() keep a game's differences)" % [path, fname])
 	if not ok.has("seasons") and RegEx.create_from_string(SEASON_COPY).search(text):
 		out.append("%s: its own seasonal props (snowman, pumpkin...): use core/season_kit.gd prop(builder, season, at, i, size)" % path)
 	if not ok.has("gifts") and RegEx.create_from_string(GIFT_COPY).search(text):
@@ -86,6 +94,20 @@ static func scan(path: String, text: String) -> Array:
 		if mm != null:
 			out.append("%s: its own mode look (%s): use PickOrbs.mode(id) / mode_color / mode_name (same names and colours everywhere)" % [path, mm.get_string().left(40)])
 	return out
+
+
+## True if a func body adds one to a tally within 3 lines of a vote / ballot name (a game's own vote count).
+static func _counts_votes(body: String) -> bool:
+	var rx_name := RegEx.create_from_string(VOTE_NAME)
+	var rx_count := RegEx.create_from_string(VOTE_COUNT)
+	var lines := body.split("\n")
+	for j in lines.size():
+		if lines[j].strip_edges().begins_with("#") or rx_count.search(lines[j]) == null:
+			continue
+		for k in range(maxi(0, j - 3), j + 1):
+			if rx_name.search(lines[k]) != null:
+				return true
+	return false
 
 
 static func game_files(dir: String = "res://games") -> Array:
@@ -115,6 +137,10 @@ func _initialize() -> void:
 	_expect(scan("bad", "\t\tinside[id] = RESTING if i >= 0 else -1\n").size() == 1, "the scan finds a game's own RESTING dwell")
 	_expect(scan("bad", "\tif t <= 0.0:\n\t\ttake(options.size() / 2, -1)\n").size() == 1, "the scan finds a game's own nobody-chose take")
 	_expect(scan("bad", "\t\tif done_t >= AFTER:\n\t\t\t_finish()\n").size() == 1, "the scan finds a game's own finish wait")
+	_expect(scan("bad", "func _resolve():\n\tfor k in takes:\n\t\tvotes[int(takes[k])] += 1\n").size() == 1, "the scan finds a game's own vote count")
+	_expect(scan("bad", "static func team_mode(p):\n\tfor s in p:\n\t\tvotes[m] = int(votes.get(m, 0)) + 1\n").size() == 1, "the scan finds a game's own vote tally")
+	_expect(scan("good", "func _finish():\n\tvar votes := picks.votes\n\tvar a := 1\n\tvar b := 2\n\tvar c := 3\n\tscore += 1\n").is_empty(), "a vote name far from a count is fine")
+	_expect(scan("ok", "## shared-picks-ok: _resolve (a test)\nfunc _resolve():\n\tvotes[k] += 1\n").is_empty(), "shared-picks-ok lets a vote count through")
 	_expect(scan("good", good).is_empty(), "the scan passes code that uses the helpers")
 	_expect(scan("ok", "## shared-picks-ok: _make_pod (a test)\n" + bad_pick).is_empty(), "shared-picks-ok lets a func through")
 	# 2. Every game.
@@ -135,6 +161,20 @@ func _initialize() -> void:
 	_expect(PickFlow.order_along([Vector3(1, 0, 0), Vector3(-1, 0, 0), Vector3(0, 0, 0)], Vector3.RIGHT) == [1, 2, 0], "order_along: left to right")
 	_expect(not PickFlow.head_moved(Transform3D(), Transform3D(Basis(), Vector3(0.1, 0, 0))), "head_moved: a small step keeps the row")
 	_expect(PickFlow.head_moved(Transform3D(), Transform3D(Basis(Vector3.UP, 0.8), Vector3.ZERO)), "head_moved: a turn moves the row")
+	# The vote mode's count (the flow itself runs in Hide & Seek's, Elemental Bender's, Snowball Blitz's, Duo Arena's bots).
+	var pf = PickFlow.new()
+	var abc := ["a", "b", "c"]
+	_expect(pf.winner_of("gift", abc, {}, 1) == 1, "vote: nobody voted -> the default")
+	_expect(pf.winner_of("gift", abc, {0: 2}, 1) == 2, "vote: one player alone decides")
+	_expect(pf.winner_of("gift", abc, {0: 2, 1: 2, 2: 0}, 1) == 2, "vote: the most votes win")
+	_expect(pf.winner_of("gift", abc, {0: 0, 1: 1}, 1) == 1, "vote: a tie with the middle -> the middle")
+	_expect(pf.winner_of("gift", abc, {0: 0, 1: 2}, 1) == 0, "vote: a tie without the middle -> the nearest (lower)")
+	_expect(pf.winner_of("mode", ["gentle", "hard", "brave"], {0: 1, 1: 2}, 1) == 1, "vote: middle rule on a mode tie keeps the middle")
+	pf.tie_rule = "gentler"
+	_expect(pf.winner_of("mode", ["gentle", "hard", "brave"], {0: 1, 1: 2}, 1) == 2, "vote: gentler rule: hard vs brave -> brave")
+	_expect(pf.winner_of("mode", ["gentle", "brave", "hard"], {0: 0, 1: 2, 2: 1, 3: 1, 4: 0}, 1) == 0, "vote: gentler rule: gentle vs brave -> gentle")
+	_expect(pf.winner_of("gift", abc, {0: 0, 1: 2}, 1) == 0, "vote: gentler rule on a gift stage -> nearest the middle")
+	pf.free()
 	# 4. The shared gift pick: three different, the newest always there, not the last one again, the same for a seed.
 	var un := ["a", "b", "c", "d", "e"]
 	for s in 50:

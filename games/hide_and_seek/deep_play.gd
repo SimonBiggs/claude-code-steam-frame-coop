@@ -1,8 +1,8 @@
 extends Node3D
 ## HIDE AND SEEK second pass in the game (data and rules: deep.gd). One node under main.gd on every machine:
-## - the MODE pick before the first round and PIP'S GIFT pick before every later round (core/pick_orbs.gd orbs over
-##   the counting room's floor: stand under one, or reach a VR hand into it, for DWELL seconds; the most picked wins,
-##   nobody in time = the middle one),
+## - the MODE pick before the first round and PIP'S GIFT pick before every later round (picks.gd: everyone votes on
+##   the shared pick flow, core/pick_flow.gd; orbs over the counting room's floor: stand under one, or reach a VR hand
+##   into it, for DWELL seconds; the most votes win, a tie or nobody in time = the middle one),
 ## - RUMBLE'S SURPRISES while the seeker looks (core/warn_rings.gd tells on the floor first, then Rumble rolls
 ##   along his band bumping hiders out of disguise, or the pepper pot puffs and everyone in the ring sneezes),
 ## - the season's props + drift and PIP'S KENNEL pieces in the house's garden.
@@ -17,16 +17,16 @@ const Seeded := preload("res://core/seeded.gd")
 const HouseGen := preload("res://games/hide_and_seek/housegen.gd")
 const HouseScript := preload("res://games/hide_and_seek/map_house.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const PicksScript := preload("res://games/hide_and_seek/picks.gd")
 
 var main
-var orbs: PickOrbs
+var picks  # picks.gd (everyone votes: core/pick_flow.gd)
 var rings: WarnRings
 var mode := ""  # GENTLE / BRAVE / HARD picked this visit ("" until the first pick)
 var gift := ""  # this round's gift
 var gift_side := ""  # who it helps: "seeker" / "hider"
 var stage := ""  # "" / "mode" / "gift": a pick is open
 var choices: Array = []
-var takes := {}  # player index -> orb index
 var stage_t := 0.0
 var last_loser := ""  # host: who picks the next gift
 var plan: Array = []  # host: this round's surprises (Deep.plan)
@@ -38,8 +38,6 @@ var season := ""
 var first_at := Deep.FIRST_AT  # (bots shorten it, like their count)
 var kennel_rounds := 0
 var stats := {"picks": 0, "tells": 0, "goes": 0, "bumped": 0, "sneezed": 0, "pops": 0}
-var _dwell := {}  # host: index -> [orb, seconds]
-var _hold := 0.0
 var _shown := ""
 var _dressed: Node3D
 var _dress_key := ""
@@ -52,9 +50,10 @@ var _told := {}  # surprise kinds told on a card this visit
 func setup(m) -> void:
 	main = m
 	name = "Deep"
-	orbs = PickOrbs.new()
-	orbs.collision_layer = 0  # nothing to bump into: you stand under them
-	add_child(orbs)
+	picks = PicksScript.new()
+	picks.main = main
+	picks.deep = self
+	add_child(picks)  # (its orbs live under main: nothing to bump into, you stand under them)
 	rings = WarnRings.new()
 	add_child(rings)
 	season = SeasonKit.override("hide_and_seek", Seeded.season())  # ARCADE_SEASON / ARCADE_SEASON_HIDE_AND_SEEK for tests and tries
@@ -148,9 +147,6 @@ func begin_round() -> bool:
 	plan_i = 0
 	live = {}
 	rings.clear()
-	takes.clear()
-	_dwell.clear()
-	_hold = 0.0
 	if mode == "":
 		stage = "mode"
 		choices = PickOrbs.mode_ids(Deep.mode_of(String(main.save.data.get("mode", "brave"))))
@@ -162,7 +158,7 @@ func begin_round() -> bool:
 		stage = ""
 		return false
 	stage_t = float(Deep.PICK_WAIT[stage])
-	main.net.event("orbs", [stage, choices])
+	picks.begin(stage, choices, gift_side, _picked)
 	_face_orbs()
 	var card := {"who": "HOW TRICKY?", "line": "Pick one!", "pic": "star", "color": Color(1.0, 0.85, 0.4)} if stage == "mode" else \
 		{"who": "PIP'S GIFT", "line": "For the seeker!" if gift_side == "seeker" else "For the hiders!", "pic": "gift", "color": Color(1.0, 0.72, 0.42)}
@@ -188,71 +184,28 @@ func _face_orbs() -> void:
 func can_pick(p) -> bool:
 	if not p.active or p.late:
 		return false
+	if p.remote and main.net.mode == "host" and not main.net.connected:
+		return false  # (a TV seat with no TV machine: nobody can walk it to an orb, never waited for: main.hider_count)
 	if stage == "mode":
 		return true
 	return (gift_side == "seeker" and p.index == 0) or (gift_side == "hider" and p.role == "hider")
 
 
-## Host, phase "pick": true once it's decided.
+## Host, phase "pick": true once it's decided (picks.gd: everyone votes).
 func update_pick(delta: float) -> bool:
-	stage_t -= delta
-	var spots := Deep.pick_spots(main.md())
-	var want := 0
-	for p in main.players:
-		if not can_pick(p):
-			continue
-		want += 1
-		if takes.has(p.index):
-			continue
-		var at := -1
-		var feet: Vector3 = p.global_position
-		for i in spots.size():
-			var sp: Vector3 = spots[i]
-			if Vector2(feet.x - sp.x, feet.z - sp.z).length() < Deep.PICK_TOUCH:
-				at = i
-			if p.vr and p.hand_l != null:
-				var ball := sp + Vector3.UP * Deep.PICK_Y
-				if p.hand_l.global_position.distance_to(ball) < Deep.HAND_R or p.hand_r.global_position.distance_to(ball) < Deep.HAND_R:
-					at = i
-		var dw: Array = _dwell.get(p.index, [-1, 0.0])
-		if at < 0:
-			_dwell.erase(p.index)
-			continue
-		dw = [at, float(dw[1]) + delta if int(dw[0]) == at else delta]
-		_dwell[p.index] = dw
-		if float(dw[1]) >= Deep.DWELL:
-			takes[p.index] = at
-			stats.picks += 1
-			main.sound("ding", -2.0, 1.0 + 0.1 * at)
-			var o: Vector3 = sp_at(spots, at)
-			main.burst(o, p.color, 14)
-			main.net.event("burst", [o, p.color, 14, 0.08])
-			print("Round %d: P%d picks %s" % [main.round_no, p.index + 1, choices[at]])
-	if want > 0 and takes.size() >= want:
-		_hold += delta
-	var done := _hold >= 0.6 or stage_t <= 0.0 or (want == 0 and stage_t <= float(Deep.PICK_WAIT[stage]) - Deep.EMPTY_WAIT)
-	if done:
-		_resolve()
-	return done
+	picks.tick(delta)
+	stage_t = picks.left()
+	return stage == ""
 
 
 func sp_at(spots: Array, i: int) -> Vector3:
 	return (spots[i] as Vector3) + Vector3.UP * Deep.PICK_Y
 
 
-func _resolve() -> void:
-	var votes := []
-	votes.resize(choices.size())
-	votes.fill(0)
-	for k in takes:
-		votes[int(takes[k])] += 1
-	var mid := choices.size() / 2
-	var best := mid
-	for i in choices.size():
-		if votes[i] > votes[best]:
-			best = i
-	var id := String(choices[best])
-	if stage == "mode":
+## Host / local: the votes are in (picks.gd): the mode or Pip's gift.
+func _picked(st: String, value: Variant, _by: int) -> void:
+	var id := String(value)
+	if st == "mode":
 		if main.net.forced_mode("HNS_MODE") != "":  # tests: this mode (a networked run checks the TV plays at it)
 			id = Deep.mode_of(main.net.forced_mode("HNS_MODE"))
 		mode = id
@@ -269,11 +222,9 @@ func _resolve() -> void:
 			for p in main.players:
 				if p.is_hiding():
 					bubbles[p.index] = true
-	print("Round %d: %s -> %s (votes %s)" % [main.round_no, stage, id, str(votes)])
+	print("Round %d: %s -> %s (votes %s)" % [main.round_no, st, id, str(picks.history[-1][3]) if not picks.history.is_empty() else "{}"])
 	stage = ""
 	choices = []
-	takes.clear()
-	main.net.event("orbs", ["", []])
 	main.run["mode"] = mode_id()
 	main.run["gift"] = gift
 
@@ -469,28 +420,22 @@ func round_over(seeker_won: bool) -> void:
 
 func pack() -> Array:
 	share_mode()
-	var tk: Array = []
-	for k in takes:
-		tk.append([int(k), int(takes[k])])
-	return [mode, gift, gift_side, stage, choices, tk, snappedf(stage_t, 0.1), season, kennel_rounds, bubbles.keys()]
+	return [mode, gift, gift_side, stage, choices, snappedf(stage_t, 0.1), season, kennel_rounds, bubbles.keys()]
 
 
 func unpack(a: Array) -> void:
-	if a.size() < 10:
+	if a.size() < 9:
 		return
 	mode = String(a[0])
 	gift = String(a[1])
 	gift_side = String(a[2])
 	stage = String(a[3])
 	choices = (a[4] as Array).duplicate()
-	takes.clear()
-	for e in a[5]:
-		takes[int(e[0])] = int(e[1])
-	stage_t = float(a[6])
-	season = String(a[7])
-	kennel_rounds = int(a[8])
+	stage_t = float(a[5])
+	season = String(a[6])
+	kennel_rounds = int(a[7])
 	bubbles.clear()
-	for i in a[9]:
+	for i in a[8]:
 		bubbles[int(i)] = true
 
 
@@ -504,6 +449,8 @@ func apply_event(kind: String, args: Array) -> bool:
 			on_bump(int(args[0]), args[1])
 		"orbs":
 			pass  # (sticky, for machines joining mid-pick: the snapshot's pack() draws them)
+		"deep_take":
+			picks.take_fx(int(args[0]), int(args[1]))
 		_:
 			return false
 	return true
@@ -523,27 +470,13 @@ func _process(delta: float) -> void:
 func _show_orbs() -> void:
 	var key := "%s|%s|%d" % [stage, str(choices), main.map_idx]
 	if stage == "" or main.phase != "pick":
-		if orbs.showing():
-			orbs.clear()
+		if picks.showing() and not picks.active():  # (the host's flow clears its own after the take)
+			picks.orbs.clear()
 		_shown = ""
 		return
 	if key != _shown:
 		_shown = key
-		var entries: Array = []
-		for id in choices:
-			if stage == "mode":
-				var m := PickOrbs.mode(String(id))
-				entries.append({"id": id, "name": String(m.name), "pic": String(m.pic), "color": m.color})
-			else:
-				var g := Deep.gift(String(id))
-				entries.append({"id": id, "name": String(g.name), "pic": String(g.pic), "color": g.color})
-		var spots := Deep.pick_spots(main.md())
-		orbs.show_orbs(stage, entries, Vector3.ZERO, Deep.PICK_GAP, Deep.PICK_Y, {"at": spots, "scale": 0.45, "touch": Deep.PICK_TOUCH,
-			"pop": true, "two_lines": true, "label_y": -0.9, "for_others": stage == "gift" and gift_side == "hider"})
-	var cols := {}
-	for p in main.players:
-		cols[p.index] = p.color
-	orbs.show_takers(takes, cols)
+		picks.show_row(stage, choices, gift_side)  # (the vote dots: core/pick_flow.gd, net state "pick_votes")
 
 
 func _make_rumble() -> Node3D:
