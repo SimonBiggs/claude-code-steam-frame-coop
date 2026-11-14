@@ -3,13 +3,15 @@ extends "res://core/pick_flow.gd"
 ##   "mode"   GENTLE / BRAVE / HARD before the first job of a visit (the family's last mode in the middle).
 ##   "build"  WREN'S NEXT JOB between jobs: three buildings (castle, lighthouse, windmill, ...) to build next, each a
 ##            seeded towergen job of the same level (so every one is validated). TODAY'S TOWER is never swapped.
+##   "gift"   WREN'S GIFTS before every other later job (and TODAY'S TOWER): three gentle gifts (gifts.gd, chosen by
+##            PickOrbs.gift_choices) that help with that one job.
 ## The orbs float in a row over the (empty) stage. A TV player WALKS into one, the VR giant TOUCHES one with a hand;
 ## the first touch decides for the team (a dot in their colour circles it). Nobody chooses in time? The middle orb
 ## (it glows brightest) is taken, so little ones are never stuck. The round clock waits while the orbs are up.
 ## Host / local decide; the host keeps the "orbs" state [stage, entries] (sticky: a machine joining mid-pick sees the
 ## orbs too) and sends "take" [i, slot] events; every machine draws.
 
-const WAIT := {"mode": 12.0, "build": 10.0}
+const WAIT := {"mode": 12.0, "build": 10.0, "gift": 10.0}
 const ROW := Vector3(0.0, 0.0, -0.6)
 const GAP := 2.4
 const Y := 2.4

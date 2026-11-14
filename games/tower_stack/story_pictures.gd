@@ -5,7 +5,7 @@ extends RefCounted
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 
 const NAMES: Array[String] = ["wren", "tower", "bouncyblock", "honeyblock", "balloonblock", "lighthouse", "clocktower",
-	"birdnest", "gust", "quake"]
+	"birdnest", "gust", "quake", "windflag", "mortar", "wrenbasket", "capstone"]
 
 
 static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
@@ -107,3 +107,43 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 					var x: float = 0.5 + side * (0.22 + 0.08 * k)
 					pic.draw_line(pic._p(x, 0.45), pic._p(x + side * 0.03, 0.55), Color(0.4, 0.3, 0.25), 0.02 * size.x)
 					pic.draw_line(pic._p(x + side * 0.03, 0.55), pic._p(x, 0.65), Color(0.4, 0.3, 0.25), 0.02 * size.x)
+		"windflag":  # Wren's calm flag: a sky-blue pennant on a pole, with a sleepy little breeze curling past
+			pic.draw_line(pic._p(0.3, 0.95), pic._p(0.3, 0.08), Color(0.5, 0.36, 0.22), 0.04 * size.x)
+			pic._circle(0.3, 0.07, 0.04, Color(1.0, 0.85, 0.3))
+			var wv := sin(t * 2.0) * 0.03
+			pic._poly([[0.32, 0.12], [0.85, 0.22 + wv], [0.32, 0.42]], color)
+			pic._poly([[0.32, 0.18], [0.6, 0.23 + wv * 0.5], [0.32, 0.3]], color.lightened(0.35))
+			for k in 2:
+				var y := 0.6 + k * 0.14
+				pic.draw_arc(pic._p(0.62, y), 0.1 * size.x, PI, TAU, 10, Color(0.85, 0.95, 1.0), 0.02 * size.x)
+		"mortar":  # sticky mortar: a builder's trowel spreading a thick dollop over a jelly block
+			pic._poly([[0.18, 0.55], [0.82, 0.55], [0.82, 0.95], [0.18, 0.95]], Color(0.95, 0.55, 0.45))
+			pic._eye(0.4, 0.72, 0.05)
+			pic._eye(0.6, 0.72, 0.05)
+			pic._poly([[0.16, 0.48], [0.84, 0.48], [0.84, 0.57], [0.16, 0.57]], Color(0.93, 0.9, 0.82))
+			for d in [0.3, 0.52, 0.72]:
+				pic._circle(d, 0.57 + sin(t * 2.0 + d * 8.0) * 0.015, 0.035, Color(0.93, 0.9, 0.82))
+			var lift := sin(t * 3.0) * 0.03
+			pic._poly([[0.35, 0.42 + lift], [0.8, 0.3 + lift], [0.72, 0.42 + lift]], Color(0.75, 0.78, 0.82))
+			pic.draw_line(pic._p(0.78, 0.33 + lift), pic._p(0.9, 0.12 + lift), Color(0.6, 0.4, 0.22), 0.05 * size.x)
+		"wrenbasket":  # Wren's basket: a woven basket full of little jelly blocks, a handle on top
+			pic.draw_arc(pic._p(0.5, 0.52), 0.3 * size.x, PI, TAU, 16, Color(0.6, 0.42, 0.22), 0.035 * size.x)
+			var cols := [Color(1.0, 0.45, 0.45), Color(0.45, 0.75, 1.0), Color(1.0, 0.85, 0.3)]
+			for k in 3:
+				var x0 := 0.26 + k * 0.17
+				var hop := absf(sin(t * 3.0 + k)) * 0.04
+				pic._poly([[x0, 0.4 - hop], [x0 + 0.15, 0.4 - hop], [x0 + 0.15, 0.55 - hop], [x0, 0.55 - hop]], cols[k])
+			pic._poly([[0.18, 0.52], [0.82, 0.52], [0.74, 0.92], [0.26, 0.92]], Color(0.78, 0.56, 0.3))
+			for k in 3:
+				var y := 0.62 + k * 0.1
+				pic.draw_line(pic._p(0.22 + k * 0.02, y), pic._p(0.78 - k * 0.02, y), Color(0.6, 0.42, 0.22), 0.015 * size.x)
+		"capstone":  # the golden roof: a shiny gold cap with a star on top, sparkling
+			pic._poly([[0.25, 0.7], [0.75, 0.7], [0.75, 0.95], [0.25, 0.95]], Color(0.95, 0.55, 0.45))
+			pic._poly([[0.15, 0.72], [0.85, 0.72], [0.5, 0.3]], Color(1.0, 0.82, 0.2))
+			pic._poly([[0.3, 0.68], [0.5, 0.38], [0.42, 0.68]], Color(1.0, 0.95, 0.6))
+			var st := 0.08 + absf(sin(t * 3.0)) * 0.02
+			pic._circle(0.5, 0.26, st, Color(1.0, 0.95, 0.4))
+			pic._circle(0.5, 0.26, st * 0.5, Color(1.0, 1.0, 0.85))
+			for k in 3:
+				var a := t * 1.5 + k * TAU / 3.0
+				pic._circle(0.5 + cos(a) * 0.36, 0.55 + sin(a) * 0.2, 0.025, Color(1, 1, 0.8))

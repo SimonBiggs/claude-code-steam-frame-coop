@@ -15,8 +15,12 @@ extends Node3D
 ## by WREN'S TOWN DISTRICTS, districts.gd, which grow over the days behind the town), the shared GENTLE / BRAVE / HARD
 ## pick before the first job of a visit and WREN'S NEXT JOB pick between jobs (picks.gd on core/pick_orbs.gd), and
 ## GUST / QUAKE weather events announced first with a warning ring (weather.gd on core/warn_rings.gd).
+## FOURTH PASS: WREN'S GIFTS (gifts.gd): before every other later job (and TODAY'S TOWER, which has no builder pick)
+## the team picks one of three gentle gifts on the pick orbs instead of the building: CALM FLAG, STICKY MORTAR,
+## WREN'S BASKET, GOLD ROOF. A gift lasts that one job and only ever helps.
 ## Try envs (arcade/whats_new.gd): TS_MODE=gentle|brave|hard (skips the mode pick), TS_TRY=blocks (every special
-## block open) | weather (jobs start three levels up, with weather events).
+## block open) | weather (jobs start three levels up, with weather events) | gifts (a gift pick before the first job,
+## every gift open).
 ## Built on the shared engine (see games/engine_template/main.gd and docs/engine/).
 
 const NetScript := preload("res://core/net.gd")
@@ -53,6 +57,7 @@ const PicksScript := preload("res://games/tower_stack/picks.gd")
 const RollersScript := preload("res://games/tower_stack/rollers.gd")
 const GreenScript := preload("res://games/tower_stack/green.gd")
 const SeasonScript := preload("res://games/tower_stack/season.gd")
+const Gifts := preload("res://games/tower_stack/gifts.gd")
 const BUILD_PICS := {"lighthouse": "lighthouse", "castle": "castle", "clock": "clocktower", "windmill": "windmill", "nest": "birdnest"}
 const SPECIAL_LINES := {4: ["Bouncy block!", "bouncyblock"], 5: ["Sticky honey block!", "honeyblock"], 6: ["Balloon block!", "balloonblock"]}
 const WREN_COLOR := Color(0.62, 0.42, 0.25)
@@ -215,6 +220,14 @@ var try_rolls := false  # TS_TRY=rollers (and bots): a roll early in every job
 var round_rolls := 0
 var roll_hits := 0  # TV builders bowled over (this machine's local players)
 var unwarned_hits := 0  # hits by a ball whose lane showed for less than Rollers.MIN_WARN (must stay 0)
+# Fourth pass: Wren's gifts (gifts.gd).
+var gifts: Node3D  # every machine: the pennant beside the stage shows the gift that's on
+var gift := ""  # host / local: the gift on for this job ("" none); shared as the "gift" state
+var try_gifts := false  # TS_TRY=gifts: a gift pick before the first job, every gift open
+var gift_parity := 0  # later jobs n with n % 2 == this get a gift pick (the others the builder pick); bots flip it
+var round_gifts: Array = []  # gifts the team chose this round (telemetry)
+var gift_uses := 0  # host: times a gift really helped (Wren's basket drops, a gold roof)
+var gift_bonus := 0  # host: bonus score the gold roof gave this round
 
 
 func _ready() -> void:
@@ -233,7 +246,7 @@ func _ready() -> void:
 	party.player_left.connect(_on_player_left)
 	save = Save.new()
 	save.game_id = GAME_ID
-	save.defaults = {"best": 0.0, "built": 0, "town": [], "daily": "", "sessions": 0, "mode": "brave"}
+	save.defaults = {"best": 0.0, "built": 0, "town": [], "daily": "", "sessions": 0, "mode": "brave", "last_gift": ""}
 	add_child(save)
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -275,7 +288,8 @@ func _log_round(end: String) -> void:
 		"built": int(save.data.built), "town": (save.data.town as Array).size(), "mode": game_mode,
 		"districts": Districts.reached(int(save.data.built)), "events": round_events, "specials": round_specials,
 		"glued": specials.glues_made if specials != null else 0, "chose": round_builds, "season": season,
-		"rolls": round_rolls, "bowled": roll_hits, "green": GreenScript.grown(int(save.data.built))})
+		"rolls": round_rolls, "bowled": roll_hits, "green": GreenScript.grown(int(save.data.built)), "gift": round_gifts,
+		"gift_uses": gift_uses + (specials.mortar_glues if specials != null else 0), "gift_bonus": gift_bonus})
 	save.save_now()
 
 
@@ -303,6 +317,8 @@ func _setup(mode: String) -> void:
 			try_bonus = 3
 		"rollers":
 			try_rolls = true
+		"gifts":
+			try_gifts = true
 	_build_world()
 	if mode != "host" or flat_host:  # every machine with a screen of its own (a flat host too)
 		split = SplitView.new()
@@ -416,6 +432,8 @@ func _build_world() -> void:
 	add_child(green)
 	season_node = SeasonScript.new()
 	add_child(season_node)
+	gifts = Gifts.new()
+	add_child(gifts)
 	if net.mode != "client":
 		specials = SpecialsScript.new()
 		add_child(specials)
@@ -872,6 +890,8 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			season_node.dress(season)
 			if not site.is_empty():
 				_apply_site(site)
+		"gift":
+			gifts.show_gift(String(value))
 		"orbs":
 			if net.mode == "client" and value is Array and (value as Array).size() >= 2:
 				picks.show_row(String(value[0]), value[1] if value[1] is Array else [])
@@ -918,6 +938,10 @@ func _start_round() -> void:
 	round_specials = 0
 	round_builds = []
 	round_rolls = 0
+	round_gifts = []
+	gift_uses = 0
+	gift_bonus = 0
+	_set_gift("")
 	rollers.clear()
 	rollers.reset([])
 	picks.history = []
@@ -940,6 +964,9 @@ func _start_round() -> void:
 
 
 func _first_job() -> void:
+	if try_gifts and job_n == 0 and round_gifts.is_empty():
+		_begin_gift_pick()  # (TS_TRY=gifts: Wren's gifts straight away; _on_picked comes back here)
+		return
 	_next_job()
 	_spawn_block(PAD + Vector3(0.0, 6.0, 0.0))  # the first block bounces up for the giant (or the crane)
 
@@ -965,6 +992,46 @@ func _build_choices() -> Array:
 	var lv := G.level(n + try_bonus, int(save.data.built), game_mode)
 	var out := G.choices(session_seed, rn, n, lv, game_mode, _open_now())
 	return out if out.size() >= 2 else []
+
+
+## Host: before later job n, a gift pick (true) or the builder pick? Gifts every other job, and always before
+## TODAY'S TOWER (it has no builder pick).
+func _gift_due(n: int, build_choices: Array) -> bool:
+	return n >= 2 and (build_choices.is_empty() or n % 2 == gift_parity)
+
+
+## Host: WREN'S GIFTS: three gentle gifts on the orbs (core/pick_orbs.gd gift_choices; the newest always shows).
+func _begin_gift_pick() -> void:
+	var seed_value := Seeded.derive(session_seed, "gift%d_%d" % [int(net.state_get("round", 1)), job_n + 1])
+	var opts := Gifts.choices(int(save.data.built), String(save.data.get("last_gift", "")), seed_value, try_gifts)
+	var entries: Array = []
+	for id in opts:
+		entries.append(Gifts.entry(String(id)))
+	picks.begin("gift", entries, opts, _on_picked)
+	story("A gift from Wren!", "gift", WREN_COLOR)
+
+
+## Host: the gift on for this job (every machine shows its pennant from the "gift" state).
+func _set_gift(id: String) -> void:
+	gift = id
+	if specials != null and not Gifts.glues(id):
+		specials.end_mortar()
+	net.state_set("gift", id)
+	if gifts != null:
+		gifts.show_gift(id)
+
+
+## Host: the gift's numbers in force now (the game's real code reads these; bots check them).
+func wind_scale() -> float:
+	return Gifts.calm(gift)
+
+
+func snap_r() -> float:
+	return Gifts.snap_r(gift, SNAP_R)
+
+
+func pad_help() -> float:
+	return Gifts.pad_help(gift, G.PAD_HELP)
 
 
 func _begin_build_pick(choices: Array) -> void:
@@ -993,6 +1060,18 @@ func _on_picked(stage_name: String, opt: Variant, _by: int = -1) -> void:
 			var s := G.from_job(opt as Array)
 			round_builds.append(String(s.get("building", "")))
 			_next_job(s)
+		"gift":
+			var id := String(opt)
+			var gd := Gifts.of(id)
+			round_gifts.append(id)
+			save.data.last_gift = id
+			save.mark_dirty()
+			_set_gift(id)
+			story(String(gd.get("line", "A gift!")), String(gd.get("pic", "gift")), gd.get("color", WREN_COLOR))
+			if job_n == 0:
+				_first_job()
+			else:
+				_next_job()
 
 
 ## The special blocks open now: the districts Wren's town has grown (and TS_TRY=blocks).
@@ -1023,6 +1102,8 @@ func _next_job(chosen: Dictionary = {}) -> void:
 	print("Tower Stack job %d: %s level %d %s, %d blocks (%d special) to %.2f m, wind %.2f, sway %.3f, events %s, rolls %s, seed %d%s" % [
 		job_n, s.building, int(s.level), game_mode, (s.plan as Array).size(), int(s.specials), float(s.top), float(s.wind),
 		float(s.sway), str(s.events), str(rollers.rolls), seed_value, " (TODAY'S TOWER)" if daily else ""])
+	if gift != "":
+		print("Tower Stack job %d gift: %s" % [job_n, gift])
 	var beats: Array = []
 	if job_n == 1 and int(net.state_get("round", 1)) == 1:
 		beats.append(["Hi! I'm Wren!" if built == 0 else "Let's build!", "wren", WREN_COLOR])
@@ -1076,17 +1157,28 @@ func _tower_built() -> void:
 			bstate[id] = "done"
 			(blocks[id] as RigidBody3D).freeze = true
 	awards.add(0, "built")
+	var extra := Gifts.bonus(gift)
+	if extra > 0:  # WREN'S GOLD ROOF: every builder scores bonus blocks
+		var who: Array = [0] if vr_rig != null or net.mode == "host" else []
+		for slot in party.active_slots():
+			if not who.has(int(slot)):
+				who.append(int(slot))
+		for slot in who:
+			awards.add(int(slot), "score", float(extra))
+		gift_bonus += extra * who.size()
+		gift_uses += 1
+		print("GIFT capstone: +%d blocks for %d builders" % [extra, who.size()])
 	print("Tower built: %s in %.1f s%s (%d this round, %d in all)" % [site.building, job_t, " PERFECT" if perfect else "", built_round, int(save.data.built)])
-	built_fx(Vector3(top_xz.x, tower_h, top_xz.y), perfect)
+	built_fx(Vector3(top_xz.x, tower_h, top_xz.y), perfect, extra > 0)
 
 
-## Every machine: roof pops on, Wren hops up, fanfare.
-func built_fx(top: Vector3, perfect: bool) -> void:
+## Every machine: roof pops on (golden with Wren's GOLD ROOF gift: +bonus over it), Wren hops up, fanfare.
+func built_fx(top: Vector3, perfect: bool, gold := false) -> void:
 	if site.is_empty():
 		return
 	if topper != null:
 		topper.queue_free()
-	topper = MeshKit.instance(Looks.topper_mesh(String(site.building), Looks.COLORS[int(site.palette[0])], bool(site.daily)))
+	topper = MeshKit.instance(Looks.topper_mesh(String(site.building), Looks.COLORS[int(site.palette[0])], bool(site.daily) or gold))
 	topper.position = top
 	add_child(topper)
 	topper.scale = Vector3.ONE * 0.01
@@ -1099,8 +1191,10 @@ func built_fx(top: Vector3, perfect: bool) -> void:
 	for slot in avatars:
 		Creatures.anim(avatars[slot]).play("cheer", 1.0)
 	green.cheer()
+	if gold:
+		HudKit.score(self, top + Vector3.UP * 0.9, Gifts.BONUS, {"color": Gifts.of("capstone").color, "size": 1.6})
 	if net.mode != "client":
-		net.event("built", [top, perfect])
+		net.event("built", [top, perfect, gold])
 
 
 ## Host: the finished tower flies off to the town (its blocks go), and Wren asks for the next one.
@@ -1127,8 +1221,11 @@ func _tower_to_town() -> void:
 			story("New: " + String(SPECIAL_LINES[k][0]).to_lower().capitalize(), String(SPECIAL_LINES[k][1]), Looks.block_color(0, k))
 	elif TOWN_CHEERS.has(count):
 		story(TOWN_CHEERS[count], "house", Looks.COLORS[int(site.palette[0])])
+	_set_gift("")  # (a gift lasts one job)
 	var choices := _build_choices()
-	if choices.is_empty():
+	if _gift_due(job_n + 1, choices):
+		_begin_gift_pick()
+	elif choices.is_empty():
 		_next_job()
 	else:
 		_begin_build_pick(choices)
@@ -1144,6 +1241,7 @@ func _end_round() -> void:
 		"style": "victory", "stats": [["TOWERS", str(built_round)], ["TALLEST", "%.1f m" % rec], ["TOWN", str((save.data.town as Array).size())]],
 		"score_format": "%d BLOCKS", "continue": "Play again"})
 	_log_round("time")
+	_set_gift("")
 	net.state_set("results", data)
 	net.state_set("phase", "results")
 	results_t = 0.0
@@ -1239,8 +1337,10 @@ func _process(delta: float) -> void:
 		_maybe_spawn()
 	# Helpers busy or stuck? Wren drops the block the plan needs next straight onto the pad.
 	pad_idle_t = pad_idle_t + delta if hover.has(-1) and done_t < 0.0 else 0.0
-	if pad_idle_t > G.PAD_HELP and blocks.size() < MAX_BLOCKS:
+	if pad_idle_t > pad_help() and blocks.size() < MAX_BLOCKS:
 		pad_idle_t = 0.0
+		if pad_help() < G.PAD_HELP:
+			gift_uses += 1  # (Wren's basket brought it sooner)
 		_spawn_block(PAD + Vector3(0.0, 6.0, 0.0), _needed_kind())
 	height_t -= delta
 	if height_t <= 0.0:
@@ -1449,8 +1549,11 @@ func _measure_job() -> void:
 	var plan: Array = site.plan
 	var mask := 0
 	for i in plan.size():
-		if _spot_block(plan[i]) >= 0:
+		var at := _spot_block(plan[i])
+		if at >= 0:
 			mask |= 1 << i
+			if Gifts.glues(gift) and specials != null:  # STICKY MORTAR: a block in its spot glues down like honey
+				specials.mortar(at, blocks[at])
 	if mask != fill:
 		fill = mask
 		net.state_set("fill", mask)
@@ -1485,8 +1588,9 @@ func _spot_block(b: Array) -> int:
 func _weather(_delta: float) -> void:
 	if site.is_empty():
 		return
-	var sway := float(site.sway)
-	var ev: Vector2 = weather.extra(job_t) if done_t < 0.0 and not results_showing() else Vector2.ZERO
+	var k := wind_scale()  # Wren's CALM FLAG: everything pushes half as hard
+	var sway := float(site.sway) * k
+	var ev: Vector2 = (weather.extra(job_t) if done_t < 0.0 and not results_showing() else Vector2.ZERO) * k
 	if (sway > 0.0 or ev.y > 0.0) and stage is AnimatableBody3D:
 		var w := TAU / maxf(1.0, float(site.sway_period))
 		var a := clock * w * 0.3
@@ -1497,7 +1601,7 @@ func _weather(_delta: float) -> void:
 	elif tilt != Vector2.ZERO:
 		tilt = Vector2.ZERO
 		stage.rotation = Vector3.ZERO
-	var wind := float(site.wind)
+	var wind := float(site.wind) * k
 	if (wind <= 0.0 and ev.x <= 0.0) or results_showing():
 		return
 	var gust := 0.7 + 0.3 * sin(clock * 1.1) * sin(clock * 0.37 + 1.0)
@@ -1839,7 +1943,7 @@ func _snap_to_plan(id: int) -> void:
 			continue
 		var at := Vector3(float(b[1]), float(b[2]), float(b[3]))
 		var p := rb.global_position
-		if Vector2(p.x - at.x, p.z - at.z).length() < SNAP_R and p.y > at.y - 0.15 and p.y < at.y + 0.45:
+		if Vector2(p.x - at.x, p.z - at.z).length() < snap_r() and p.y > at.y - 0.15 and p.y < at.y + 0.45:
 			rb.global_transform = Transform3D(Basis(Vector3.UP, PI * 0.5 * int(b[4])), Vector3(at.x, maxf(p.y, at.y + 0.03), at.z))
 			_poke(id, 0.4)
 			return
@@ -2050,7 +2154,7 @@ func apply_event(kind: String, args: Array) -> void:
 			if party.is_local(int(args[0])):
 				_hop(int(args[0]))
 		"built":
-			built_fx(args[0], bool(args[1]))
+			built_fx(args[0], bool(args[1]), args.size() > 2 and bool(args[2]))
 		"story":
 			story(String(args[0]), String(args[1]), args[2], false, args.size() > 3 and bool(args[3]))
 		"weather":

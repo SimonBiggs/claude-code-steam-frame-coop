@@ -12,6 +12,10 @@ extends Node
 ## Third pass: Rolo rolls a ball early in every job (try_rolls): its lane is told on every machine before the ball
 ## rolls, nobody is ever bowled over by a ball whose lane showed too briefly, the green shows Wren's neighbours, and
 ## every machine dresses for the host's season.
+## Fourth pass: WREN'S GIFTS. The first finished tower leads to a gift pick (gift_parity 0); once a gift worked the bot
+## flips gift_parity so job 2 is a builder pick again (both picks run). The host checks the gift the team took
+## is on for the next job with its real effect in force (calm wind, wider snap, quicker basket, gold roof bonus), and
+## every machine sees it in the "gift" state (kit.seen_values) with its pennant beside the stage.
 
 const BotKit := preload("res://tests/bot_kit.gd")
 const VrRig := preload("res://core/vr_rig.gd")
@@ -37,6 +41,10 @@ var cheer_was := -1.0
 var cheer_round := 0
 var lanes_seen := 0  # most of Rolo's lane tells seen at once (every machine)
 var balls_seen := 0  # most balls rolling at once
+var gift_want := ""  # host: the gift the bot walked to
+var gift_ok := 0  # host: gifted jobs that started with the gift on and its effect in force
+var gift_bad := 0
+var gift_poles := 0  # every machine: frames the gift pennant showed with a gift on
 
 
 func _ready() -> void:
@@ -124,6 +132,8 @@ func _physics_process(delta: float) -> void:
 	lanes_seen = maxi(lanes_seen, main.rollers.rings.count())
 	balls_seen = maxi(balls_seen, main.rollers.balls().size())
 	_watch_picks()
+	if main.gifts.gift != "" and main.gifts.pole.visible:
+		gift_poles += 1
 	var slots: Array[int] = main.party.local_slots()
 	jump_t -= delta
 	if not main.picks.orbs.orbs.is_empty() and not slots.is_empty():
@@ -153,6 +163,17 @@ func _watch_picks() -> void:
 		cheers_done += 1
 	cheer_was = main.done_t
 	cheer_round = rn
+	if gift_ok >= 1 and main.gift_parity == 0:
+		main.gift_parity = 1  # once a gift worked, job 2 is a builder pick again (both picks run)
+	if main.picks.stage == "gift" and main.picks.chosen >= 0 and gift_want == "":
+		gift_want = String(main.picks.options[main.picks.chosen])
+	if gift_want != "" and main.job_n != job_seen and main.picks.stage == "":
+		if main.gift == gift_want and _gift_in_force(gift_want):
+			gift_ok += 1
+		else:
+			gift_bad += 1
+			print("BOT gift %s: on %s, in force %s" % [gift_want, main.gift, str(_gift_in_force(gift_want))])
+		gift_want = ""
 	if main.picks.stage == "build" and main.picks.chosen >= 0 and pick_want == "":
 		var opt: Array = main.picks.options[main.picks.chosen]
 		pick_want = String(main.G.from_job(opt).building)
@@ -163,6 +184,20 @@ func _watch_picks() -> void:
 			pick_bad += 1
 		pick_want = ""
 	job_seen = main.job_n
+
+
+## The gift's numbers the game's real code reads are in force for the job (and only that gift's).
+func _gift_in_force(id: String) -> bool:
+	match id:
+		"flag":
+			return main.wind_scale() < 1.0 and main.snap_r() == main.SNAP_R
+		"mortar":
+			return main.snap_r() > main.SNAP_R and main.wind_scale() == 1.0
+		"basket":
+			return main.pad_help() < main.G.PAD_HELP
+		"capstone":
+			return main.Gifts.bonus(main.gift) > 0
+	return false
 
 
 func _walk_to_orb(slot: int) -> void:
@@ -383,6 +418,15 @@ func _checks() -> void:
 	kit.assert_true(main.season != "" and main.season == String(main.net.state_get("season", "")) and main.season_node.season == main.season, "%s: dressed for the host's season (%s)" % [mode, main.season])
 	kit.assert_eq(main.green.folk_count(), mini(int(main.net.state_get("made", 0)), main.GreenScript.SHOW), "%s: the green shows Wren's newest neighbours" % mode)
 	kit.assert_eq(main.green.piece_count(), main.GreenScript.grown(int(main.net.state_get("made", 0))), "%s: the green has grown its pieces" % mode)
+	# Fourth pass: Wren's gifts reach every machine.
+	var gifts_seen: Array = kit.seen_values("gift").filter(func(v: Variant) -> bool: return String(v) != "")
+	kit.info("%s: gifts seen %s, pennant frames %d" % [mode, str(gifts_seen), gift_poles])
+	var gift_rows := kit.seen_values("orbs").filter(func(v: Variant) -> bool: return v is Array and (v as Array).size() >= 1 and String(v[0]) == "gift")
+	var first_gift_pending: bool = gifts_seen.is_empty() and main.picks.showing() and main.picks.orbs.stage == "gift"
+	if (cheers_done >= 1 or not gift_rows.is_empty()) and not first_gift_pending:  # (a gift pick came: a cheer ended in play)
+		kit.assert_true(not gift_rows.is_empty(), "%s: Wren's gift orbs showed" % mode)
+		kit.assert_true(not gifts_seen.is_empty(), "%s: a gift was picked and shared (%s)" % [mode, str(gifts_seen)])
+		kit.assert_true(gift_poles > 0, "%s: the gift's pennant showed beside the stage" % mode)
 	if mode == "client":
 		kit.assert_eq(main.party.local_slots().size(), want, "client: all %d local players are seated" % want)
 		kit.assert_true(ghosts_seen > 0, "client: ghost blocks mirrored from the host")
@@ -408,9 +452,13 @@ func _checks() -> void:
 	# A tower counts as built when its roof goes on, but the build pick opens only after its CHEER, and never when
 	# the round runs out during it (2026-11-11: a tower finished in round 1's last seconds failed this). So: every
 	# tower whose cheer ended during play must have led to a pick (done, or still being chosen / about to start).
-	var pick_pending: bool = main.picks.active() or pick_want != ""
+	var pick_pending: bool = main.picks.active() or pick_want != "" or gift_want != ""
 	if cheers_done >= 1:
-		kit.assert_true(pick_ok >= 1 or pick_pending, "%s: after a tower the team chose the next building (%d)" % [mode, pick_ok])
+		kit.assert_true(pick_ok + gift_ok >= 1 or pick_pending, "%s: after a tower the team chose the next building or a gift (%d + %d)" % [mode, pick_ok, gift_ok])
+	kit.info("%s: gifts %s, uses %d, bonus %d, mortar glues %d" % [mode, str(main.round_gifts), main.gift_uses, main.gift_bonus, main.specials.mortar_glues])
+	kit.assert_true(gift_bad == 0, "%s: the gift taken is on for the next job with its effect in force (%d ok, %d wrong)" % [mode, gift_ok, gift_bad])
+	if cheers_done >= 1 and not main.picks.active():
+		kit.assert_true(gift_ok >= 1 or pick_ok >= 1, "%s: a pick after a finished tower started its job" % mode)
 	if mode == "local" and want >= 2:
 		kit.info("highest a TV player climbed: %.2f m" % max_climb)
 		kit.assert_true(max_climb > main.BASE_H + 0.3, "a TV player climbed onto the tower")
