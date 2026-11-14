@@ -61,7 +61,7 @@ func _ready() -> void:
 	# since core/pick_flow.gd a pick takes a moment: orbs open 0.8 s, then a short dwell). 42 s left no room for one
 	# toppled stack, so about 1 local run in 30 never finished a tower (2026-11-12); networked runs had the same 42 s and
 	# the same risk, so their checks moved 8 s later too (client finish 61 s, host checks 64 s, host finish 68 s).
-	main.set("round_time", 95.0 if lone else 48.0)
+	main.set("round_time", 95.0 if lone else (44.0 if OS.get_environment("TS_TRY") == "gifts" else 48.0))  # (TS_TRY=gifts: one more pick before job 1)
 	main.set("daily_ok", false)
 	main.set("try_open", 7)  # towergen OPEN_ALL: special blocks from job 2 on
 	main.set("try_rolls", true)  # TS_TRY=rollers: Rolo rolls a ball early in every job
