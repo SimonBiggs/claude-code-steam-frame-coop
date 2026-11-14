@@ -184,6 +184,8 @@ func _face_orbs() -> void:
 func can_pick(p) -> bool:
 	if not p.active or p.late:
 		return false
+	if p.remote and main.net.mode == "host" and not main.net.connected:
+		return false  # (a TV seat with no TV machine: nobody can walk it to an orb, never waited for: main.hider_count)
 	if stage == "mode":
 		return true
 	return (gift_side == "seeker" and p.index == 0) or (gift_side == "hider" and p.role == "hider")
