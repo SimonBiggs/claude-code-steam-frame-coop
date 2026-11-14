@@ -414,6 +414,16 @@ func _restore_menu_state() -> void:
 	if st is Dictionary:
 		selected = clampi(int(st.get("selected", 0)), 0, GAMES.size() - 1)
 		cat = int(st.get("cat", 0))
+	elif OS.has_environment("DUO_RESUME_GAME"):
+		# Restarted by core/vr_watch.gd (VR stopped / rejoined): the game they were playing is picked again.
+		var id := OS.get_environment("DUO_RESUME_GAME")
+		OS.unset_environment("DUO_RESUME_GAME")
+		for i in GAMES.size():
+			if str(GAMES[i].id) == id:
+				selected = i
+				cat = -1  # _build_tv_menu picks its tab (and skips the fresh-arcade Trophy Hall start)
+				print("Arcade: back on %s (restarted by core/vr_watch.gd)" % id)
+				get_tree().root.set_meta("arcade_menu_state", {"selected": selected, "cat": cat})
 
 
 @rpc("any_peer", "call_remote", "reliable")

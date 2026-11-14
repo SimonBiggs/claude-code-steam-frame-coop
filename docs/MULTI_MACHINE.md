@@ -125,6 +125,26 @@ seats = ClassicSeats.new(self, {"no_keys": PlayerScript.NO_KEYS, "free_actions":
 - Check: `godot-test --headless --path . -s res://tests/classic_seats_test.gd` (every multi_machine classic
   game uses the helper, no seat-code copies, arcade `"multi"` matches, the helper's arbitration).
 
+## When SteamVR crashes (core/vr_watch.gd + tools/gdev RESTART)
+
+2026-11-13 18:19: the Frame's stream to SteamVR never delivered a frame (vrcompositor: no vsync from the vrlink driver
+from the first second, `AcquireSync: Couldn't find a backbuffer`), the link went inactive, vrserver's own watchdog
+aborted it ("Failed Watchdog timeout in thread Connection after 21 s"), then vrcompositor and Steam aborted, and 13 s
+later SteamVR's client library inside the arcade (vrclient.so, `pipes.cpp: Stalled cross-thread pipe ... Fatal
+assert`) abort()ed the arcade. Nothing of ours caused it: first SteamVR run since the Frame updated to 0.5.8
+(20261106) on SteamVR 2.18.4 (the last good session, 2026-10-24, was Frame 0.5.6 and ended gracefully). An abort
+inside vrclient.so can't be caught in GDScript, so:
+- **VrWatch (a service)**: while VR is live it arms gdev's restart file ("if I crash, start me flat"); when OpenXR
+  says the session/instance is going (session_loss_pending, instance_exiting) or the vrserver process vanishes, it
+  saves, asks for the restart now and stops itself before vrclient can abort it. The flat run (`--xr-mode off`,
+  DUO_VR_LOST) shows "VR stopped — put the headset back on to rejoin", networks like a TV (Decks find it again) and
+  the arcade is back on the same game (DUO_RESUME_GAME). When vrserver runs again and Steam's driver_vrlink.txt says
+  the headset connected after that start, it restarts INTO VR from the arcade menu (never out of a TV game).
+- **gdev run** only restarts what the game asked for (crash signal with the file armed, or `"now": true`), at most 4
+  times in 2 minutes, saying so in the log and on the brepl channel. Launchers stay dumb; decisions are in vr_watch.gd.
+- Tests: tests/vr_watch_test.gd (log reading, specs, guards), tools/vr-survive-test (end to end with a fake VR
+  session and a fake vrserver: kill it, SIGABRT the game, headset back, SIGTERM).
+
 ## Deploys while playing (core/safe_apply.gd)
 
 Deploys reach every machine straight away (duo-deploy rsync, LAN updates), but new code only **switches on at a
