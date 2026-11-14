@@ -60,6 +60,10 @@ func _ready() -> void:
 	kit.at(1.2, "quick picks", func() -> void:
 		if main.picks != null:
 			main.picks.wait_scale = 0.4)
+	if host:  # (while the TV machines are still connected: they leave before the host's end)
+		kit.at(30.0, "host: everyone seated", func() -> void:
+			var host_p := 0 if main.net.has_vr else 1  # (a flat host seats its own pad; a VR host never does)
+			kit.assert_eq(kit.seated(), kit.seated_want(want, host_p), "host: every TV machine's players (+%d on the host) are seated" % host_p))
 	kit.every(4.0, _report)
 	kit.every(0.25, _watch)
 	var full := 150.0 if host else (140.0 if client else 120.0)
@@ -251,9 +255,8 @@ func _checks() -> void:
 	kit.assert_true(main.ready_to_play, "the game started (%s)" % mode)
 	if mode == "client":
 		kit.assert_true(main.party.local_slots().size() == want, "client: all %d local players are seated" % want)
-	elif mode == "local" or main.vr_rig == null:
-		var host_p := 1 if mode == "host" else 0
-		kit.assert_eq(kit.seated(), kit.seated_want(want if mode == "local" else 0, host_p), "%s: the TV players are seated" % mode)
+	elif mode == "local":
+		kit.assert_eq(kit.seated(), want, "local: the TV players are seated")
 	kit.assert_true(not island_keys.is_empty(), "%s: an island was built" % mode)
 	kit.assert_true(max_bolts > 0, "%s: bolts were collected (%d)" % [mode, max_bolts])
 	if mode != "client":
