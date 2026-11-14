@@ -19,6 +19,7 @@ const SERVICES := [
 	{"name": "TelemetryPush", "path": "res://core/telemetry_push.gd"},
 	{"name": "VrTextGuard", "path": "res://core/vr_text_guard.gd", "meta": "vr_text_guard"},
 	{"name": "VrLayerGuard", "path": "res://core/vr_layer_guard.gd"},
+	{"name": "VrWatch", "path": "res://core/vr_watch.gd"},  # the arcade survives SteamVR crashing (back flat, rejoins)
 	{"name": "VrViewWatch", "path": "res://core/vr_view_watch.gd", "needs": "res://tests/bot_end.gd"},
 	{"name": "QuitAfter", "path": "res://core/quit_after.gd", "needs": "res://tests/bot_end.gd"},
 ]

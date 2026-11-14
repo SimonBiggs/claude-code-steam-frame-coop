@@ -1,0 +1,93 @@
+#!/bin/bash
+# vr-survive-test [PROJECT]: end-to-end check that the arcade survives the VR runtime dying (core/vr_watch.gd +
+# tools/gdev RESTART), with a FAKE VR session and a FAKE vrserver, so it never touches SteamVR, the TV or the Frame:
+#   headless godot-test under `gdev run`, BOT_VR=1 + VR_WATCH_FAKE=1 (a live "session"), VR_WATCH_SERVER=<a copy of
+#   sleep named fakevrsrv> (the "vrserver"), VR_WATCH_LINK_LOG=<a scratch file> (the vrlink headset log).
+#  1 in a game, VR live -> the restart is armed (.dev/restart.json, "now": false)
+#  2 kill the fake vrserver -> the game stops itself; gdev restarts it flat (--xr-mode off, DUO_VR_LOST), the card
+#    shows, the arcade is back on the same game
+#  3 the fake vrserver runs again + the log says the headset connected -> restart INTO VR (DUO_VR_REJOIN), live again
+#  4 SIGABRT the game while in VR (what vrclient.so did on 2026-11-13) -> gdev restarts it flat
+#  5 SIGTERM gdev (Steam stopping the game) -> the game stops too, no restart
+# Prints VR SURVIVE: PASS / FAIL. Uses the project's .dev/ (a worktree's, never the live dir).
+set -u
+PROJ=$(realpath "${1:-$PWD}")
+case "$PROJ" in "$HOME/GodotProjects/duo-arena") echo "VR SURVIVE: FAIL never in the live dir"; exit 2;; esac
+T=$(mktemp -d)
+LOG="$PROJ/.dev/game.log"
+FAILS=0
+SRV=""
+GD=""
+cleanup() {
+  [ -n "$GD" ] && kill "$GD" 2>/dev/null
+  [ -n "$SRV" ] && kill "$SRV" 2>/dev/null
+  sleep 1
+  pkill -f -- "--path $PROJ" 2>/dev/null
+  rm -rf "$T"
+}
+trap cleanup EXIT
+ok() { echo "  ok   $*"; }
+bad() { echo "  FAIL $*"; FAILS=$((FAILS + 1)); }
+# wait_for SECONDS FILE PATTERN: until grep -q PATTERN FILE
+wait_for() {
+  local end=$((SECONDS + $1))
+  while [ $SECONDS -lt $end ]; do grep -q -- "$3" "$2" 2>/dev/null && return 0; sleep 0.5; done
+  return 1
+}
+game_pid() { cat "$PROJ/.dev/pid" 2>/dev/null; }
+stamp() { LC_ALL=C date +"%a %b %d %Y %H:%M:%S.000000"; }
+
+cp /usr/bin/sleep "$T/fakevrsrv"
+"$T/fakevrsrv" 100000 & SRV=$!
+: > "$T/link.txt"
+unset XR_RUNTIME_JSON  # never a real runtime
+export GDEV_GODOT=godot-test GDEV_GODOT_ARGS="--headless --audio-driver Dummy" DUO_PORT=$((20000 + RANDOM % 9999))
+export DUO_SOLO=1 BOT_VR=1 VR_WATCH_FAKE=1 VR_WATCH_SERVER=fakevrsrv VR_WATCH_LINK_LOG="$T/link.txt"
+export ARCADE_GAME=snowball_blitz
+"$PROJ/tools/gdev" run "$PROJ" > "$T/gdev.out" 2>&1 & GD=$!  # this checkout's gdev (the one being tested)
+
+echo "1 VR live in a game: restart armed"
+if wait_for 60 "$LOG" "VrWatch: VR session live" && wait_for 10 "$PROJ/.dev/restart.json" '"now":false'; then
+  ok "armed: $(cat "$PROJ/.dev/restart.json")"
+else bad "no live session / armed restart file"; tail -20 "$LOG"; exit 1; fi
+wait_for 15 "$PROJ/.dev/restart.json" 'snowball_blitz' && ok "armed for the game being played" || bad "restart file doesn't name snowball_blitz"
+P1=$(game_pid)
+
+echo "2 the fake vrserver dies -> back flat"
+kill "$SRV"; SRV=""
+if wait_for 20 "$T/gdev.out" "restarting as it asked"; then ok "$(grep 'restarting as it asked' "$T/gdev.out" | tail -1)"; else bad "gdev didn't restart the game"; fi
+wait_for 60 "$LOG" "VrWatch: flat after VR stopped" && ok "flat run knows VR stopped" || bad "no 'flat after VR stopped' in the new run"
+P2=$(game_pid)
+[ "$P2" != "$P1" ] && tr '\0' ' ' < "/proc/$P2/cmdline" | grep -q -- "--xr-mode off" && ok "new game pid $P2 runs --xr-mode off" || bad "restarted game isn't --xr-mode off"
+wait_for 20 "$LOG" "VrWatch: card shown" && ok "card shown" || bad "no VR stopped card"
+grep -q "Arcade: back on snowball_blitz" "$LOG" && ok "arcade back on the same game" || bad "arcade didn't pick snowball_blitz again"
+grep -q "SCRIPT ERROR" "$LOG" && bad "SCRIPT ERRORs in the flat run: $(grep -m3 -A3 'SCRIPT ERROR' "$LOG")"
+sleep 3
+grep -q "headset is back" "$LOG" && bad "rejoined without a headset (stale log?)"
+
+echo "3 headset back -> restart into VR"
+"$T/fakevrsrv" 100000 & SRV=$!
+echo "$(stamp) [Info] - vrserver 2.18.4 startup with PID=$SRV, config=x" >> "$T/link.txt"
+sleep 1.2
+echo "$(stamp) [Info] - ReceivedHMDStaticProps. Model Number: Deckard MP, Serial Number: TEST" >> "$T/link.txt"
+if wait_for 20 "$T/gdev.out" "headset is back"; then ok "restarting into VR"; else bad "headset back not noticed"; tail -5 "$LOG"; fi
+wait_for 60 "$LOG" "VrWatch: restarted to rejoin VR" && wait_for 20 "$LOG" "VrWatch: VR session live" && ok "VR live again after rejoin" || bad "rejoin run has no VR session"
+wait_for 10 "$PROJ/.dev/restart.json" '"now":false' && ok "re-armed" || bad "rejoin run not re-armed"
+
+echo "4 SIGABRT the game in VR (vrclient.so's abort) -> back flat"
+P3=$(game_pid)
+kill -ABRT "$P3"
+if wait_for 30 "$T/gdev.out" "crashed (signal SIGABRT); restarting"; then ok "gdev restarted after SIGABRT"; else bad "no restart after SIGABRT"; fi
+wait_for 60 "$LOG" "VrWatch: flat after VR stopped" && ok "flat after the abort" || bad "not flat after the abort"
+
+echo "5 SIGTERM gdev (Steam stops the game) -> game stops, no restart"
+P4=$(game_pid)
+kill -TERM "$GD"
+for _ in $(seq 20); do kill -0 "$GD" 2>/dev/null || break; sleep 0.5; done
+kill -0 "$GD" 2>/dev/null && bad "gdev still running after SIGTERM" || ok "gdev ended"
+sleep 1
+kill -0 "$P4" 2>/dev/null && bad "game $P4 still running after gdev was stopped" || ok "game stopped with it"
+GD=""
+echo "--- gdev said:"; grep "^\[gdev\]" "$T/gdev.out"
+echo "VR SURVIVE: $([ $FAILS -eq 0 ] && echo PASS || echo FAIL) ($FAILS problems)"
+exit $FAILS

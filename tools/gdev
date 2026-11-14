@@ -6,7 +6,8 @@
 """gdev: run a Godot project in the background with hot reload and screen recording.
 
   gdev start [DIR]        install the bridge autoload and launch the game detached
-  gdev run [DIR]          like start, but stays in the foreground until the game exits (for Steam)
+  gdev run [DIR]          like start, but stays in the foreground until the game exits (for Steam); restarts
+                          the game when IT asked for that (see RESTART below)
   gdev stop | status
   gdev restart [--hard]   soft: reload the scene in place; hard: relaunch the process
   gdev send CMD...        raw bridge command (pause, resume, record on|off, quit)
@@ -18,10 +19,21 @@
                           now | -30s | 2m ago | 15:42 | 15:42:10 | unix epoch
 
 The project is found from -C DIR, then the current directory upward, then the last one started.
+
+RESTART (gdev run only). The launcher decides nothing; the game does. A game may write <project>/.dev/restart.json
+(path also in env GDEV_RESTART_FILE; GDEV_SUPERVISED=1 says someone reads it):
+  {"args": [...extra godot args], "env": {NAME: value}, "unset": [NAME...], "now": bool, "reason": "..."}
+gdev run starts it again with those args / env when the game died of a crash signal (ABRT, SEGV, BUS, ILL, FPE: e.g.
+SteamVR's vrclient.so aborting the game when vrserver dies, 2026-11-13) or exited any way with "now": true (the game
+asked). No file, or a normal exit / SIGTERM, ends gdev run as before. Each start deletes the file (start unarmed);
+more than 4 restarts in 2 minutes stops trying (said in the log and on the brepl channel, never quietly).
+Tests: GDEV_GODOT (default: godot on PATH) and GDEV_GODOT_ARGS (e.g. "--headless") change how Godot is started.
 """
 import argparse
 import datetime as dt
+import json
 import os
+import shlex
 import re
 import shutil
 import signal
@@ -122,26 +134,114 @@ def send(proj: Path, line: str) -> None:
 
 # --- Commands ----------------------------------------------------------------
 
+CRASH_SIGNALS = {signal.SIGABRT, signal.SIGSEGV, signal.SIGBUS, signal.SIGILL, signal.SIGFPE}
+RESTART_LIMIT = 4  # restarts allowed ...
+RESTART_WINDOW = 120.0  # ... in this many seconds
+
+
+def restart_file(proj: Path) -> Path:
+    return dev_dir(proj) / "restart.json"
+
+
+def _say(proj: Path, msg: str) -> None:
+    """A supervisor line: printed, in the game log and on the brepl channel (never a quiet restart)."""
+    print(msg, file=sys.stderr)
+    try:
+        with open(dev_dir(proj) / "game.log", "a") as f:
+            f.write(msg + "\n")
+    except OSError:
+        pass
+    try:
+        subprocess.run(["brepl", "--pipe", "gdev"], input=msg + "\n", text=True, timeout=5,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass  # printed and logged above
+
+
+def _restart_spec(proj: Path, code: int) -> dict | None:
+    """What the game asked for (restart.json), if this exit should restart it; None = gdev run ends."""
+    f = restart_file(proj)
+    try:
+        spec = json.loads(f.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(spec, dict):
+        return None
+    crashed = code < 0 and -code in CRASH_SIGNALS
+    return spec if crashed or spec.get("now") else None
+
+
 def cmd_run(proj: Path, args) -> None:
-    """Foreground launch (for Steam shortcuts): replaces any running instance and waits for the game."""
+    """Foreground launch (for Steam shortcuts): replaces any running instance and waits for the game, starting it
+    again when the game asked for that (RESTART in the help)."""
     if pid_of(proj):
         cmd_stop(proj, args)
-    args.wait = True
-    cmd_start(proj, args)
+    args.wait = False
+    stopping = {"sig": 0}
+    game = {"pid": 0}
+
+    def forward(sig, _frame):  # Steam / a terminal stopping us stops the game too (and no restart)
+        stopping["sig"] = sig
+        if game["pid"]:
+            try:
+                os.killpg(game["pid"], signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+
+    for s in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP):
+        signal.signal(s, forward)
+    restarts: list[float] = []
+    extra_args: list[str] = []
+    extra_env: dict = {}
+    unset: list = []
+    while True:
+        restart_file(proj).unlink(missing_ok=True)  # every start begins unarmed
+        p = cmd_start(proj, args, extra_args, extra_env, unset)
+        if p is None:
+            return
+        game["pid"] = p.pid
+        if stopping["sig"]:  # stopped while it was starting
+            forward(stopping["sig"], None)
+        code = p.wait()
+        if stopping["sig"]:
+            sys.exit(code)
+        spec = _restart_spec(proj, code)
+        if spec is None:
+            sys.exit(code)
+        now = time.time()
+        restarts = [t for t in restarts if now - t < RESTART_WINDOW] + [now]
+        how = f"crashed (signal {signal.Signals(-code).name})" if code < 0 else f"exited ({code})"
+        if len(restarts) > RESTART_LIMIT:
+            _say(proj, f"[gdev] {proj.name} {how}: NOT restarting, {len(restarts) - 1} restarts in "
+                       f"{RESTART_WINDOW:.0f} s already ({spec.get('reason', '')})")
+            sys.exit(code)
+        extra_args = [str(a) for a in spec.get("args", [])]
+        extra_env = {str(k): str(v) for k, v in dict(spec.get("env", {})).items()}
+        unset = [str(k) for k in spec.get("unset", [])]
+        _say(proj, f"[gdev] {proj.name} {how}; restarting as it asked: {spec.get('reason', '')} "
+                   f"args={extra_args} env={extra_env} unset={unset}")
 
 
-def cmd_start(proj: Path, args) -> None:
+def cmd_start(proj: Path, args, extra_args: list | None = None, extra_env: dict | None = None,
+              unset: list | None = None) -> subprocess.Popen | None:
     if pid := pid_of(proj):
         print(f"already running (pid {pid}); use gdev restart [--hard]")
-        return
+        return None
     install(proj)
     d = dev_dir(proj)
     log = d / "game.log"
     if log.exists():
         log.replace(d / "game.log.1")
-    godot = shutil.which("godot") or str(Path.home() / ".local/bin/godot")
+    godot = os.environ.get("GDEV_GODOT") or shutil.which("godot") or str(Path.home() / ".local/bin/godot")
+    env = dict(os.environ)
+    for k in unset or []:
+        env.pop(k, None)
+    env.update(extra_env or {})
+    env["GDEV_SUPERVISED"] = "1" if args.cmd == "run" else ""
+    env["GDEV_RESTART_FILE"] = str(restart_file(proj))
+    cmd = [godot, *shlex.split(os.environ.get("GDEV_GODOT_ARGS", "")), "--path", str(proj), *(extra_args or [])]
     with open(log, "w") as out:
-        p = subprocess.Popen([godot, "--path", str(proj)], stdout=out, stderr=subprocess.STDOUT,
+        p = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, env=env,
                              stdin=subprocess.DEVNULL, start_new_session=True)
     (d / "pid").write_text(str(p.pid))
     LAST_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -149,13 +249,14 @@ def cmd_start(proj: Path, args) -> None:
     for _ in range(50):
         time.sleep(0.2)
         if p.poll() is not None:
+            if args.cmd == "run":
+                break  # cmd_run decides (a crash at start may still be a restart the game asked for)
             print(log.read_text()[-3000:])
             sys.exit(f"gdev: game exited with code {p.returncode}")
         if "bridge ready" in log.read_text(errors="replace"):
             break
     print(f"started {proj.name} (pid {p.pid}), log: {log}")
-    if getattr(args, "wait", False):
-        sys.exit(p.wait())
+    return p
 
 
 def cmd_stop(proj: Path, args) -> None:
