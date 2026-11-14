@@ -125,7 +125,7 @@ func think(r: Node3D, level: Node, boss: Node, delta: float) -> void:
 	# Not on the step's floor yet: get there.
 	if not r.is_on_floor():
 		var f := Vector3(tp.x - pos.x, 0.0, tp.z - pos.z)
-		out_move = _toward(f, 0.0)
+		out_move = _toward(f, 0.5 if level.support(Vector3(tp.x, tp.y + 0.05, tp.z), 0.3, 0.3) == want else 0.0)
 		out_hold = tp.y > pos.y - 0.2 or f.length() > 1.5
 		return
 	var dir := Vector3(tp.x - pos.x, 0.0, tp.z - pos.z)

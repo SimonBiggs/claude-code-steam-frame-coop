@@ -64,7 +64,7 @@ func _ready() -> void:
 	kit.every(0.25, _watch)
 	var full := 150.0 if host else (140.0 if client else 120.0)
 	var end: float = preload("res://tests/bot_end.gd").end_at(full)
-	short = end < full - 1.0
+	short = preload("res://tests/bot_end.gd").short_run(48.0)  # (an island takes the bots 15-35 s)
 	kit.at(end, "finish", func() -> void:
 		_checks()
 		kit.finish())
@@ -73,6 +73,10 @@ func _ready() -> void:
 func _watch() -> String:
 	if not main.ready_to_play:
 		return ""
+	if OS.has_environment("SKY_DEBUG") and not brains.is_empty() and not main.level.lv.is_empty() and (brains.values()[0] as Brain).k >= 4:
+		var br0: Brain = brains.values()[0]
+		var r1: CharacterBody3D = main.robots.values()[0]
+		print("DBG2 t %.2f pos %s v %s floor %s k %d move %s jump %s hold %s" % [kit.t, r1.position, r1.velocity, r1.is_on_floor(), br0.k, br0.out_move, br0.out_jump, br0.out_hold])
 	var d: Dictionary = main.net.state_get("ldesc", {})
 	var key := var_to_str(d)
 	if not d.is_empty() and not island_keys.has(key) and main.built_key == key:
@@ -157,11 +161,16 @@ func _tv_bot(slot: int, delta: float) -> void:
 		var right := Vector3(-fw.z, 0.0, fw.x)
 		v = Vector2(move.dot(right), -move.dot(fw)).limit_length(1.0)
 	kit.slot_stick(main.party, slot, "left", v)
+	# A: a fresh press only to jump (then kept down to hover while the brain wants); never pressed again mid-air (a
+	# press in the air is a buffered jump on landing, like a person's).
 	if jump:
-		kit.slot_press(main.party, slot, "accept")
-	elif hold != bool(held.get(slot, false)):
-		kit.slot_hold(main.party, slot, "accept", hold)
-		held[slot] = hold
+		if bool(held.get(slot, false)):
+			kit.slot_hold(main.party, slot, "accept", false)
+		kit.slot_hold(main.party, slot, "accept", true)
+		held[slot] = true
+	elif bool(held.get(slot, false)) and not hold:
+		kit.slot_hold(main.party, slot, "accept", false)
+		held[slot] = false
 	if punch:
 		kit.slot_press(main.party, slot, "x")
 
@@ -227,6 +236,11 @@ func _report() -> String:
 	var xs: Array = []
 	for rb in main.robots.values():
 		xs.append(snappedf((rb as Node3D).position.x, 0.1))
+	if OS.has_environment("SKY_DEBUG") and not brains.is_empty() and not main.level.lv.is_empty():
+		var br: Brain = brains.values()[0]
+		var r0: Node3D = main.robots.values()[0]
+		print("DBG pos %s floor %s k %d step %s on %d move %s" % [r0.position, r0.is_on_floor(), br.k, str(main.level.lv.route[br.k]),
+			main.level.support(r0.position + Vector3.UP * 0.05, 0.3, 0.3), br.out_move])
 	return "BOT %s: phase %s, island %s, robots x %s, bolts %d, gear %s, cp %d, cleared %s" % [main.net.mode, main.phase(),
 		G.island_name(lv.desc) if not lv.is_empty() else "-", str(xs), max_bolts, str(main.level.gear_got),
 		int(main.net.state_get("cp", 0)), str(main.finish_log)]

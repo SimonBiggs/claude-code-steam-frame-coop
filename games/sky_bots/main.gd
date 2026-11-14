@@ -349,6 +349,9 @@ func _go_island(i: int) -> void:
 		desc = {"i": i, "s": Seeded.derive(int(save.data.world), "island %d visit %d" % [i, int(visits[i])]), "m": mode}
 		visits[i] = int(visits[i]) + 1
 		save.data.visits = visits
+		if OS.has_environment("SKY_SEED") and not has_meta("seeded"):  # (bots, screenshots: replay one island)
+			set_meta("seeded", true)
+			desc.s = int(OS.get_environment("SKY_SEED"))
 	save.mark_dirty()
 	island_t = 0.0
 	told.clear()
@@ -384,6 +387,7 @@ func _build_island(d: Dictionary) -> void:
 		return
 	var lv := G.generate(d)
 	hub.visible = false
+	hub.process_mode = Node.PROCESS_MODE_DISABLED  # (its floor's collision goes too: robots fell onto the hidden town)
 	level.visible = true
 	level.build(lv, G.theme_of(d), season, net.mode != "client")
 	level.set_bolts(net.state_get("bolts", PackedInt32Array()) if net.mode == "client" else PackedInt32Array())

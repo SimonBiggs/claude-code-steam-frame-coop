@@ -139,6 +139,32 @@ func _floor_mesh(b: MeshKit.Builder, p: Dictionary, at: Vector3) -> void:
 			b.box(Vector3(s.x, 0.06, 0.1), MeshKit.at(c + Vector3(0, 0.02, sz * (s.y * 0.5 - 0.05))), HANDLE)
 	elif theme == "gears":
 		b.box(Vector3(s.x, 0.04, 0.12), MeshKit.at(c + Vector3(0, 0.01, s.y * 0.5 - 0.1)), HANDLE)
+	if kind == "solid" or kind == "side":
+		_dressing(b, c, s)
+
+
+## A few little things on a still floor's back edge and sides (no collision): flowers (snow lumps in winter) on the
+## meadow, gear wheels on the gear works' sides, shells and starfish in the cove.
+func _dressing(b: MeshKit.Builder, c: Vector3, s: Vector2) -> void:
+	var n := int(s.x / 2.5)
+	for k in n:
+		var x := c.x - s.x * 0.5 + 1.0 + (s.x - 2.0) * (float(k) + 0.5) / float(n)
+		var z := c.z - s.y * 0.5 + 0.22
+		var hue := fposmod(x * 0.37, 1.0)
+		match theme:
+			"meadow":
+				if season == "winter":
+					b.sphere(0.2, MeshKit.at(Vector3(x, c.y, z), Vector3(1.2, 0.5, 1.0)), Color(0.97, 0.98, 1.0), 8)
+				else:
+					b.cylinder(0.02, 0.02, 0.3, MeshKit.at(Vector3(x, c.y + 0.15, z)), Color(0.3, 0.6, 0.25), 4)
+					b.sphere(0.09, MeshKit.at(Vector3(x, c.y + 0.32, z)), Color.from_hsv(hue, 0.55, 1.0), 8)
+			"gears":
+				b.cylinder(0.3, 0.3, 0.08, MeshKit.at(Vector3(x, c.y - 0.45, c.z + s.y * 0.5 + 0.04), Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.75, 0.6, 0.25), 8)
+			"cove":
+				if k % 2 == 0:
+					b.dome(0.14, MeshKit.at(Vector3(x, c.y, z)), Color(1.0, 0.75, 0.75), 8)
+				else:
+					b.star(5, 0.14, 0.06, 0.04, MeshKit.at(Vector3(x, c.y + 0.02, z), Vector3.ONE, Vector3(-PI * 0.5, 0, 0)), Color(1.0, 0.55, 0.35))
 
 
 func _box_shape(body: Node3D, c: Vector3, s: Vector2, round_one: bool) -> void:
