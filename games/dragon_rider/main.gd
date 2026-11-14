@@ -240,8 +240,6 @@ var charm_list: Array = []  # [[kind, play-day, golden], ...]
 var charm_days := 0
 var charm_root: Node3D
 var charm_count := -1
-var story_queue: Array = []
-var story_t := 0.0
 var ghost_hands: Node3D
 var ghost_rein_hands: Array[GhostHand] = []  # its two see-through hands (core/ghost_hand.gd)...
 var ghost_reins: Array[MeshInstance3D] = []  # ...and the ghost reins from each hand to the ring
@@ -1810,7 +1808,6 @@ func _process(delta: float) -> void:
 		music.volume_db = -17.0
 	if music.has_method("play_track"):
 		music.play_track(maxi(level - 1, 0))
-	_update_story(delta)
 	stage_t += delta
 	if mirror_vp:
 		mirror_t -= delta
@@ -2885,17 +2882,19 @@ func _story_for_all(line: String, pic: String, color: Color) -> void:
 
 
 func _story(line: String, pic: String, color: Color) -> void:
-	if story_queue.size() < 4:
-		story_queue.append([line, pic, color])
+	_show_story([line, pic, color])
 
 
-func _update_story(delta: float) -> void:
-	story_t -= delta
-	if story_t > 0.0 or story_queue.is_empty() or players.is_empty():
+## Show a beat now: StoryCard's shared queue paces the cards (each waits its turn behind one still being read).
+func _show_story(b: Array, urgent: bool = false, now: bool = false) -> void:
+	if not now:
+		StoryCard.later(self, 0, _show_story.bind(b, urgent, true))  # next frame (its views are built)
 		return
-	var b: Array = story_queue.pop_front()
-	story_t = 2.6
+	if players.is_empty():
+		return
 	var opts := {"who": "SUNNY", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.4}
+	if urgent:
+		opts["urgent"] = true
 	var huds: Array = []
 	for p in players:
 		if p.hud != null and is_instance_valid(p.hud) and p.hud is Control and p.hud.is_visible_in_tree():

@@ -18,6 +18,7 @@ const AHEAD := 1.7  # metres in front of the VR lantern-bearer (a flat one: AHEA
 const AHEAD_FLAT := 3.2
 const FEET_R := 0.55  # how close (flat) a walking player must come under an orb
 const HAND_R := 0.22
+const ORB_SCALE := 0.7
 const UPGRADES: Array = [
 	["wide", "BIG LIGHT", "biglight", Color(1.0, 0.85, 0.35)],
 	["far", "LONG LIGHT", "longlight", Color(0.55, 0.85, 1.0)],
@@ -87,6 +88,8 @@ func _places(n: int) -> Array:
 	for i in n:
 		var p := o + right * (float(i) - (n - 1) * 0.5) * gap
 		out.append(Vector3(p.x, 0.0, p.z))  # (VR cards keep clear of the orbs themselves: UiKit.vr_dodge)
+	if main.players[0].vr and p0.xr_camera != null:
+		out = PickOrbs.vr_clear_row(p0.xr_camera, out, Y, ORB_SCALE)  # never behind a table or a wall
 	return out
 
 
@@ -94,7 +97,7 @@ func show_row(new_stage: String, entries: Array, places: Array) -> void:
 	if new_stage == "" or entries.is_empty():
 		orbs.clear()
 		return
-	orbs.show_orbs(new_stage, entries, Vector3.ZERO, GAP, Y, {"at": places, "scale": 0.7, "pop": true, "touch": FEET_R})
+	orbs.show_orbs(new_stage, entries, Vector3.ZERO, GAP, Y, {"at": places, "scale": ORB_SCALE, "pop": true, "touch": FEET_R})
 
 
 ## VR players' hands reaching into an orb, the others walking under one.

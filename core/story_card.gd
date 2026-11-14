@@ -55,6 +55,32 @@ const SHORT_META := "story_card_short"
 const MAX_WAITING := 3
 
 
+## opts.hold: a METHOD Callable (game._story_held, never a lambda: a lambda kept in a card's opts / meta corrupted the
+## heap at quit, Penalty Shootout 2026-11-14); while it returns true a card waits its turn (never while a ball flies). Games never keep their own story queue or timer: tests/story_queue_test.gd.
+static func _held(opts: Dictionary) -> bool:
+	var h: Variant = opts.get("hold")
+	return h is Callable and (h as Callable).is_valid() and bool((h as Callable).call())
+
+
+## One beat on every local view and the VR head at once (the usual game call; each waits its turn on its own view):
+## huds: the TV / Deck view roots (invalid or hidden ones are skipped), cam: the VR head (null: no VR player).
+static func tell(huds: Array, world: Node, cam: Node3D, opts: Dictionary) -> void:
+	var views := huds.filter(func(h: Variant) -> bool: return h is Control and is_instance_valid(h) and (h as Control).is_inside_tree())
+	if not views.is_empty():
+		show(views, opts)
+	if world != null and cam != null and is_instance_valid(cam) and cam.is_inside_tree():
+		show_vr(world, cam, opts)
+
+
+## Run `call` on the next frame, or at `until_ms` (Time.get_ticks_msec) if that is later: a game's _story defers its
+## card this way so the views built this frame get it, and beats said with the title wait until it has gone. Beats
+## deferred to the same moment keep their order.
+static func later(node: Node, until_ms: int, call: Callable) -> void:
+	if node == null or not node.is_inside_tree():
+		return
+	node.get_tree().create_timer(maxf(0.0, float(until_ms - Time.get_ticks_msec()) / 1000.0)).timeout.connect(call)
+
+
 static func _urgent(opts: Dictionary) -> bool:
 	return bool(opts.get("urgent", false)) or bool(opts.get("replace", false))
 
@@ -77,7 +103,17 @@ static func _note_gone(parent: Node, shown: float, duration: float, line: String
 		print("STORY CARD: \"%s\" knocked off after %.1f s (core/story_card.gd MIN_READ)" % [line, shown]), CONNECT_ONE_SHOT)
 
 
-## The last card shown (its roots and opts), so tests can show it again on demand (replay()).
+## The last card shown (its roots and opts), so tests can show it again on demand (replay()). Only plain values are
+## kept (_plain): a static var holding a game's lambda outlives the game's script at quit and corrupted the heap
+## (Penalty Shootout's opts.hold, 2026-11-14: "double free or corruption", exit 134 after every run).
+static func _plain(opts: Dictionary) -> Dictionary:
+	var out := {}
+	for k in opts:
+		if not (opts[k] is Callable or opts[k] is Object):
+			out[k] = opts[k]
+	return out
+
+
 static var _last_roots: Array = []
 static var _last_opts: Dictionary = {}
 
@@ -85,7 +121,7 @@ static var _last_opts: Dictionary = {}
 ## Show a story card on one view root or an Array of them. Returns the first card made (or null).
 static func show(root: Variant, opts: Dictionary) -> Control:
 	_last_roots = [root]
-	_last_opts = opts.duplicate()
+	_last_opts = _plain(opts)
 	if root is Array:
 		var first: Control = null
 		for r in root:
@@ -164,6 +200,8 @@ static func show_vr(world: Node, cam: Node3D, opts: Dictionary) -> Node3D:
 		{"duration": float(opts.get("duration", 4.0)), "color": opts.get("color", "accent"), "width": 1.0,
 		"height": float(opts.get("vr_height", -0.22)), "title_size": 0.07, "body_size": 0.055})
 	card.add_to_group(VR_GROUP)  # is_story(): bots tell a story card from how-to text by this, not by a game's var
+	if opts.has("hold"):
+		card.set_meta("story_hold", opts.hold)
 	var pic := String(opts.get("pic", ""))
 	if pic != "":
 		card.add_child(StoryCardPics.vr_medallion(pic, UiKit.color_of(opts.get("color", "accent"), UiKit.ACCENT), card))
@@ -202,6 +240,8 @@ static func _vr_try(card: Node) -> bool:
 		if c == card:
 			break
 		prev = c
+	if card.has_meta("story_hold") and _held({"hold": card.get_meta("story_hold")}):
+		return false
 	if prev == null:
 		return true
 	if prev.has_meta("story_waiting") or float(prev.get("t")) < MIN_READ:
@@ -320,6 +360,8 @@ class Card extends Control:
 
 	## Its turn? Yes when no older card on this view is being read; one read for MIN_READ s leaves for it.
 	func _try_start() -> bool:
+		if Outer._held(opts):
+			return false
 		var prev: Card = null
 		for c in get_parent().get_children():
 			if c == self:

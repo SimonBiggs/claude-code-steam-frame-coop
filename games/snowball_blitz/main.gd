@@ -217,8 +217,6 @@ var village: Node3D
 var village_list: Array = []  # [[built play-day, golden, waves beaten, want], ...]
 var village_days := 0
 var village_count := -1
-var story_queue: Array = []  # [line, pic, color]
-var story_t := 0.0
 ## gentle / brave / hard (the MODE pick; siegegen.gd MODE_NUM, bosses.gd). The host's pick rules every machine: set on
 ## the host / local game it goes out as net state "mode", and a TV machine takes it from there (_on_state_changed)
 ## (2026-11-12: a TV machine kept its own "brave" until a gift pick told it). Never set it on a client by hand.
@@ -1509,7 +1507,6 @@ func _process(delta: float) -> void:
 	if music.has_method("play_track"):
 		music.play_track(1 if boss_hp >= 0.0 else maxi(wave - 1, 0) / 3)
 	director().tick(delta)
-	_update_story(delta)
 	_update_slides(delta)
 	siege_t += delta
 	if props:
@@ -2744,21 +2741,18 @@ func _story_for_all(line: String, pic: String, color: Color, urgent: bool = fals
 
 
 func _story(line: String, pic: String, color: Color, urgent: bool = false) -> void:
-	if urgent:
-		story_queue = story_queue.filter(func(q: Array) -> bool: return not (q.size() > 3 and bool(q[3])))  # an older prompt is stale now
-		story_queue.push_front([line, pic, color, true])
-		story_t = minf(story_t, 0.2)
-	elif story_queue.size() < 7:
-		story_queue.append([line, pic, color])
+	_show_story([line, pic, color], urgent)
 
 
-func _update_story(delta: float) -> void:
-	story_t -= delta
-	if story_t > 0.0 or story_queue.is_empty() or players.is_empty():
+## Show a beat: StoryCard's shared queue paces the cards (each waits its turn behind one still being read; an urgent
+## pick prompt replaces what shows at once).
+func _show_story(b: Array, urgent: bool = false, now: bool = false) -> void:
+	if not now:
+		StoryCard.later(self, 0, _show_story.bind(b, urgent, true))  # next frame (its views are built)
 		return
-	var b: Array = story_queue.pop_front()
-	story_t = 2.6
-	var opts := {"who": "BOBO", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.4,
+	if players.is_empty():
+		return
+	var opts := {"who": "BOBO", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.4, "urgent": urgent,
 		"vr_height": -0.55}  # (VR: under the boss, never over it; clear of pick orbs by itself: UiKit.vr_dodge)
 	var huds: Array = []
 	for p in players:

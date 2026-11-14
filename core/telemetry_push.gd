@@ -34,6 +34,7 @@ const WARN_DAYS := 7
 const LOG := "TELEMETRY PUSH: "
 
 var _next_try := 0.0  # seconds (Time.get_ticks_msec / 1000) when the next attempt may start
+var _fails := 0  # failed sends in a row (each waits twice as long, up to RETRY_S)
 var _state := "idle"  # idle | hello | send
 var _udp: PacketPeerUDP
 var _nonce := ""
@@ -340,8 +341,14 @@ func _on_done(result: int, code: int, _headers: PackedStringArray, data: PackedB
 	_state = "idle"
 	var v: Variant = JSON.parse_string(data.get_string_from_utf8()) if code == 200 else null
 	if result != HTTPRequest.RESULT_SUCCESS or not v is Dictionary:
-		print(LOG + "sending failed (result %d, HTTP %d); %d RUN lines kept for later" % [result, code, pending().size()])
+		# Soon again (30 s, 60 s, ... up to the usual wait): one failure as the arcade starts (the TV, 2026-11-13: a
+		# timeout while SteamVR went down) must not leave a machine silent for RETRY_S.
+		_fails += 1
+		var again := minf(_retry_s(), 30.0 * pow(2.0, float(_fails - 1)))
+		_next_try = minf(_next_try, _now() + again)
+		print(LOG + "sending failed (result %d, HTTP %d); %d RUN lines kept for later (trying again in %d s)" % [result, code, pending().size(), int(again)])
 		return
+	_fails = 0
 	var d: Dictionary = v
 	_checkin = false
 	var removed := ack(d.get("acked", []))

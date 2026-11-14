@@ -166,8 +166,7 @@ var temple_seed := 0
 var temple_daily := false
 var wave_plan := {}
 var spawn_i := 0
-var story_queue: Array = []
-var story_t := 0.0
+var story_hold_ms := 0  # story cards said with the title wait until then (StoryCard.later)
 var vr_story: Node3D
 var run_logged := false
 var game_t := 0.0
@@ -1260,7 +1259,6 @@ func _process(delta: float) -> void:
 		_send_states(delta)
 	world.animate(delta)
 	temple_story.update_kiko(delta, _kiko_looks_at())
-	_update_story(delta)
 	# A pause undone from elsewhere (bots, the arcade) must not leave the PAUSED card up.
 	if tv_banner != null and tv_banner.visible and not get_tree().paused:
 		tv_banner.visible = false
@@ -1806,7 +1804,7 @@ func _start_temple(first: bool) -> void:
 	print("Elemental Bender: temple seed %d%s | tree %d waves, %d fruit, day %d" % [temple_seed,
 		" (TODAY'S RAIDERS)" if temple_daily else "", int(save.data.waves), (save.data.fruit as Array).size(), int(save.data.days)])
 	if first:
-		story_t = 3.0  # after the title
+		story_hold_ms = Time.get_ticks_msec() + 3000  # after the title
 		if not Engine.has_meta("eb_said_hi"):
 			Engine.set_meta("eb_said_hi", true)  # (once per session)
 			_story_for_all("Hi! I'm Kiko! Save my temple!", "kiko", KIKO_COLOR)
@@ -1940,19 +1938,19 @@ func _story_for_all(line: String, pic: String, color: Color) -> void:
 
 
 func _story(line: String, pic: String, color: Color) -> void:
-	if story_queue.size() < 5:
-		story_queue.append([line, pic, color])
+	_show_story([line, pic, color])
 
 
 ## One card at a time, on every view this machine shows (and in front of the VR master).
-func _update_story(delta: float) -> void:
-	story_t -= delta
-	if story_t > 0.0 or story_queue.is_empty():
+## Show a beat now: StoryCard's shared queue paces the cards (each waits its turn behind one still being read).
+func _show_story(b: Array, urgent: bool = false, now: bool = false) -> void:
+	if not now:
+		StoryCard.later(self, story_hold_ms, _show_story.bind(b, urgent, true))  # next frame (its views are built), after the title
 		return
-	var b: Array = story_queue.pop_front()
-	story_t = 3.0
 	log_story += 1
 	var opts := {"who": KIKO, "line": b[0], "pic": b[1], "color": b[2], "duration": 2.8}
+	if urgent:
+		opts["urgent"] = true
 	var roots := _all_huds()
 	if not roots.is_empty():
 		StoryCard.show(roots, opts)
@@ -2144,7 +2142,7 @@ func _pick_hint(kind: String) -> void:
 	if kind == "boon" and _pick_hints > 2:
 		return  # (the glowing stones speak for themselves after the first time)
 	if kind == "mode":
-		story_queue.push_front(["Easy or hard?", "star", Color(0.35, 0.75, 1.0)])  # (first: the stones are up now)
+		_show_story(["Easy or hard?", "star", Color(0.35, 0.75, 1.0)], true)  # (first: the stones are up now)
 	elif kind == "master":
 		_story("Pick your master!", "kiko", KIKO_COLOR)
 	else:

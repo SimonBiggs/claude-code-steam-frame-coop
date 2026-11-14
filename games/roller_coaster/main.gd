@@ -144,8 +144,6 @@ var ride_score0 := 0
 var outline_mi: MeshInstance3D
 var outline_key := ""
 var pad_plan_n := -1
-var story_queue: Array = []
-var story_t := 0.0
 var new_day := false
 var _rng := RandomNumberGenerator.new()
 # --- Second pass (deep.gd): modes, Buttons' gifts on the pick orbs, warned park weather, seasons, the toy fair ---
@@ -582,7 +580,6 @@ func _process(delta: float) -> void:
 	_effects(delta)
 	gifts.tick(delta)
 	_spin_stars(delta)
-	_update_story(delta)
 	if outline_mi.visible:
 		UiKit.fade3d(outline_mi, 0.35 * absf(sin(cam_t * 2.5)))
 	_update_cameras(delta)
@@ -1616,17 +1613,17 @@ func _story_for_all(line: String, pic: String, color: Color) -> void:
 
 
 func _story(line: String, pic: String, color: Variant) -> void:
-	if story_queue.size() < 4:
-		story_queue.append([line, pic, color])
+	_show_story([line, pic, color])
 
 
-func _update_story(delta: float) -> void:
-	story_t -= delta
-	if story_t > 0.0 or story_queue.is_empty():
+## Show a beat now: StoryCard's shared queue paces the cards (each waits its turn behind one still being read).
+func _show_story(b: Array, urgent: bool = false, now: bool = false) -> void:
+	if not now:
+		StoryCard.later(self, 0, _show_story.bind(b, urgent, true))  # next frame (its views are built)
 		return
-	var b: Array = story_queue.pop_front()
-	story_t = 2.8
 	var opts := {"who": "BUTTONS", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.6}
+	if urgent:
+		opts["urgent"] = true
 	var hs := _all_huds()
 	if not hs.is_empty():
 		StoryCard.show(hs, opts)

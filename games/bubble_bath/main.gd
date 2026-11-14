@@ -166,8 +166,7 @@ var golden_caught := 0
 var mama: Node3D
 var family_root: Node3D
 var family_key := ""
-var story_queue: Array = []
-var story_t := 0.0
+var story_hold_ms := 0  # story cards said with the title wait until then (StoryCard.later)
 # --- Second pass (deep.gd): mode + gift picks, warned surprises, seasons, Mama's pond ---
 var picks: Node  # picks.gd (host / local run the picks; every machine shows the orbs)
 var hazards: Node3D  # hazards.gd (every machine draws the "hz" state)
@@ -796,7 +795,6 @@ func _process(delta: float) -> void:
 	_animate_boats()
 	_animate_props(delta)
 	_update_bubbles(delta)
-	_update_story(delta)
 	_animate_family()
 	if net.mode == "client":
 		_animate_client_ducks(delta)
@@ -1435,7 +1433,7 @@ func _start_bath() -> void:
 		mode_picked = true
 	_send_deep()
 	net.state_set("pond", Deep.pond(int(save.data.goals)))
-	story_t = 6.5  # after the intro card
+	story_hold_ms = Time.get_ticks_msec() + 6500  # after the intro card
 	_story_for_all("Hi! I'm Mama Duck!", "mamaduck", MAMA_COLOR)
 	var sd := Deep.season_data(season)
 	_story_for_all(String(sd.line), String(sd.pic), sd.drift)
@@ -1631,17 +1629,17 @@ func _story_for_all(line: String, pic: String, color: Color) -> void:
 
 
 func _story(line: String, pic: String, color: Color) -> void:
-	if story_queue.size() < 4:
-		story_queue.append([line, pic, color])
+	_show_story([line, pic, color])
 
 
-func _update_story(delta: float) -> void:
-	story_t -= delta
-	if story_t > 0.0 or story_queue.is_empty():
+## Show a beat now: StoryCard's shared queue paces the cards (each waits its turn behind one still being read).
+func _show_story(b: Array, urgent: bool = false, now: bool = false) -> void:
+	if not now:
+		StoryCard.later(self, story_hold_ms, _show_story.bind(b, urgent, true))  # next frame (its views are built), after the title
 		return
-	var b: Array = story_queue.pop_front()
-	story_t = 2.6
 	var opts := {"who": MAMA, "line": b[0], "pic": b[1], "color": b[2], "duration": 2.4}
+	if urgent:
+		opts["urgent"] = true
 	var views: Array = []
 	for h in _all_huds():
 		if (h as Control).is_visible_in_tree():

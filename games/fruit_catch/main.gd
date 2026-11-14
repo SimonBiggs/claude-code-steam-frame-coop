@@ -149,8 +149,6 @@ var orchard: Node3D
 var orchard_count := -1
 var nutmeg: Node3D
 var nutmeg_hop := 0.0
-var story_queue: Array = []  # beats waiting to show: [line, pic, color]
-var story_t := 0.0
 # --- Second pass (deep.gd) ---
 var picks: Node  # picks.gd
 var hazards: Node3D  # hazards.gd (every machine draws the "hz" state)
@@ -898,7 +896,6 @@ func _process(delta: float) -> void:
 	_animate_avatars(delta)
 	_animate_fruit_visuals(delta)
 	_animate_nutmeg(delta)
-	_update_story(delta)
 	if net.mode == "client":
 		for k in BRANCHES:
 			_pose_branch(k)
@@ -1391,7 +1388,7 @@ func _dish_name(d: int) -> String:
 
 ## Every machine: Nutmeg says something (beats wait their turn so none is missed).
 func _story(line: String, pic: String, color: Color) -> void:
-	story_queue.append([line, pic, color])
+	_show_story([line, pic, color])
 
 
 ## Host: a story beat / a banner on every machine (beats that don't come from a state change).
@@ -1407,13 +1404,14 @@ func _banner_all(title: String, style: String) -> void:
 		net.event("banner", [title, style])
 
 
-func _update_story(delta: float) -> void:
-	story_t -= delta
-	if story_t > 0.0 or story_queue.is_empty():
+## Show a beat now: StoryCard's shared queue paces the cards (each waits its turn behind one still being read).
+func _show_story(b: Array, urgent: bool = false, now: bool = false) -> void:
+	if not now:
+		StoryCard.later(self, 0, _show_story.bind(b, urgent, true))  # next frame (its views are built)
 		return
-	var b: Array = story_queue.pop_front()
-	story_t = 2.6
 	var opts := {"who": "NUTMEG", "line": b[0], "pic": b[1], "color": b[2], "duration": 2.5}
+	if urgent:
+		opts["urgent"] = true
 	StoryCard.show(_all_huds(), opts)
 	if vr_rig != null:
 		StoryCard.show_vr(self, vr_rig.camera, opts)

@@ -213,8 +213,7 @@ var pick_t := 0.0
 var picked := {}  # slot -> orb index (this stage)
 var heroes := {}  # slot -> hero id
 var perks := {}  # slot -> [perk ids]
-var story_queue: Array = []
-var story_t := 0.0
+var story_hold_ms := 0  # story cards said with the title wait until then (StoryCard.later)
 var vr_story: Node3D
 var run_logged := false
 var bosses_run: Array = []
@@ -1145,7 +1144,6 @@ func _process(delta: float) -> void:
 		sky_fish.main = self
 		add_child(sky_fish)
 	_check_say(delta)
-	_update_story(delta)
 	if ghost_cam:
 		ghost_cam.global_transform = players[0].net_head
 	if mirror_vp:
@@ -2313,7 +2311,7 @@ func _start_run() -> void:
 	_send_keep()
 	print("RUN start: seed %d%s, mode %s, route %s, waves ever %d, days %d" % [run_seed, " (TODAY'S ARENA)" if daily else "",
 		game_mode, route, int(save.data.waves), int(save.data.days)])
-	story_t = 2.5
+	story_hold_ms = Time.get_ticks_msec() + 2500
 	if int(save.data.games) <= 1:
 		_story_for_all("Hi! I'm Nova!", "nova")
 		_story_for_all("Monsters took our lights!", "neoncity")
@@ -2567,21 +2565,16 @@ func _story_for_all(line: String, pic: String, color: Color = NOVA_COLOR, urgent
 
 
 func _story(line: String, pic: String, color: Color, urgent: bool = false) -> void:
-	if urgent:
-		story_queue = story_queue.filter(func(q: Array) -> bool: return not (q.size() > 3 and bool(q[3])))  # an older prompt is stale now
-		story_queue.push_front([line, pic, color, true])
-		story_t = minf(story_t, 0.2)
-	elif story_queue.size() < 5:
-		story_queue.append([line, pic, color])
+	_show_story([line, pic, color], urgent)
 
 
-func _update_story(delta: float) -> void:
-	story_t -= delta
-	if story_t > 0.0 or story_queue.is_empty():
+## Show a beat: StoryCard's shared queue paces the cards (each waits its turn behind one still being read; an urgent
+## pick prompt replaces what shows at once).
+func _show_story(b: Array, urgent: bool = false, now: bool = false) -> void:
+	if not now:
+		StoryCard.later(self, story_hold_ms, _show_story.bind(b, urgent, true))  # next frame (its views are built), after the title
 		return
-	var b: Array = story_queue.pop_front()
-	story_t = 2.6 if story_queue.size() < 2 else 1.8  # a long queue moves faster (never falls behind the game)
-	var opts := {"who": "NOVA", "line": String(b[0]), "pic": String(b[1]), "color": b[2], "duration": story_t + 0.2,
+	var opts := {"who": "NOVA", "line": String(b[0]), "pic": String(b[1]), "color": b[2], "duration": 2.8, "urgent": urgent,
 		"vr_height": -0.42}  # (VR: under the centre banner, never over it)
 	if views_root != null and is_instance_valid(views_root):
 		StoryCard.show(views_root, opts)
