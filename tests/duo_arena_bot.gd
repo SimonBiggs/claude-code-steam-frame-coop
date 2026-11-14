@@ -91,6 +91,8 @@ func _physics_process(delta: float) -> void:
 	var pick_now: String = "%s %s" % [main.pick_stage, main.pick_ids] if main.pick_stage != "" else ""
 	pick_up_t = pick_up_t + delta if pick_now == pick_was else 0.0
 	pick_was = pick_now
+	if main.team_picks.active() and main._pick_players().size() >= 2:
+		set_meta("vote_pool", true)  # (two or more vote on a team pick: the split vote must show up)
 	for p in main.players:
 		if p.vr and not p.ghost:
 			_drive_vr(p, delta)
@@ -295,7 +297,8 @@ func _orb_for(p):
 	var orbs: Array = main.zone.orbs if main.zone != null else []
 	if orbs.is_empty() or _reading_orbs():
 		return null
-	var o = orbs[(p.index + main.wave) % orbs.size()]
+	var k: int = p.index % 2 if main.team_picks.vote_row() else p.index  # (a team vote: odd and even players split, so 3+ make a majority)
+	var o = orbs[(k + main.wave) % orbs.size()]
 	return o if is_instance_valid(o) and o.is_inside_tree() else null
 
 
@@ -383,6 +386,9 @@ func _deep_checks() -> void:
 	var want_season: String = load("res://core/season_kit.gd").override("duo_arena", "", Deep.SEASONS)  # "" = none asked for
 	kit.assert_true(main.deep.season != "" and (want_season == "" or main.deep.season == want_season), "the season is %s (want %s)" % [main.deep.season, want_season if want_season != "" else "any"])
 	if main.net.mode != "client":
+		if has_meta("vote_pool"):
+			var why: String = kit.vote_problem(main.team_picks)
+			kit.assert_true(why == "", "everyone voted on a team pick, the most votes / the tie rule won" + ("" if why == "" else ": " + why))
 		kit.assert_true(main.wave >= 1, "wave 1 started (pick stage '%s')" % main.pick_stage)
 		var need: int = main.players.filter(func(p) -> bool: return p.active).size()
 		kit.assert_true(main.heroes.size() >= mini(need, 1), "everyone got a hero (%s)" % [main.heroes])

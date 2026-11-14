@@ -40,7 +40,8 @@ const Who := preload("res://core/who.gd")  # who joined / left (names, not "TV p
 ## and sends the village and the story cards as events (every machine builds the igloos itself).
 ##
 ## PICKS (core/pick_orbs.gd: glowing picture orbs in a row in front of the fort; throw a snowball at one - the VR player
-## too - or walk into it): the first game of a visit picks GENTLE / BRAVE / HARD after the practice (SB_MODE=... skips
+## too - or walk into it): the first game of a visit VOTES GENTLE / BRAVE / HARD after the practice (picks.gd: everyone
+## votes on core/pick_flow.gd, the most votes, a tie stays gentler; SB_MODE=... skips
 ## it; the family's last mode is saved and sits in the middle), which shapes the siege (siegegen.gd MODE_NUM) and the
 ## bosses (bosses.gd). After every cleared wave BOBO'S GIFTS (gifts.gd): three seeded gift orbs, each player takes one
 ## (they stack, capped); the middle one is taken for anyone who doesn't choose in time. BOSS TELLS (bosses.gd): the
@@ -63,6 +64,7 @@ const Save := preload("res://core/save.gd")
 const Telemetry := preload("res://core/telemetry.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
+const PicksScript := preload("res://games/snowball_blitz/picks.gd")
 const WarnRings := preload("res://core/warn_rings.gd")
 const Gifts := preload("res://games/snowball_blitz/gifts.gd")
 const Bosses := preload("res://games/snowball_blitz/bosses.gd")
@@ -226,6 +228,7 @@ var game_mode := "brave":
 		if net != null and net.mode != "client":
 			net.state_set("mode", v)
 var orbs: PickOrbs  # the pick orbs (every machine draws them)
+var picks: Node  # picks.gd: the MODE vote on those orbs (core/pick_flow.gd, everyone votes)
 var rings: WarnRings  # boss warning rings (every machine)
 var pick_stage := ""  # host / local: "mode" or "gift" while orbs are up
 var pick_ids: Array = []
@@ -276,6 +279,9 @@ func _ready() -> void:
 	net.main = self
 	add_child(net)
 	net.state_changed.connect(_on_state_changed)
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
 	net.sticky_event("village")  # a machine that joins later gets the latest one (core/net.gd)
 	net.sticky_event("orbs")
 	net.sticky_event("gifts")
@@ -2371,7 +2377,10 @@ func apply_event(kind: String, args: Array) -> void:
 			else:
 				orbs.show_orbs(String(args[0]), args[1], ORB_ROW, ORB_GAP, ORB_Y)
 		"take":
-			_take_fx(int(args[0]), int(args[1]))
+			if picks.vote_row():
+				picks.take_fx(int(args[0]), int(args[1]))  # (the MODE vote's winner)
+			else:
+				_take_fx(int(args[0]), int(args[1]))
 		"gifts":
 			var all: Dictionary = args[0]
 			for k in all:
@@ -2795,9 +2804,12 @@ func _begin_pick(stage: String) -> void:
 	pick_t = float(Gifts.WAIT[stage]) * (Gifts.GENTLE_WAIT if game_mode == "gentle" and stage != "mode" else 1.0)
 	picked = {}
 	var entries := _orb_entries(stage, ids)
-	orbs.show_orbs(stage, entries, ORB_ROW, ORB_GAP, ORB_Y)
-	if net.mode == "host":
-		net.event("orbs", [stage, entries])
+	if stage == "mode":  # everyone votes (picks.gd)
+		picks.begin(ids, _mode_voted)
+	else:
+		orbs.show_orbs(stage, entries, ORB_ROW, ORB_GAP, ORB_Y)
+		if net.mode == "host":
+			net.event("orbs", [stage, entries])
 	var mid: Dictionary = entries[entries.size() / 2]
 	_story_for_all("Pick how brave!" if stage == "mode" else "Pick a gift!", String(mid.pic) if stage == "mode" else "gift",
 		mid.color, true)
@@ -2815,6 +2827,9 @@ static func _orb_entries(stage: String, ids: Array) -> Array:
 
 
 func _pick_tick(delta: float) -> void:
+	if picks.active():  # the MODE: everyone votes (picks.gd); it calls _mode_voted
+		picks.tick(delta)
+		return
 	pick_t -= delta
 	for tch in orbs.touches(players):
 		on_orb_hit(int(tch[0]), tch[1], "walk")
@@ -2824,7 +2839,7 @@ func _pick_tick(delta: float) -> void:
 	for p in _pick_players():
 		if not picked.has(p.index):
 			all = false
-	if (pick_stage == "mode" and not picked.is_empty()) or all or pick_t <= 0.0:
+	if all or pick_t <= 0.0:
 		_finish_pick()
 
 
@@ -2832,7 +2847,10 @@ func _pick_tick(delta: float) -> void:
 func on_orb_hit(i: int, p, how: String = "throw") -> void:
 	if pick_stage == "" or net.mode == "client" or i < 0 or i >= pick_ids.size() or not (p in players):
 		return
-	if picked.has(p.index) or (pick_stage == "mode" and not picked.is_empty()):
+	if picks.active():
+		picks.choose(i, p.index)  # the MODE: a vote (picks.gd)
+		return
+	if picked.has(p.index):
 		return
 	picked[p.index] = i
 	_take_fx(i, p.index)
@@ -2841,11 +2859,6 @@ func on_orb_hit(i: int, p, how: String = "throw") -> void:
 	sound("pickup", 0.0, 1.0 + 0.1 * i)
 	var id := String(pick_ids[i])
 	match pick_stage:
-		"mode":
-			game_mode = id
-			if save != null:
-				save.data.mode = id
-				save.mark_dirty()
 		"gift":
 			Gifts.apply(p.gifts, id)
 			var mine: Array = gifts_taken.get(p.index, [])
@@ -2863,12 +2876,22 @@ func _take_fx(i: int, slot: int) -> void:
 		puff(at, orbs.color_of(i), 16, 0.09)
 
 
+## Host / local: the MODE vote is in (picks.gd: the most votes, a tie stays gentler, nobody: the middle orb).
+func _mode_voted(_stage: String, id: Variant, _by: int) -> void:
+	game_mode = String(id)
+	if save != null:
+		save.data.mode = game_mode
+		save.mark_dirty()
+	print("PICK mode: the team voted %s" % game_mode)
+	_finish_pick()
+
+
 func _finish_pick() -> void:
+	if picks.active():  # (cut short, e.g. SB_WAVE: the vote so far / the middle orb)
+		picks.finish_now()
+		return
 	var di := pick_ids.find(Gifts.default_pick(pick_ids))
-	if pick_stage == "mode":
-		if picked.is_empty() and not players.is_empty():
-			on_orb_hit(di, players[0], "middle")
-	else:
+	if pick_stage != "mode":
 		for p in _pick_players():
 			if not picked.has(p.index):
 				on_orb_hit(di, p, "middle")

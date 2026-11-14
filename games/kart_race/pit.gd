@@ -11,6 +11,7 @@ extends Node3D
 ## has driven through row 3) it starts, keeping last time's speed and going on to the next cup.
 ## The host runs it (main.gd calls start / update); every machine draws the gates from the same rows (snapshot), and
 ## glows a lane when someone picks it (main.gd pit_flash events).
+## shared-picks-ok: _pick (the pit's speed / cup rows are lanes the karts DRIVE through mid-race, first to get there breaks a tie: not pick orbs; a later move to pick_flow's vote mode would need lane takers)
 
 const StoryCard := preload("res://core/story_card.gd")
 const UiKit := preload("res://core/ui_kit.gd")

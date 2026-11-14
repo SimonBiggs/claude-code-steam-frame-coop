@@ -12,6 +12,7 @@ extends Node3D
 ##   · 5 GOLDEN FINAL (x2).
 ## Every finished picture flies onto the gallery wall; at the end everyone VOTES for the best one (gold
 ## frame, MASTERPIECE), then the final scores and fun awards.
+## shared-picks-ok: _finish_vote (the best-picture vote is a contest that scores each painter by the votes they got, ties share the gold: not a team pick)
 ##
 ## SMUDGE'S STORY (paintgen.gd, story_pictures.gd): Smudge, the studio cat in a red beret, keeps a gallery of the
 ## family's paintings. Everything to paint is a PICTURE (the artist sees a picture of it, the guessers pick one of

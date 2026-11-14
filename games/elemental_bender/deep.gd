@@ -1,8 +1,8 @@
 extends RefCounted
 ## ELEMENTAL BENDER, the second pass (data + generators; every machine computes the same from the same numbers):
-## - MODES: after practice the team picks GENTLE / BRAVE / HARD on Kiko's altar (the shared core/pick_orbs.gd MODES:
-##   names, colours). GENTLE: fewer, softer, slower raiders, kind bosses, long warnings, soft surprises. HARD: more,
-##   tougher raiders and two surprises a wave. The family's last mode sits in the middle stone (saved "mode").
+## - MODES: after practice the team votes GENTLE / BRAVE / HARD on Kiko's altar (picks.gd on the shared pick flow's
+##   vote mode, core/pick_flow.gd: the most votes, a tie stays gentler; the shared core/pick_orbs.gd MODES: names, colours).
+##   GENTLE: fewer, softer, slower raiders, kind bosses, long warnings, soft surprises. HARD: more, tougher raiders and two surprises a wave. The family's last mode sits in the middle stone (saved "mode").
 ## - SURPRISES (Kiko's island tricks, from wave 3, never on a boss wave): every island has two, always TOLD first by a
 ##   steady warning on the ground (the shared core/warn_rings.gd) for tell() seconds, then they go off:
 ##     RAIN  (a few circles): FALLING ROCKS / ICICLES / LAVA BOMBS / LIGHTNING drop into them
@@ -49,20 +49,6 @@ static func mode_id(id: String) -> String:
 	var m := String(PickOrbs.mode(id).get("id", "brave"))
 	return m if MODES.has(m) else "brave"
 
-
-## The team's mode from everyone's picks ({slot: mode id}): the most picked; a tie goes to the gentler one.
-static func team_mode(picks: Dictionary, fallback: String = "brave") -> String:
-	if picks.is_empty():
-		return mode_id(fallback)
-	var votes := {}
-	for s in picks:
-		var m := mode_id(String(picks[s]))
-		votes[m] = int(votes.get(m, 0)) + 1
-	var best := ""
-	for m in MODE_IDS:  # gentle first: a tie stays gentle
-		if votes.has(m) and (best == "" or int(votes[m]) > int(votes[best])):
-			best = m
-	return best
 
 # --- Surprises ---------------------------------------------------------------------------------------
 

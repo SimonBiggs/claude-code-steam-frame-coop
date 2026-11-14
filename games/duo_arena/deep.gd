@@ -4,8 +4,8 @@ extends RefCounted
 ##   ICE RINK, COMET on STAR DECK). While the family fights in that zone the friend floats in a bubble over the far
 ##   wall; beat the zone's boss and the friend is SAVED for good (saved "friends"): it flies to Nova, follows her in
 ##   every later game, gets a little house in the city and brings a new gift for Nova's gift orbs.
-## - NOVA'S GIFTS: after every boss the team picks ONE of three gifts on the pick orbs (the first orb shot decides; the
-##   middle one if nobody does). A gift lasts the rest of the game and they add up: NOVA ZAP (Nova zaps monsters),
+## - NOVA'S GIFTS: after every boss the team picks ONE of three gifts on the pick orbs (everyone votes: team_picks.gd;
+##   the middle one if nobody does). A gift lasts the rest of the game and they add up: NOVA ZAP (Nova zaps monsters),
 ##   BUBBLE (every wave starts in a shield bubble), HEARTS (hearts fall now and then), and the friends' gifts MAGNET,
 ##   FIRE, SLEEPY (slower monsters), ZOOM.
 ## - TOLD SURPRISES: from wave 3 (never on a boss wave) each zone has its own surprise: falling CRATES (Neon City),

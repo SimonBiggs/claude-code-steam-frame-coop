@@ -84,6 +84,7 @@ const Bosses := preload("res://games/elemental_bender/bosses.gd")
 const Boons := preload("res://games/elemental_bender/boons.gd")
 const Altar := preload("res://games/elemental_bender/altar.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
+const PicksScript := preload("res://games/elemental_bender/picks.gd")
 const Hazards := preload("res://games/elemental_bender/hazards.gd")
 const Deep := preload("res://games/elemental_bender/deep.gd")
 const SeasonDress := preload("res://games/elemental_bender/season.gd")
@@ -217,7 +218,7 @@ var log_vents := 0
 var log_phase2 := 0
 # Second pass (deep.gd): the team's mode, Kiko's warned island surprises, spirit friends, seasons.
 var team_mode := "brave"  ## host: GENTLE / BRAVE / HARD (net state "mode")
-var mode_picks := {}  ## host: slot -> mode id taken on the altar
+var picks: Node  ## picks.gd: the team's mode vote on the altar (core/pick_flow.gd, everyone votes)
 var surprise_plan: Array = []
 var surprise_i := 0
 var surprise_told := -1.0  ## wave_t when the coming surprise was told (-1: not yet)
@@ -314,6 +315,9 @@ func _setup(mode: String) -> void:
 	altar = Altar.new()
 	altar.name = "Altar"
 	add_child(altar)
+	picks = PicksScript.new()
+	picks.main = self
+	add_child(picks)
 	fx = Fx.new()
 	fx.name = "Fx"
 	if vr:
@@ -427,8 +431,7 @@ func _start_breather(after_wave: bool) -> void:
 		var open := Boons.unlocked_boons(int(save.data.waves), int(save.data.generals))
 		_open_pick("boon", Boons.offer(temple_seed, wave, open))
 	else:
-		mode_picks = {}
-		_open_pick("mode", PickOrbs.mode_ids(Deep.mode_id(String(save.data.get("mode", "brave")))))
+		picks.begin(PickOrbs.mode_ids(Deep.mode_id(String(save.data.get("mode", "brave")))), _mode_chosen)
 
 
 func _start_wave() -> void:
@@ -980,7 +983,10 @@ func projectile_hit(pr: Projectile, target: Node3D, push: Vector3) -> void:
 		if target is Dummy:
 			_practice_hit(pr.element, pr.owner_slot)
 		elif target is PickOrbs.Orb:
-			_altar_pick(pr.owner_slot, (target as PickOrbs.Orb).index)
+			if picks.active():
+				picks.choose((target as PickOrbs.Orb).index, pr.owner_slot)  # (the mode: a vote)
+			else:
+				_altar_pick(pr.owner_slot, (target as PickOrbs.Orb).index)
 		elif target is Raider:
 			(target as Raider).take_hit(pr.damage, pr.element, push, pr.effect, pr.owner_slot)
 	else:
@@ -1498,7 +1504,8 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			if value is Dictionary and not (value as Dictionary).is_empty():
 				_pick_hint(String(value.get("kind", "boon")))
 		"taken":
-			altar.show_takers(value if value is Dictionary else {}, _slot_colors())
+			if altar.stage != "mode":  # (the mode stones show the votes: picks.gd, net state "pick_votes")
+				altar.show_takers(value if value is Dictionary else {}, _slot_colors())
 		"perks":
 			_mods_key = ""
 			_apply_masters_here(value if value is Dictionary else {})
@@ -2073,6 +2080,9 @@ func _close_pick() -> void:
 
 ## Host / local, in the breather: walking onto a stone picks it; everyone done (or time up) closes the altar.
 func _pick_step(delta: float) -> void:
+	if picks.active():  # the mode: everyone votes (picks.gd)
+		picks.tick(delta)
+		return
 	var d: Dictionary = net.state_get("pick", {})
 	if d.is_empty():
 		return
@@ -2092,8 +2102,6 @@ func _pick_step(delta: float) -> void:
 		done = true
 	if done and pick_t > 0.6:
 		_close_pick()
-		if String(d.get("kind", "")) == "mode":
-			_mode_chosen()
 
 
 ## Host / local: `slot` takes stone `idx` of the altar showing (once per altar).
@@ -2105,14 +2113,6 @@ func _altar_pick(slot: int, idx: int) -> void:
 	pick_taken[slot] = idx
 	var kind := String(d.get("kind", "boon"))
 	var id := String(ids[idx])
-	if kind == "mode":
-		mode_picks[slot] = id
-		net.state_set("taken", pick_taken)
-		var fm := fighter_of(slot)
-		fx.burst((fm as Node3D).global_position + Vector3.UP, PickOrbs.mode_color(id), 16, 3.0, 0.3, 0.6)
-		sound_all("power_up", (fm as Node3D).global_position, -4.0, 1.2)
-		_note(slot, "%s!" % PickOrbs.mode_name(id))
-		return
 	var p: Dictionary = (perks.get(slot, {}) as Dictionary).duplicate(true)
 	if kind == "master":
 		p["m"] = id
@@ -2329,9 +2329,10 @@ func _update_perk_labels() -> void:
 
 # --- Second pass: the team's mode, Kiko's island surprises, spirit friends, seasons (deep.gd) -----------
 
-## Host / local: the mode stones closed: the team's mode (most picked; a tie stays gentler), then the masters.
-func _mode_chosen() -> void:
-	team_mode = Deep.team_mode(mode_picks, String(save.data.get("mode", "brave")))
+## Host / local: the mode vote is in (picks.gd: the most votes; a tie stays gentler; nobody: the family's last),
+## then the masters.
+func _mode_chosen(_stage: String, id: Variant, _by: int) -> void:
+	team_mode = Deep.mode_id(String(id))
 	if net.forced_mode("EB_MODE") != "":
 		team_mode = Deep.mode_id(net.forced_mode("EB_MODE"))
 	log_mode = team_mode
@@ -2340,7 +2341,7 @@ func _mode_chosen() -> void:
 	net.state_set("mode", team_mode)
 	var pm := PickOrbs.mode(team_mode)
 	_story_for_all(String(PickOrbs.MODE_LINES.get(team_mode, "Let's go!")), String(pm.get("pic", "star")), PickOrbs.mode_color(team_mode))
-	print("Elemental Bender: mode %s (picks %s)" % [team_mode, str(mode_picks)])
+	print("Elemental Bender: mode %s (votes %s)" % [team_mode, str(picks.history[-1][3]) if not picks.history.is_empty() else "{}"])
 	var masters := Boons.unlocked_masters(int(save.data.waves), int(save.data.generals))
 	if masters.size() >= 2 and perks.is_empty():
 		_open_pick("master", masters)
