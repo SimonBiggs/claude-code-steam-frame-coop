@@ -251,6 +251,24 @@ export async function playstats(o: { since?: string; game?: string; recent?: num
     recent: runs.slice(-(o.recent ?? 10)).map(r => `${String(r.date).slice(0, 16)} ${r.device} ${r.game} ${r.mode ?? ""} ${r.end ?? ""}`) };
 }
 
+/** Who plays what (~/GodotProjects/play-record, refreshed every 15 min by duo-catch-up): per person + the TV, most
+ *  played 7/30 days, games they keep coming back to, Steam's last-2-weeks playtime, and the arcade's estimated vs
+ *  measured hours (IN-DEPTH candidates). dev.favourites({full: true}) = the whole favourites.md. */
+export async function favourites(o: { full?: boolean } = {}) {
+  const dir = join(HOME, "GodotProjects/play-record");
+  if (o.full) return await readFile(join(dir, "favourites.md"), "utf8").catch(() => "no favourites.md yet: run play-record collect");
+  const s = JSON.parse(await readFile(join(dir, "data/summary.json"), "utf8").catch(() => "{}"));
+  const fm = (m: number) => m >= 60 ? `${Math.floor(m / 60)}h${String(Math.round(m % 60)).padStart(2, "0")}` : `${Math.round(m)}m`;
+  const list = (xs: any[]) => (xs || []).map(([g, m]: any) => `${g} ${fm(m)}`).join(", ") || "-";
+  const people: Record<string, any> = {};
+  for (const [p, v] of Object.entries<any>(s.people || {}))
+    people[p] = { week: list(v.top7), month: list(v.top30), comeback: (v.comeback || []).map(([g, n]: any) => `${g} (${n} days)`).join(", ") || "-", steam_2wks: list(v.steam_2wks) };
+  const arcade: Record<string, string> = {};
+  for (const d of Object.values<any>(s.arcade_depth || {}))
+    arcade[d.title] = `est ${d.estimate[0]}-${d.estimate[1]} h, projected ${d.projection ? d.projection.toFixed(1) + " h" : "-"}: ${d.verdict}`;
+  return { updated: s.updated ? new Date(s.updated * 1000).toISOString().slice(0, 16) : "never", report: join(dir, "favourites.md"), people, arcade, voice: s.voice || {} };
+}
+
 /** Everything that needs tidying: unmerged finished branches, stale worktrees, uncommitted work, staging drift,
  *  tool copies out of sync, broken services. Returns {clean, issues: [{kind, what, fix}]}. */
 /** Worktrees that live for good (merged branch or not): wt-merge is the deploy steward's permanent merge worktree
@@ -908,6 +926,7 @@ export function help() {
   dev.land(branch, genTests, botId, otherBots, msg)  merge a finished branch via wt-merge, test in staging, deploy TV+Decks, merge live main
   dev.playstats({since?, game?})     how the family really played: RUN lines every machine pushed to the Steam Machine
   dev.playRuns({since?, game?})      those RUN lines as objects ({device, recv, ...run})
+  dev.favourites({full?})            who plays what: favourites per person + TV, arcade estimated vs measured hours (play-record)
   dev.lone(ids?) / dev.loneRun(id, project?)  lone flat player check (one Deck player, no VR, nobody else): rounds advance, never frozen (dev.land runs it)
   dev.guard(game)                    a game's long guard bots (LAND_GUARDS; dev.land runs them when a branch touches the game)
   dev.nightly(tests?)                full sweep of every test (every seed/date; landings run GEN_QUICK samples); nightly at 03:30
