@@ -23,6 +23,9 @@ const Seeded := preload("res://core/seeded.gd")
 const StoryCard := preload("res://core/story_card.gd")
 const Deep := preload("res://games/duo_arena/deep.gd")
 const TestTime := preload("res://tests/test_time.gd")
+const Zone := preload("res://games/duo_arena/zone.gd")
+const PickOrbs := preload("res://core/pick_orbs.gd")
+const VrViewCheck := preload("res://core/vr_view_check.gd")
 
 var fails := 0
 var checks := 0
@@ -188,6 +191,33 @@ func _initialize() -> void:
 		one.call()
 		worst = TestTime.worst(worst, (Time.get_ticks_usec() - t1) / 1000.0, one)
 	_expect(worst < 30.0, "an arena + its surprises generate and check in < 30 ms (%.2f ms; Decks ~3x)" % worst)
+	# The pick row placed for a VR player (zone.gd orb_place): from every head spot round the row (standing and
+	# seated eyes), no orb or name hides behind another orb further than PICK_BESIDE_D (VrViewCheck.pick_hidden's
+	# rule; 2026-11-15 solo VR: HEARTS behind BUBBLE), and with no pillar in the way the middle orb is ORB_NEAR away
+	# (Nova's card has room to dodge). The straight row must fail the sweep, or the sweep proves nothing.
+	var hid_placed := _row_hidden([], true)
+	_expect(hid_placed == "", "the placed pick row never hides an orb behind another (%s)" % hid_placed)
+	_expect(_row_hidden([], false) != "", "the sweep finds the straight row's end-on view (it can see a hidden orb)")
+	# ... in real arenas: the orbs keep clear of every pillar, and the row is mostly the ideal one.
+	var bad_place := ""
+	var ideal := 0
+	var tried := 0
+	for k in 40:
+		var lay := Gen.layout(4242 + k * 7, String(Gen.ZONES[k % Gen.ZONES.size()].id))
+		var pillars: Array = lay.get("pillars", [])
+		for ix in range(-8, 9):
+			for iz in range(-8, 9):
+				var head := Vector3(ix, 1.6, Zone.ORB_Z + iz)
+				var place := Zone.orb_place(head, pillars)
+				tried += 1
+				if place == Zone.orb_place(head, []):
+					ideal += 1
+				if not Zone.orbs_clear(place, pillars) and not (place[0] == 0.0 and place[2] == Zone.ORB_Z) and bad_place == "":
+					bad_place = "seed %d head %s: %s" % [4242 + k * 7, head, place]
+	_expect(bad_place == "", "placed pick orbs keep clear of pillars (%s)" % bad_place)
+	_expect(ideal * 10 >= tried * 8, "the pick row is square on to the VR player in most arenas (%d of %d)" % [ideal, tried])
+	var hid_pillars := _row_hidden(Gen.layout(4242, "neon").get("pillars", []), true)
+	_expect(hid_pillars == "", "the placed row hides no orb in Neon City either (%s)" % hid_pillars)
 	# Trophy Hall.
 	var today := Seeded.today()
 	var sm := Prog.progress_summary(Prog.sample(today), today)
@@ -196,6 +226,60 @@ func _initialize() -> void:
 	print("BOT RESULT: %s (%d checks, %d failures)" % ["PASS" if fails == 0 else "FAIL", checks, fails])
 	print("DUO ARENA GEN: %s" % ("PASS" if fails == 0 else "FAIL"))
 	quit(1 if fails > 0 else 0)
+
+
+## The first head spot (sweeping the arena round the pick row) that sees an orb or its name behind another orb more
+## than PICK_BESIDE_D away, "" if none. placed: the row goes where zone.gd orb_place puts it, else straight.
+func _row_hidden(pillars: Array, placed: bool) -> String:
+	const NAME_HALF := 0.75  # half a MAX_NAME (9 letter) name at the orbs' 64 px font, as pick_hidden samples it
+	var n := 3
+	for eye in [1.6, 1.15]:
+		for ix in range(-32, 33):
+			for iz in range(-32, 33):
+				var head := Vector3(ix * 0.25, eye, Zone.ORB_Z + iz * 0.25)
+				var place: Array = Zone.orb_place(head, pillars, n) if placed else []
+				var spots: Array[Vector3] = []
+				var inside := false
+				for i in n:
+					spots.append(Zone.orb_spot(i, n, place))
+					if Vector2(head.x - spots[i].x, head.z - spots[i].z).length() < PickOrbs.BALL_R + 0.3:
+						inside = true
+				if inside:
+					continue
+				if placed and pillars.is_empty() and Vector2(head.x - spots[1].x, head.z - spots[1].z).length() < Zone.ORB_NEAR - 0.05:
+					return "eye %.2f at (%.2f, %.2f): the middle orb only %.2f m away" % [eye, head.x, head.z, Vector2(head.x - spots[1].x, head.z - spots[1].z).length()]
+				for j in n:
+					var o := spots[j]
+					if head.distance_to(o) > VrViewCheck.PICK_SEE_D:
+						continue
+					var flat := Vector3(o.x - head.x, 0.0, o.z - head.z).normalized()
+					var right := flat.cross(Vector3.UP)
+					var aims: Array[Vector3] = [o]
+					for fx in [-1.0, 0.0, 1.0]:
+						for fy in [-0.16, 0.0, 0.16]:
+							aims.append(o + Vector3(0, -0.95 + fy, 0) + right * NAME_HALF * fx)
+					for aim in aims:
+						for i in n:
+							if i == j:
+								continue
+							var t := _ray_ball(head, aim, spots[i], PickOrbs.BALL_R)
+							if t > VrViewCheck.PICK_BESIDE_D:
+								return "eye %.2f at (%.2f, %.2f) row %s: orb %d behind orb %d, %.1f m away" % [eye, head.x, head.z, place, j, i, t]
+	return ""
+
+
+## Distance along head -> aim where it first enters the ball (centre c, radius r), -1 if it misses before 97 % of the way.
+func _ray_ball(head: Vector3, aim: Vector3, c: Vector3, r: float) -> float:
+	var d := aim - head
+	var l := d.length()
+	d /= l
+	var m := head - c
+	var b := m.dot(d)
+	var disc := b * b - (m.length_squared() - r * r)
+	if disc < 0.0:
+		return -1.0
+	var t := -b - sqrt(disc)
+	return t if t >= 0.0 and t <= l * 0.97 else -1.0
 
 
 func _check_any(x: Dictionary) -> Array:

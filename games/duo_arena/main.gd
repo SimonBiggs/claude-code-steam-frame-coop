@@ -2481,15 +2481,25 @@ func _begin_pick(stage: String) -> void:
 	if Picks.TEAM_STAGES.has(stage):  # everyone votes (team_picks.gd)
 		team_picks.begin(stage, ids, _team_voted)
 	else:
-		zone.show_orbs(stage, ids)
+		var place := orb_place()
+		zone.show_orbs(stage, ids, place)
 		if net.mode == "host":
-			net.event("orbs", [stage, ids])
+			net.event("orbs", [stage, ids, place])
 	net.state_set("da_phase", "pick:" + stage)
 	var mid := Picks.find(stage, Picks.default_pick(ids))
 	var line := {"mode": "Pick how brave!", "hero": "Pick your hero!", "perk": "Pick a power!", "gift": "Nova's gift! Pick one!"}
 	_story_for_all(String(line[stage]), String(mid.get("pic", "star")), mid.get("color", NOVA_COLOR), true)
 	sound("bubble", -2.0, 0.9)
 	print("PICK %s: %s (%.0f s)" % [stage, ids, pick_t])
+
+
+## Host / local: where the pick row goes (zone.gd orb_place: square on to the VR player); [] with nobody in VR.
+func orb_place() -> Array:
+	for p in players:
+		if p.vr and not p.ghost:
+			var at: Vector3 = p.xr_camera.global_position if p.xr_camera != null and p.xr_camera.is_inside_tree() else p.global_position
+			return zone.orb_place(at, zone.lay.get("pillars", []))
+	return []
 
 
 func _pick_tick(delta: float) -> void:
@@ -2677,7 +2687,7 @@ func _apply_deep_event(kind: String, args: Array) -> bool:
 			if (args[1] as Array).is_empty():
 				zone.clear_orbs()
 			else:
-				zone.show_orbs(String(args[0]), args[1])
+				zone.show_orbs(String(args[0]), args[1], args[2] if args.size() > 2 and args[2] is Array else [])
 		"take":
 			if team_picks.vote_row():
 				team_picks.take_fx(int(args[0]), int(args[1]))  # (a team vote's winner)

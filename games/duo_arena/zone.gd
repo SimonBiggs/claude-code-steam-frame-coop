@@ -5,7 +5,7 @@ extends Node3D
 ##   (a plume; the host hurts and pushes players and monsters inside: main.on_pad_burst).
 ## - warn(pos, r, colour, secs): a pulsing ring on the floor that stays until a boss's attack lands (its TELL).
 ## - show_orbs(stage, ids): the PICK orbs (picks.gd) in a row in front of the start, drawn by the shared
-##   core/pick_orbs.gd (a glowing ball, a big picture, a short name). Shoot one (its Orb body's hit -> main.on_orb_hit)
+##   core/pick_orbs.gd (a glowing ball, a big picture, a short name), placed for a VR player (orb_place). Shoot one (its Orb body's hit -> main.on_orb_hit)
 ##   or walk into it (host: touches). take(i, slot) adds a little dot in the slot's colour circling it. The middle orb
 ##   glows brightest (taken for whoever doesn't choose).
 ## - NOVA, the little light-bot, floats over the middle (cheer() makes her bounce).
@@ -28,6 +28,11 @@ const UiKit := preload("res://core/ui_kit.gd")
 const ORB_Z := -3.5  # (arenagen.gd SAFE_SPOTS keeps this row clear)
 const ORB_Y := 1.4
 const ORB_GAP := 2.6
+## A VR player sees the pick row the way they would from the start (orb_place): square on to them, its middle
+## ORB_NEAR away. A straight row seen end-on hid one orb behind the next, and a row right beside the head left Nova's
+## card no room to dodge (2026-11-15, solo VR bots). The orbs keep ORB_CLEAR from the zone's pillars.
+const ORB_NEAR := 3.5  # (the start spot is this far from the row's middle)
+const ORB_CLEAR := 1.0  # an orb's middle to a pillar's side (BALL_R 0.6 + room for its name)
 const PYLON_R := 27.0
 
 var main
@@ -226,13 +231,64 @@ func warn(pos: Vector3, radius: float, col: Color, secs: float) -> void:
 
 # --- Pick orbs (core/pick_orbs.gd) --------------------------------------------------------------------------
 
-func show_orbs(stage: String, ids: Array) -> void:
+## place: [turn degrees, middle x, middle z] (orb_place: the host decides and sends it, so every machine has the
+## same row); [] = the row straight in front of the start.
+func show_orbs(stage: String, ids: Array, place: Array = []) -> void:
 	var list: Array = []
 	for id in ids:
 		var d := Picks.find(stage, String(id))
 		list.append({"id": String(id), "name": String(d.get("name", id)), "pic": String(d.get("pic", "star")),
 			"color": d.get("color", Color.WHITE)})
-	picker.show_orbs(stage, list, Vector3(0, 0, ORB_Z), ORB_GAP, ORB_Y)
+	var ok := place.size() == 3
+	picker.position = Vector3(float(place[1]), 0, float(place[2])) if ok else Vector3(0, 0, ORB_Z)
+	picker.rotation = Vector3(0, deg_to_rad(float(place[0])) if ok else 0.0, 0)
+	picker.show_orbs(stage, list, Vector3.ZERO, ORB_GAP, ORB_Y)
+
+
+## Where the pick row goes for a VR player at `at` (head or feet: only x / z count), among `pillars` (the zone's):
+## [turn degrees, middle x, middle z]. Ideal: square on to them with its middle ORB_NEAR away (slid back from the
+## start's spot along the line to them when they're nearer); a turn or slide that would bring an orb within ORB_CLEAR
+## of a pillar is cut back (3/4, 1/2 ...) down to the plain row at the start (arenagen.gd SAFE_SPOTS keeps that clear).
+## The same answer for the same head and zone (tests/duo_arena_gen_test.gd sweeps heads round it).
+static func orb_place(at: Vector3, pillars: Array, n := 3) -> Array:
+	var home := Vector3(0, 0, ORB_Z)
+	var to := Vector3(home.x - at.x, 0.0, home.z - at.z)
+	var dist := to.length()
+	var dir := to / dist if dist > 0.01 else Vector3.FORWARD
+	var turn := rad_to_deg(atan2(dir.x, dir.z))  # the row square on to the line from the head (either way round)
+	while turn > 90.0:
+		turn -= 180.0
+	while turn < -90.0:
+		turn += 180.0
+	var slide := maxf(0.0, ORB_NEAR - dist)
+	for tk in [1.0, 0.75, 0.5, 0.25]:
+		for sk in [1.0, 0.75, 0.5, 0.25, 0.0]:
+			var c: Vector3 = home + dir * slide * sk
+			var place := [snappedf(turn * tk, 0.1), snappedf(c.x, 0.01), snappedf(c.z, 0.01)]
+			if orbs_clear(place, pillars, n):
+				return place
+	return [0.0, home.x, home.z]
+
+
+## Every orb of a row `place` at least ORB_CLEAR from every pillar's side, and well inside the arena.
+static func orbs_clear(place: Array, pillars: Array, n := 3) -> bool:
+	for i in n:
+		var o := orb_spot(i, n, place)
+		if Vector2(o.x, o.z).length() > Gen.ARENA_RADIUS - 3.0:
+			return false
+		for q in pillars:
+			var gap := Vector2(maxf(absf(o.x - q.x) - Gen.PILLAR_HALF, 0.0), maxf(absf(o.z - q.z) - Gen.PILLAR_HALF, 0.0)).length()
+			if gap < ORB_CLEAR:
+				return false
+	return true
+
+
+## Where orb i of n floats (its middle) for a row `place` ([] = straight in front of the start).
+static func orb_spot(i: int, n: int, place: Array = []) -> Vector3:
+	var ok := place.size() == 3
+	var c := Vector3(float(place[1]), 0, float(place[2])) if ok else Vector3(0, 0, ORB_Z)
+	var off := Vector3((i - (n - 1) * 0.5) * ORB_GAP, ORB_Y, 0.0).rotated(Vector3.UP, deg_to_rad(float(place[0])) if ok else 0.0)
+	return c + off
 
 
 func clear_orbs() -> void:
