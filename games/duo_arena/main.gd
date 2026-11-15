@@ -1181,6 +1181,7 @@ func _process(delta: float) -> void:
 	_update_tether(delta)
 	if pick_stage != "":
 		_pick_tick(delta)
+		_keep_pickups_off_picks()
 		if pick_stage != "":
 			return  # the orbs hold the game until everyone has picked (or the time runs out)
 	zone.host_step(delta, not in_break and wave > 0)
@@ -2495,11 +2496,33 @@ func _begin_pick(stage: String) -> void:
 
 ## Host / local: where the pick row goes (zone.gd orb_place: square on to the VR player); [] with nobody in VR.
 func orb_place() -> Array:
+	var at = _vr_head_at()
+	return zone.orb_place(at, zone.lay.get("pillars", [])) if at != null else []
+
+
+## Host / local: the VR player's head (their body without a head camera), null with nobody in VR here.
+func _vr_head_at():
 	for p in players:
 		if p.vr and not p.ghost:
-			var at: Vector3 = p.xr_camera.global_position if p.xr_camera != null and p.xr_camera.is_inside_tree() else p.global_position
-			return zone.orb_place(at, zone.lay.get("pillars", []))
-	return []
+			return p.xr_camera.global_position if p.xr_camera != null and p.xr_camera.is_inside_tree() else p.global_position
+	return null
+
+
+## Host / local, every frame of a pick: no pickup sits between the VR player and the pick row (zone.gd
+## pick_keep_out), so every orb's name can be read. Machines mirror the host's pickups (snapshot positions).
+func _keep_pickups_off_picks() -> void:
+	var row: Array = zone.orbs
+	var at = _vr_head_at()
+	if row.size() < 1 or at == null or not is_instance_valid(row[0]) or not is_instance_valid(row[row.size() - 1]):
+		return
+	var a: Vector3 = (row[0] as Node3D).global_position
+	var b: Vector3 = (row[row.size() - 1] as Node3D).global_position
+	for k in get_tree().get_nodes_in_group("pickups"):
+		if k.ghost or not k.is_inside_tree():
+			continue
+		var to := ZoneScript.pick_keep_out(k.global_position, at, a, b, zone.lay.get("pillars", []))
+		if to != k.global_position:
+			k.global_position = to
 
 
 func _pick_tick(delta: float) -> void:

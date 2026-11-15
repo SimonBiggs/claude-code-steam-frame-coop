@@ -218,6 +218,15 @@ func _initialize() -> void:
 	_expect(ideal * 10 >= tried * 8, "the pick row is square on to the VR player in most arenas (%d of %d)" % [ideal, tried])
 	var hid_pillars := _row_hidden(Gen.layout(4242, "neon").get("pillars", []), true)
 	_expect(hid_pillars == "", "the placed row hides no orb in Neon City either (%s)" % hid_pillars)
+	# Pickups dropped anywhere are moved out of the pick row's view (zone.gd pick_keep_out, main.gd every frame of a
+	# pick): from every head spot (standing and seated) no pickup box hides any orb or any part of its name
+	# (2026-11-15 solo VR: a HEALTH box 1.8 m from a seated player hid HEAVY). Unmoved, they must hide some (or the
+	# sweep proves nothing).
+	var pk_hid := _pickup_hides([], true)
+	_expect(pk_hid == "", "pickups never hide a pick orb's name (%s)" % pk_hid)
+	_expect(_pickup_hides([], false) != "", "the pickup sweep finds a pickup in front of a name when nothing moves it")
+	var pk_hid2 := _pickup_hides(Gen.layout(4242, "neon").get("pillars", []), true)
+	_expect(pk_hid2 == "", "pickups never hide a pick's name in Neon City either (%s)" % pk_hid2)
 	# Trophy Hall.
 	var today := Seeded.today()
 	var sm := Prog.progress_summary(Prog.sample(today), today)
@@ -265,6 +274,51 @@ func _row_hidden(pillars: Array, placed: bool) -> String:
 							var t := _ray_ball(head, aim, spots[i], PickOrbs.BALL_R)
 							if t > VrViewCheck.PICK_BESIDE_D:
 								return "eye %.2f at (%.2f, %.2f) row %s: orb %d behind orb %d, %.1f m away" % [eye, head.x, head.z, place, j, i, t]
+	return ""
+
+
+## The first (head, pickup spot) where a pickup box (pickup.gd: 0.5-0.6 m, spinning, bobbing 0.8 m up) hides an orb
+## or part of its name more than 0.6 m from the eyes (VrViewCheck.pick_hidden's rule), "" if none. push: the pickup
+## goes where zone.gd pick_keep_out moves it first. Pickups within 0.9 m of the player are taken (pickup.gd).
+func _pickup_hides(pillars: Array, push: bool) -> String:
+	const NAME_HALF := 0.75
+	var n := 3
+	var box_half := Vector3(0.4, 0.42, 0.4)
+	for eye in [1.6, 1.15]:
+		for ix in range(-4, 5):
+			for iz in range(-4, 5):
+				var head := Vector3(ix * 2.0, eye, Zone.ORB_Z + iz * 2.0)
+				var place: Array = Zone.orb_place(head, pillars, n)
+				var spots: Array[Vector3] = []
+				var inside := false
+				for i in n:
+					spots.append(Zone.orb_spot(i, n, place))
+					if Vector2(head.x - spots[i].x, head.z - spots[i].z).length() < PickOrbs.BALL_R + 0.3:
+						inside = true
+				if inside:
+					continue
+				var aims: Array[Vector3] = []
+				for o in spots:
+					if head.distance_to(o) > VrViewCheck.PICK_SEE_D:
+						continue
+					var right := Vector3(o.x - head.x, 0.0, o.z - head.z).normalized().cross(Vector3.UP)
+					aims.append(o)
+					for fx in [-1.0, 0.0, 1.0]:
+						for fy in [-0.16, 0.0, 0.16]:
+							aims.append(o + Vector3(0, -0.95 + fy, 0) + right * NAME_HALF * fx)
+				var mid := (head + spots[1]) * 0.5
+				for px in range(-14, 15):
+					for pz in range(-14, 15):
+						var p := Vector3(mid.x + px * 0.5, 0.0, mid.z + pz * 0.5)
+						if push:
+							p = Zone.pick_keep_out(p, head, spots[0], spots[n - 1], pillars)
+						if Vector2(p.x - head.x, p.z - head.z).length() < 0.9:
+							continue
+						var box := AABB(Vector3(p.x, 0.8, p.z) - box_half, box_half * 2.0)
+						for aim in aims:
+							var hit = box.intersects_segment(head, head.lerp(aim, 0.97))
+							if hit != null and head.distance_to(hit) > 0.6:
+								return "eye %.2f at (%.1f, %.1f) row %s: a pickup at (%.1f, %.1f) hides %s" % [eye, head.x, head.z, place, p.x, p.z, aim]
 	return ""
 
 
