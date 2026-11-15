@@ -63,8 +63,11 @@ func _initialize() -> void:
 								var rd := RoundGen.generate(seed_v, sp)
 								var tspec := {"mode": mode, "time": time, "season": season, "extra_gold": 1 if gift == "gold" else 0}
 								var tl := Deep.tricks(seed_v, tspec, rd)
-								worst_ms = TestTime.worst(worst_ms, (Time.get_ticks_usec() - t1) / 1000.0, func() -> Variant: return Deep.tricks(seed_v, tspec, RoundGen.generate(seed_v, sp)))
-								gen_us += Time.get_ticks_usec() - t1
+								# (the time is taken BEFORE TestTime.worst: its retries + 40 ms gaps once counted in the average, 14.3 ms
+								# "per round" while the worst real round took 13.5 ms: nightly 2026-11-15)
+								var dt_us := Time.get_ticks_usec() - t1
+								gen_us += dt_us
+								worst_ms = TestTime.worst(worst_ms, dt_us / 1000.0, func() -> Variant: return Deep.tricks(seed_v, tspec, RoundGen.generate(seed_v, sp)))
 								checked += 1
 								var tag := "%s %s b%d p%d %ds %s %s seed %d" % [mode, c.id, beds, players, int(time), season, gift, seed_v]
 								for x in RoundGen.check(rd, ok):
