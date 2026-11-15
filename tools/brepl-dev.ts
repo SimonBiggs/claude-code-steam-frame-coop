@@ -27,7 +27,7 @@ const TOOL_COPIES: Record<string, string> = {  // installed file -> repo copy (k
   [join(BIN, "test-throttle")]: "tools/test-throttle", [join(BIN, "duo-nightly-tests")]: "tools/duo-nightly-tests",
   [join(HOME, ".config/systemd/user/duo-nightly-tests.service")]: "tools/systemd/duo-nightly-tests.service", [join(HOME, ".config/systemd/user/duo-nightly-tests.timer")]: "tools/systemd/duo-nightly-tests.timer", [join(BIN, "duo-deploy-deck")]: "tools/duo-deploy-deck",
   [join(HOME, "GodotProjects/duo-arena-deck-build/run.sh")]: "tools/deck-run.sh", [join(HOME, "GodotProjects/duo-arena-deck-build/claude-rc.sh")]: "tools/deck/claude-rc.sh",
-  [join(HOME, ".config/systemd/user/brepl.service")]: "tools/systemd/brepl.service", [join(BIN, "frame-at")]: "tools/frame-at", [join(BIN, "duo-deploy-frame")]: "tools/duo-deploy-frame",
+  [join(HOME, ".config/systemd/user/brepl.service")]: "tools/systemd/brepl.service", [join(BIN, "frame-at")]: "tools/frame-at", [join(BIN, "session-env")]: "tools/session-env", [join(HOME, "GodotProjects/duo-arena-deck-build/session-env")]: "tools/session-env", [join(BIN, "duo-deploy-frame")]: "tools/duo-deploy-frame",
 };
 
 /** Run a shell command: {code, out} (stdout+stderr, trimmed). Never throws. */

@@ -1,0 +1,84 @@
+#!/bin/bash
+# session-env: give a game launched from a shell WITHOUT a display (a Claude Code / ssh / systemd / tmux shell) the
+# graphical session's env, read from the desktop's own processes. Every visible game launch goes through it
+# (gdev run/start, ~/GodotProjects/*/launch.sh). 2026-11-15: `setsid nohup launch.sh &` from a Claude session had no
+# DISPLAY / WAYLAND_DISPLAY / XAUTHORITY, so the arcade ran invisibly ("X11 Display is not available").
+#
+#   . session-env            (source) fill the env in this shell; returns 1 when there is still no display
+#   session-env              print the KEY=VALUE lines it would set (none when a display is already there);
+#                            exit 1 when no display can be found
+#   session-env CMD ARGS...  fill the env, then exec CMD; REFUSES (exit 3, loud) when there is still no display
+#
+# Only acts when DISPLAY and WAYLAND_DISPLAY are BOTH empty, so Steam / desktop launches (env already set) are
+# untouched. Headless runs (--headless, --display-driver headless, godot-test) are never touched: they stay headless.
+# It always SAYS what it borrowed, on stderr (no silent fallbacks). Source: duo-arena/tools/session-env.
+_session_env_vars=(DISPLAY WAYLAND_DISPLAY XAUTHORITY XDG_RUNTIME_DIR DBUS_SESSION_BUS_ADDRESS)
+
+_session_env_headless() {  # args contain a headless Godot flag?
+  local prev=""
+  for a in "$@"; do
+    [ "$a" = "--headless" ] && return 0
+    [ "$prev" = "--display-driver" ] && [ "$a" = "headless" ] && return 0
+    [ "$a" = "--display-driver=headless" ] && return 0
+    prev="$a"
+  done
+  return 1
+}
+
+# Prints KEY=VALUE lines to fill (only keys that are empty here), says where they came from on stderr.
+_session_env_find() {
+  [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ] && return 0
+  local uid name pid line k v found="" out=""
+  uid=$(id -u)
+  # kwin_wayland's environ is unreadable (it has capabilities); plasmashell & co. carry the same session env.
+  # steam / gamescope cover Gaming Mode on a Deck.
+  for name in plasmashell kwin_wayland ksmserver kded6 kded5 Xwayland steam gamescope-wl; do
+    for pid in $(pgrep -u "$uid" -x "$name" 2>/dev/null); do
+      [ -r "/proc/$pid/environ" ] || continue
+      local -A got=()
+      while IFS= read -r -d '' line; do
+        k=${line%%=*}; v=${line#*=}
+        case " ${_session_env_vars[*]} " in *" $k "*) got[$k]=$v ;; esac
+      done < "/proc/$pid/environ" 2>/dev/null
+      [ -n "${got[DISPLAY]:-}${got[WAYLAND_DISPLAY]:-}" ] || { unset got; continue; }
+      for k in "${_session_env_vars[@]}"; do
+        [ -n "${got[$k]:-}" ] && [ -z "${!k:-}" ] && out+="$k=${got[$k]}"$'\n'
+      done
+      found="$name (pid $pid)"
+      break 2
+    done
+  done
+  if [ -z "$found" ]; then
+    echo "⚠⚠ session-env: NO DISPLAY: DISPLAY and WAYLAND_DISPLAY are empty and no desktop session process" \
+         "(plasmashell/kwin/steam/gamescope) was found to borrow them from. A game started now would be INVISIBLE." >&2
+    return 1
+  fi
+  printf '%s' "$out"
+  echo "session-env: this shell had no display; borrowed from $found: $(printf '%s' "$out" | tr '\n' ' ')" >&2
+}
+
+_session_env_apply() {
+  local lines line
+  lines=$(_session_env_find) || return 1
+  while IFS= read -r line; do
+    [ -n "$line" ] && export "${line?}"
+  done <<< "$lines"
+  [ -n "${DISPLAY:-}${WAYLAND_DISPLAY:-}" ]
+}
+
+if [ "${BASH_SOURCE[0]}" != "$0" ]; then  # sourced
+  _session_env_apply
+  return $?
+fi
+if [ $# -eq 0 ]; then
+  _session_env_find
+  exit $?
+fi
+if _session_env_headless "$@" || [ "$(basename "$1")" = "godot-test" ]; then
+  exec "$@"
+fi
+if ! _session_env_apply; then
+  echo "⚠⚠ session-env: REFUSING to start an invisible game: $*" >&2
+  exit 3
+fi
+exec "$@"

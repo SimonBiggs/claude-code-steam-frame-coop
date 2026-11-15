@@ -28,6 +28,8 @@ SteamVR's vrclient.so aborting the game when vrserver dies, 2026-11-13) or exite
 asked). No file, or a normal exit / SIGTERM, ends gdev run as before. Each start deletes the file (start unarmed);
 more than 4 restarts in 2 minutes stops trying (said in the log and on the brepl channel, never quietly).
 Tests: GDEV_GODOT (default: godot on PATH) and GDEV_GODOT_ARGS (e.g. "--headless") change how Godot is started.
+DISPLAY: a visible (non-headless) start from a shell with no DISPLAY / WAYLAND_DISPLAY (Claude Code, ssh, tmux) borrows
+the desktop session's env via session-env and says so (stderr, game log, brepl); with no desktop session it refuses.
 """
 import argparse
 import datetime as dt
@@ -171,6 +173,41 @@ def _restart_spec(proj: Path, code: int) -> dict | None:
     return spec if crashed or spec.get("now") else None
 
 
+def _is_headless(cmd: list) -> bool:
+    return ("--headless" in cmd or "--display-driver=headless" in cmd
+            or any(a == "--display-driver" and b == "headless" for a, b in zip(cmd, cmd[1:]))
+            or Path(cmd[0]).name == "godot-test")
+
+
+def _session_display(proj: Path, cmd: list, env: dict) -> str:
+    """A visible game needs the desktop's display. Launched from a shell without one (Claude Code, ssh, tmux,
+    systemd) it ran INVISIBLY (2026-11-15). Borrow the session env via session-env and SAY so; refuse loudly when
+    there is none. Headless / test runs are never touched. Returns the note to put at the top of the game log."""
+    if _is_headless(cmd) or env.get("DISPLAY") or env.get("WAYLAND_DISPLAY"):
+        return ""
+    helper = shutil.which("session-env") or str(Path.home() / ".local/bin/session-env")
+    r = subprocess.run([helper], capture_output=True, text=True, env=env, timeout=10)
+    if r.stderr:
+        print(r.stderr.rstrip(), file=sys.stderr)
+    for line in r.stdout.splitlines():
+        k, _, v = line.partition("=")
+        if k and v and not env.get(k):
+            env[k] = v
+    if not (env.get("DISPLAY") or env.get("WAYLAND_DISPLAY")):
+        _say(proj, f"[gdev] ⚠⚠ REFUSING to start {proj.name}: no DISPLAY / WAYLAND_DISPLAY and no desktop session "
+                   "to borrow one from, the game would run invisibly. Start it from the desktop or Steam.")
+        sys.exit(3)
+    note = (f"[gdev] {proj.name}: launched without a display; borrowed the desktop session env: "
+            + " ".join(f"{k}={env[k]}" for k in ("DISPLAY", "WAYLAND_DISPLAY", "XAUTHORITY") if env.get(k)))
+    print(note, file=sys.stderr)
+    try:
+        subprocess.run(["brepl", "--pipe", "gdev"], input=note + "\n", text=True, timeout=5,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except Exception:
+        pass  # printed above and written into the game log
+    return note
+
+
 def cmd_run(proj: Path, args) -> None:
     """Foreground launch (for Steam shortcuts): replaces any running instance and waits for the game, starting it
     again when the game asked for that (RESTART in the help)."""
@@ -240,7 +277,11 @@ def cmd_start(proj: Path, args, extra_args: list | None = None, extra_env: dict 
     env["GDEV_SUPERVISED"] = "1" if args.cmd == "run" else ""
     env["GDEV_RESTART_FILE"] = str(restart_file(proj))
     cmd = [godot, *shlex.split(os.environ.get("GDEV_GODOT_ARGS", "")), "--path", str(proj), *(extra_args or [])]
+    display_note = _session_display(proj, cmd, env)
     with open(log, "w") as out:
+        if display_note:
+            out.write(display_note + "\n")
+            out.flush()
         p = subprocess.Popen(cmd, stdout=out, stderr=subprocess.STDOUT, env=env,
                              stdin=subprocess.DEVNULL, start_new_session=True)
     (d / "pid").write_text(str(p.pid))
