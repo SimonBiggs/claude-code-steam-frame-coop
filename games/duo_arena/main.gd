@@ -218,6 +218,7 @@ var perks := {}  # slot -> [perk ids]
 var story_hold_ms := 0  # story cards said with the title wait until then (StoryCard.later)
 var vr_story: Node3D
 var run_logged := false
+var tel_t_ms := 0  # when the last RUN line (or the run) started: each line carries its own "secs" (play-record measures hours)
 var bosses_run: Array = []
 var pads_told := false
 var story_shown := 0  # story cards shown on this machine (bots check it)
@@ -2293,6 +2294,7 @@ func _start_run() -> void:
 		save.data.days = int(save.data.days) + 1
 		save.data.last_day = today
 	save.data.games = int(save.data.games) + 1
+	tel_t_ms = Time.get_ticks_msec()
 	daily = String(save.data.daily) != today and not OS.has_environment("DA_SEED")
 	run_seed = int(OS.get_environment("DA_SEED")) if OS.has_environment("DA_SEED") else (Gen.daily_seed() if daily else Seeded.fresh_seed())
 	if daily:
@@ -2479,15 +2481,25 @@ func _begin_pick(stage: String) -> void:
 	if Picks.TEAM_STAGES.has(stage):  # everyone votes (team_picks.gd)
 		team_picks.begin(stage, ids, _team_voted)
 	else:
-		zone.show_orbs(stage, ids)
+		var place := orb_place()
+		zone.show_orbs(stage, ids, place)
 		if net.mode == "host":
-			net.event("orbs", [stage, ids])
+			net.event("orbs", [stage, ids, place])
 	net.state_set("da_phase", "pick:" + stage)
 	var mid := Picks.find(stage, Picks.default_pick(ids))
 	var line := {"mode": "Pick how brave!", "hero": "Pick your hero!", "perk": "Pick a power!", "gift": "Nova's gift! Pick one!"}
 	_story_for_all(String(line[stage]), String(mid.get("pic", "star")), mid.get("color", NOVA_COLOR), true)
 	sound("bubble", -2.0, 0.9)
 	print("PICK %s: %s (%.0f s)" % [stage, ids, pick_t])
+
+
+## Host / local: where the pick row goes (zone.gd orb_place: square on to the VR player); [] with nobody in VR.
+func orb_place() -> Array:
+	for p in players:
+		if p.vr and not p.ghost:
+			var at: Vector3 = p.xr_camera.global_position if p.xr_camera != null and p.xr_camera.is_inside_tree() else p.global_position
+			return zone.orb_place(at, zone.lay.get("pillars", []))
+	return []
 
 
 func _pick_tick(delta: float) -> void:
@@ -2634,7 +2646,10 @@ func _log_run(end: String) -> void:
 	var perk_count := 0
 	for k in perks:
 		perk_count += (perks[k] as Array).size()
-	Telemetry.run(GAME_ID, {"end": end, "wave": wave, "score": score, "seed": run_seed, "daily": daily, "mode": game_mode,
+	var now_ms := Time.get_ticks_msec()
+	var secs := snappedf(float(now_ms - tel_t_ms) / 1000.0, 0.1) if tel_t_ms > 0 else 0.0
+	tel_t_ms = now_ms
+	Telemetry.run(GAME_ID, {"end": end, "wave": wave, "secs": secs, "score": score, "seed": run_seed, "daily": daily, "mode": game_mode,
 		"zone": zone.zone_id, "leg": leg, "players": active_player_count(), "downs": wave_downs, "heroes": hero_list,
 		"perks": perk_count, "bosses": bosses_run.duplicate(), "won": won, "waves_total": int(save.data.waves),
 		"machines": net.peer_count() if net.mode == "host" else 0}.merged(deep.telemetry()))
@@ -2672,7 +2687,7 @@ func _apply_deep_event(kind: String, args: Array) -> bool:
 			if (args[1] as Array).is_empty():
 				zone.clear_orbs()
 			else:
-				zone.show_orbs(String(args[0]), args[1])
+				zone.show_orbs(String(args[0]), args[1], args[2] if args.size() > 2 and args[2] is Array else [])
 		"take":
 			if team_picks.vote_row():
 				team_picks.take_fx(int(args[0]), int(args[1]))  # (a team vote's winner)

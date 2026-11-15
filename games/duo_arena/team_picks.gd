@@ -5,7 +5,7 @@ extends "res://core/pick_flow.gd"
 ## that is your vote, a dot in your colour circles it on every machine. Everyone has voted (or the time is up): the
 ## most votes win; a tie stays GENTLER on the mode, the middle orb for a gift; nobody voted: the middle orb.
 ## HERO and PERK are each player's OWN pick on the same orbs (main.gd on_orb_hit): not a team vote.
-## Sync: the sticky "orbs" event [stage, ids] and "take" [i, slot] (main.gd draws them on every machine).
+## Sync: the sticky "orbs" event [stage, ids, place] and "take" [i, slot] (main.gd draws them on every machine).
 
 const Picks := preload("res://games/duo_arena/picks.gd")
 
@@ -24,8 +24,9 @@ func make_orbs() -> PickOrbs:
 ## Host / local: a team pick's orbs go up.
 func begin(new_stage: String, ids: Array, done: Callable) -> void:
 	start(new_stage, ids, done)
-	main.zone.show_orbs(new_stage, ids)
-	publish([new_stage, ids])
+	var place: Array = main.orb_place()
+	main.zone.show_orbs(new_stage, ids, place)
+	publish([new_stage, ids, place])
 
 
 func vote_row() -> bool:
