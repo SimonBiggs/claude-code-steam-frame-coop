@@ -291,6 +291,57 @@ static func orb_spot(i: int, n: int, place: Array = []) -> Vector3:
 	return c + off
 
 
+## PICKUPS KEEP OUT OF THE PICK ROW'S VIEW: while the row shows, no dropped pickup sits between the VR player and the
+## orbs (or under them), so the names (0.95 m under each orb, about pickup height) can always be read (2026-11-15:
+## a HEALTH box 1.8 m from a seated VR player hid HEAVY in ~1 of 10 solo VR bots). The keep-out zone: the triangle
+## from the head to the two outer orbs (x / z), grown by PICK_KEEP_OUT. main.gd moves any pickup in it out to the
+## nearest clear spot every frame of a pick (host / local; machines mirror the host's pickups).
+const PICK_KEEP_OUT := 1.25  # half a 9-letter name (0.75 m) + a spinning pickup's half width (0.4 m) + room
+
+
+## How far ground spot `p` is from the keep-out triangle head / a / b (only x / z count): 0 inside.
+static func view_gap(p: Vector3, head: Vector3, a: Vector3, b: Vector3) -> float:
+	var q := Vector2(p.x, p.z)
+	var tri: Array[Vector2] = [Vector2(head.x, head.z), Vector2(a.x, a.z), Vector2(b.x, b.z)]
+	if Geometry2D.point_is_inside_triangle(q, tri[0], tri[1], tri[2]):
+		return 0.0
+	var best := INF
+	for i in 3:
+		best = minf(best, q.distance_to(Geometry2D.get_closest_point_to_segment(q, tri[i], tri[(i + 1) % 3])))
+	return best
+
+
+## Where a pickup at `p` goes so it is out of the pick row's keep-out zone (view_gap > PICK_KEEP_OUT): itself when
+## already clear, else the nearest spot on rings round it (0.5 m steps) that is clear, inside the arena and off the
+## pillars. The same answer for the same spot (tests/duo_arena_gen_test.gd checks no name is ever hidden).
+static func pick_keep_out(p: Vector3, head: Vector3, a: Vector3, b: Vector3, pillars: Array) -> Vector3:
+	if view_gap(p, head, a, b) > PICK_KEEP_OUT:
+		return p
+	for ri in range(1, 33):
+		var r := ri * 0.5
+		var best := p
+		var best_gap := -1.0
+		for k in 24:
+			var ang := TAU * k / 24.0
+			var c := Vector3(p.x + cos(ang) * r, p.y, p.z + sin(ang) * r)
+			if Vector2(c.x, c.z).length() > Gen.ARENA_RADIUS - 2.0:
+				continue
+			var on_pillar := false
+			for q in pillars:
+				if maxf(absf(c.x - q.x), absf(c.z - q.z)) < Gen.PILLAR_HALF + 0.6:
+					on_pillar = true
+					break
+			if on_pillar:
+				continue
+			var gap := view_gap(c, head, a, b)
+			if gap > PICK_KEEP_OUT + 0.05 and gap > best_gap:
+				best = c
+				best_gap = gap
+		if best_gap > 0.0:
+			return best
+	return p
+
+
 func clear_orbs() -> void:
 	picker.clear()
 

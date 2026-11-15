@@ -1194,9 +1194,12 @@ func _update_sword_demo(delta: float) -> void:
 	if w >= 2 and int(get_meta("demo_wave", 0)) == 0 or (w >= 4 and int(get_meta("demo_wave", 0)) == 2 and int(get_meta("swapped", 0)) == 0):
 		set_meta("demo_wave", w)
 		set_meta("demo_left", 14.0 if w < 4 else 10.0)
-	var left: float = float(get_meta("demo_left", 0.0)) - delta
+	# Never while the pick row shows: the figure stands 1.6 m in front of the face, right where the orbs' names are
+	# (2026-11-15 solo VR: its ear dot hid BUBBLE); its time waits for the pick to end.
+	var picking: bool = main.zone != null and main.zone.picker != null and main.zone.picker.showing()
+	var left: float = float(get_meta("demo_left", 0.0)) - (0.0 if picking else delta)
 	set_meta("demo_left", left)
-	var want: bool = left > 0.0 and int(get_meta("swapped", 0)) < 2 and not is_down and not main.game_over
+	var want: bool = left > 0.0 and int(get_meta("swapped", 0)) < 2 and not is_down and not main.game_over and not picking
 	if not want:
 		if demo != null:
 			demo.visible = false

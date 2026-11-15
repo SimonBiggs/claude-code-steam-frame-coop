@@ -373,6 +373,32 @@ func _run() -> void:
 	_clear_ui()
 	await _frames(2)
 
+	# 5e. a dropped pickup (an Area3D with a spinning mesh, Duo Arena pickup.gd) in front of a pick's name hides it:
+	# pickups are real occluders, never skipped as "moving" things (2026-11-15: a HEALTH box hid HEAVY; Duo Arena
+	# keeps them out of the row's view instead, zone.gd pick_keep_out).
+	var prow := PickOrbs.new()
+	world.add_child(prow)
+	prow.show_orbs("mode", ents, Vector3(0, 0, -3.0), 1.6, 1.2)
+	var pk := Area3D.new()
+	pk.name = "Pickup"
+	var pkm := MeshInstance3D.new()
+	var pkb := BoxMesh.new()
+	pkb.size = Vector3(0.5, 0.5, 0.5)
+	pkm.mesh = pkb
+	pkm.position.y = 0.8
+	pk.add_child(pkm)
+	world.add_child(pk)
+	pk.global_position = Vector3(0, 0, -1.5)
+	await _frames(3)
+	var pk_probs := ", ".join(VrViewCheck.problems(root))
+	_check(pk_probs.contains("hidden behind") and pk_probs.contains("Pickup"), "a pickup in front of a pick's name is reported: %s" % pk_probs)
+	pk.global_position = Vector3(4, 0, -1.5)
+	await _frames(2)
+	_check(not ", ".join(VrViewCheck.problems(root)).contains("hidden behind"), "and not once it is out of the way: %s" % [VrViewCheck.problems(root)])
+	pk.free()
+	prow.free()
+	await _frames(2)
+
 	# 6. games use the shared PAUSED card (no hand-made ones left to pile up)
 	for dir in DirAccess.get_directories_at("res://games"):
 		var path := "res://games/%s/main.gd" % dir
