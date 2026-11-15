@@ -93,6 +93,14 @@ const CATEGORIES := [
 	# What's New (arcade/whats_new.gd): a picture board of what changed in the games lately, a sparkly NEW! on what
 	# nobody in the family has opened yet. First, so a fresh arcade with news opens on it (else on the HALL).
 	{"id": "new", "name": "NEW!", "color": Color(1.0, 0.95, 0.55)},
+	# The big games (asked for by the kids, 2026-11-15): only games with about 10 HOURS of unique, non-repeating play
+	# (a story, many different places, unlocks, saves). A game joins with "in_depth": true next to its "cat" in GAMES
+	# (a short hour estimate beside it); a deep but repetitive loop doesn't count. Shown even with no games yet
+	# ("always"), with the "empty" line instead of cards. 2026-11-15 count of unique play (levels, bosses, story,
+	# unlocks read from each game's code): none reaches 10 h yet. Biggest: Dungeon Delve 4-6 h, Mech Titans 4-5 h,
+	# Crystal Saga 3-4 h, Party Board 3-4 h, Duo Arena 2.5-3.5 h, Marble Maze 2.5-3.5 h; most others 1-3 h.
+	{"id": "in_depth", "name": "IN-DEPTH", "color": Color(0.55, 1.0, 0.85), "always": true,
+		"empty": "No games here yet!\nThis is for the BIG games:\nabout 10 hours of new things to play."},
 	# The Family Trophy Hall (arcade/hall.gd): every story game's friend, how far the family grew it, today's golden
 	# stars. First, so it's what a fresh arcade shows. A filter like 1 PLAYER: games with a games/<game>/progress.gd.
 	{"id": "hall", "name": "HALL", "color": Color(1.0, 0.82, 0.3)},
@@ -698,6 +706,9 @@ func _tab_of(cat_id: String) -> int:
 func tabs() -> Array[int]:
 	var out: Array[int] = []
 	for c in CATEGORIES.size():
+		if bool(CATEGORIES[c].get("always", false)):
+			out.append(c)
+			continue
 		for g in GAMES:
 			if _in_category(g, str(CATEGORIES[c].id)):
 				out.append(c)
@@ -710,6 +721,8 @@ func _in_category(g: Dictionary, cat_id: String) -> bool:
 		return int(SOLO.get(str(g.get("id", "")), 0)) > 0
 	if cat_id == "hall":
 		return Progress.has(str(g.get("id", "")))
+	if cat_id == "in_depth":
+		return bool(g.get("in_depth", false))
 	if cat_id == "new":
 		return WhatsNew.has(str(g.get("id", ""))) and Progress.has(str(g.get("id", "")))
 	return str(g.get("cat", "action")) == cat_id
@@ -771,6 +784,12 @@ func _show_category(tab: int, focus_first: bool) -> void:
 		var sb := StyleBoxFlat.new()
 		sb.bg_color = (cd.color as Color) if on else Color(0.1, 0.1, 0.18)
 		sb.set_corner_radius_all(18)
+		if str(cd.id) == "in_depth":  # stands out in the row: a glowing outline, like the hall's star tab
+			tab_label.name = "InDepthTab"
+			sb.set_border_width_all(3)
+			sb.border_color = Color(1, 1, 1, 0.9) if on else (cd.color as Color)
+			sb.shadow_color = Color(cd.color as Color, 0.45)
+			sb.shadow_size = 8
 		sb.content_margin_top = 6
 		sb.content_margin_bottom = 6
 		tab_label.add_theme_stylebox_override("normal", sb)
@@ -783,6 +802,8 @@ func _show_category(tab: int, focus_first: bool) -> void:
 	var games := _games_in(cat)
 	var hall := str(CATEGORIES[t[cat]].id) == "hall"
 	var news := str(CATEGORIES[t[cat]].id) == "new"
+	if games.is_empty():
+		grid.add_child(_empty_tab_note(str(CATEGORIES[t[cat]].get("empty", "No games here yet!")), colour))
 	for i in games:
 		var b := _make_news_card(i, colour) if news else (_make_hall_card(i, colour) if hall else _make_card(i, colour))
 		grid.add_child(b)
@@ -790,6 +811,28 @@ func _show_category(tab: int, focus_first: bool) -> void:
 	var target: int = selected if cards.has(selected) and not focus_first else (games[0] if not games.is_empty() else 0)
 	if cards.has(target):
 		(cards[target] as Button).grab_focus()
+
+
+## A tab with no games yet (IN-DEPTH): one friendly panel instead of cards. LB / RB still change tabs.
+func _empty_tab_note(text: String, colour: Color) -> Control:
+	var panel := PanelContainer.new()
+	panel.name = "EmptyTab"
+	panel.custom_minimum_size = Vector2(minf(1100.0, get_viewport().get_visible_rect().size.x - 80.0), 0)
+	var sb := StyleBoxFlat.new()
+	sb.bg_color = Color(0.08, 0.08, 0.15)
+	sb.border_color = colour
+	sb.set_border_width_all(4)
+	sb.set_corner_radius_all(22)
+	sb.set_content_margin_all(40)
+	panel.add_theme_stylebox_override("panel", sb)
+	var label := Label.new()
+	label.text = text
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	label.add_theme_font_size_override("font_size", 36)
+	label.add_theme_color_override("font_color", colour)
+	panel.add_child(label)
+	return panel
 
 
 ## arcade/thumbs/<id>.jpg (screenshots taken offscreen by Claude's dev.thumbs()), loaded straight from the

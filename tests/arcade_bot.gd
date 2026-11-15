@@ -113,6 +113,12 @@ class Runner extends Node:
 			await frames(2)
 			var want: int = arcade._games_in(k).size()
 			var name := str(arcade.CATEGORIES[tabs[k]].name)
+			if want == 0 and bool(arcade.CATEGORIES[tabs[k]].get("always", false)):
+				# A tab shown with no games yet (IN-DEPTH): one friendly note, no cards.
+				var note: Node = arcade.grid.get_node_or_null("EmptyTab")
+				check(note != null and arcade.cards.is_empty() and arcade.grid.get_child_count() == 1,
+					"empty tab %s shows its 'no games yet' note" % name)
+				continue
 			check(want > 0 and arcade.cards.size() == want and arcade.grid.get_child_count() == want,
 				"tab %s opens with all %d cards (shows %d)" % [name, want, arcade.cards.size()])
 			var f := vp.gui_get_focus_owner()
@@ -128,7 +134,20 @@ class Runner extends Node:
 		check(arcade.hall_ready, "the Trophy Hall finished loading")
 		var ht: int = arcade._hall_tab()
 		var nt: int = arcade._tab_of("new")
-		check(ht == (1 if nt == 0 else 0), "the Trophy Hall is the first tab after What's New (hall %d, new %d)" % [ht, nt])
+		# IN-DEPTH (the big ~10-hour games): right after What's New, always there (even with no games yet); it shows
+		# exactly the games flagged "in_depth", each a real game with a scene.
+		var dt: int = arcade._tab_of("in_depth")
+		check(dt == nt + 1, "IN-DEPTH is the tab right after What's New (in-depth %d, new %d)" % [dt, nt])
+		var flagged: Array[int] = []
+		for i in arcade.GAMES.size():
+			var g: Dictionary = arcade.GAMES[i]
+			check(not g.has("in_depth") or g.in_depth is bool, "%s: in_depth is true/false" % g.id)
+			if bool(g.get("in_depth", false)):
+				flagged.append(i)
+				check(ResourceLoader.exists(str(g.scene)), "IN-DEPTH game %s is a real game (%s)" % [g.id, g.scene])
+		if dt >= 0:
+			check(arcade._games_in(dt) == flagged, "the IN-DEPTH tab shows exactly the flagged games (%s)" % str(flagged))
+		check(ht == dt + 1, "the Trophy Hall is the first tab after What's New and IN-DEPTH (hall %d, in-depth %d)" % [ht, dt])
 		# What's New (arcade/whats_new.gd): the first tab, one tile per game with news: its friend, a NEW! badge on
 		# what nobody opened yet, pictures and one line, all inside the tile; nothing cut off or overlapping.
 		check(nt == 0, "What's New is the first tab (%d)" % nt)
