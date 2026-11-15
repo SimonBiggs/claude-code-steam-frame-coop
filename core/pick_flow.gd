@@ -234,7 +234,10 @@ func _dwell_picks(delta: float, points: Dictionary) -> Array:
 		if i >= 0 and t >= open:
 			dwell[id] = was + delta
 			var need := dwell_for(kind)
-			if float(dwell[id]) >= need and (was < need or i != before):
+			# (was <= 0: the first counted frame in it. A no-dwell taker that came in before `open` (Whack-a-Mole's
+			# mallet swinging at an orb as the row pops up) and kept swinging inside it used to never take it: the
+			# entering was spent before the row opened, and was < 0 never holds. Solo VR bots, 2026-11-15.)
+			if float(dwell[id]) >= need and (was < need or was <= 0.0 or i != before):
 				got.append([i, int(p[1]), String(id)])
 	return got
 
