@@ -256,6 +256,9 @@ func attach_camera(cam: Camera3D) -> void:
 	camera.add_child(gun)
 	gun.position = Vector3(0.2, -0.17, -0.42)
 	gun.scale = Vector3.ONE * 0.55
+	# Only this player's own view draws its screen gun: on the world layer it floated at the camera for everyone
+	# else, a stray gun in front of the VR player's face that hid pick orb names (2026-11-15, solo VR bots).
+	_set_layers(gun, viewmodel_layer())
 	_update_camera(0.0)
 
 
