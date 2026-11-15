@@ -218,6 +218,7 @@ var perks := {}  # slot -> [perk ids]
 var story_hold_ms := 0  # story cards said with the title wait until then (StoryCard.later)
 var vr_story: Node3D
 var run_logged := false
+var tel_t_ms := 0  # when the last RUN line (or the run) started: each line carries its own "secs" (play-record measures hours)
 var bosses_run: Array = []
 var pads_told := false
 var story_shown := 0  # story cards shown on this machine (bots check it)
@@ -2293,6 +2294,7 @@ func _start_run() -> void:
 		save.data.days = int(save.data.days) + 1
 		save.data.last_day = today
 	save.data.games = int(save.data.games) + 1
+	tel_t_ms = Time.get_ticks_msec()
 	daily = String(save.data.daily) != today and not OS.has_environment("DA_SEED")
 	run_seed = int(OS.get_environment("DA_SEED")) if OS.has_environment("DA_SEED") else (Gen.daily_seed() if daily else Seeded.fresh_seed())
 	if daily:
@@ -2634,7 +2636,10 @@ func _log_run(end: String) -> void:
 	var perk_count := 0
 	for k in perks:
 		perk_count += (perks[k] as Array).size()
-	Telemetry.run(GAME_ID, {"end": end, "wave": wave, "score": score, "seed": run_seed, "daily": daily, "mode": game_mode,
+	var now_ms := Time.get_ticks_msec()
+	var secs := snappedf(float(now_ms - tel_t_ms) / 1000.0, 0.1) if tel_t_ms > 0 else 0.0
+	tel_t_ms = now_ms
+	Telemetry.run(GAME_ID, {"end": end, "wave": wave, "secs": secs, "score": score, "seed": run_seed, "daily": daily, "mode": game_mode,
 		"zone": zone.zone_id, "leg": leg, "players": active_player_count(), "downs": wave_downs, "heroes": hero_list,
 		"perks": perk_count, "bosses": bosses_run.duplicate(), "won": won, "waves_total": int(save.data.waves),
 		"machines": net.peer_count() if net.mode == "host" else 0}.merged(deep.telemetry()))

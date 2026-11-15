@@ -14,4 +14,8 @@ for s in ~/.cache/duo-pending-cmds/*.sh; do
   [ -e "$s" ] || continue
   timeout 120 bash "$s" >/dev/null 2>&1 && rm -f "$s" && echo "ran: $(basename "$s")"
 done
+# Who plays what (~/GodotProjects/play-record, dev.favourites()): read-only Steam sessions + playtime from the TV and
+# whichever Decks are reachable, arcade telemetry, voice comments -> favourites.md. It limits itself to every 15 min.
+pr=~/GodotProjects/play-record/play-record
+[ -x "$pr" ] && { timeout 150 "$pr" collect --if-due 15 >>~/.cache/play-record.log 2>&1 || echo "play-record failed (see ~/.cache/play-record.log)"; }
 exit 0
