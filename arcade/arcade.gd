@@ -542,6 +542,7 @@ func _launch(index: int) -> void:
 		remove_meta("lobby_udp")
 	get_tree().create_timer(delay).timeout.connect(func() -> void:
 		_close_peer()
+		preload("res://core/telemetry.gd").game_started()  # a RUN line without its own "secs" is timed from here
 		get_tree().change_scene_to_file(game.scene))
 
 
