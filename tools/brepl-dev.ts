@@ -567,6 +567,15 @@ export async function quitGodotsIn(dir: string) {
 /** Remove a worktree (and its branch, if given) only after quitting the Godots running from it. Use this, never a
  *  bare `git worktree remove`. */
 export async function removeWorktree(path: string, branch?: string) {
+  // Never throw work away: commits made after a landing merged the branch, or uncommitted edits, keep the worktree
+  // (2026-11-19: dev.land deleted tv-share with two commits made while its tests ran; recovered from the reflog).
+  const unmerged = branch ? (await sh(`git rev-list --count main..${JSON.stringify(branch)} 2>/dev/null || echo 0`, LIVE)).out.trim() : "0";
+  const dirty = (await sh(`git -C ${JSON.stringify(path)} status --porcelain --untracked-files=no 2>/dev/null | head -5`)).out.trim();
+  if ((+unmerged || 0) > 0 || dirty) {
+    const why = `KEPT ${path}: ${+unmerged ? `${unmerged} commit(s) on ${branch} not in main (land them)` : ""}${dirty ? ` uncommitted edits: ${dirty.split("\n").join(", ")}` : ""}`;
+    (globalThis as any).send?.("removeWorktree", why);
+    return { quit: [], out: why, code: 1 };
+  }
   const quit = await quitGodotsIn(path);
   const r = await sh(`git worktree remove --force ${JSON.stringify(path)}${branch ? ` && git branch -D ${branch}` : ""}`, LIVE);
   return { quit, out: r.out, code: r.code };
