@@ -251,7 +251,7 @@ func _flat_update(delta: float) -> void:
 	if joy >= 0:
 		var st := Vector2(Input.get_joy_axis(joy, JOY_AXIS_LEFT_X), Input.get_joy_axis(joy, JOY_AXIS_LEFT_Y))
 		if st.length() > 0.15:
-			k += st
+			k += stick_curve(st)
 		level = level or Input.is_joy_button_pressed(joy, JOY_BUTTON_A)
 	if level:
 		mouse_tilt = Vector2.ZERO
@@ -259,6 +259,16 @@ func _flat_update(delta: float) -> void:
 	want_tilt = (k.limit_length(1.0) + mouse_tilt).limit_length(1.0)
 	if level:
 		want_tilt = Vector2.ZERO
+
+
+## Third pass: a soft stick (co-op tilting that feels good): no jump past the dead zone, small pushes make small tilts
+## (fine control on narrow planks and ice), a full push is still a full tilt.
+static func stick_curve(st: Vector2) -> Vector2:
+	var l := st.length()
+	if l <= 0.15:
+		return Vector2.ZERO
+	var x := clampf((l - 0.15) / 0.85, 0.0, 1.0)
+	return st / l * pow(x, 1.5)
 
 
 func _key(kk: Key) -> float:

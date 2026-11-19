@@ -848,7 +848,7 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     // GEN_QUICK=1: generator tests check today's sample of seeds/dates (core/seeded.gd Seeded.quick()); the nightly
     // full sweep (tools/duo-nightly-tests) checks them all. A landing test over SLOW_TEST_S is flagged (dev.debt).
     const t0 = Date.now();
-    out[t] = (await sh(`GEN_QUICK=1 DUO_PORT=${rport()} timeout 600 godot-test --headless --path . ${how} 2>&1 | grep -v OpenXR | grep -E "PASS|FAIL|SCRIPT ERROR" | tail -3; echo exit=\${PIPESTATUS[0]}`, STAGE)).out;
+    out[t] = (await sh(`GEN_QUICK=1 DUO_PORT=${rport()} timeout 600 godot-test --headless --path . ${how} 2>&1 | grep -v OpenXR | grep -E "PASS|FAIL|SCRIPT ERROR" | awk '/SCRIPT ERROR/ && !e {f=$0; e=1} {l[NR]=$0} END {if (e) print f; for (i=NR-2; i<=NR; i++) if (i>0) print l[i]}'; echo exit=\${PIPESTATUS[0]}`, STAGE)).out;  // (the FIRST SCRIPT ERROR always shows: a compile error early in a test that then prints several PASS lines slipped past tail -3, deep3-marble 2026-11-19)
     const secs = Math.round((Date.now() - t0) / 1000);
     out[t] += ` (${secs} s)`;
     if (secs > SLOW_TEST_S) { out[t] += ` SLOW: over ${SLOW_TEST_S} s in a landing`; await noteSlowTest(t, secs, branch); }

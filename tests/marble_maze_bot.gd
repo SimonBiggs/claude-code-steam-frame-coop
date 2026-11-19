@@ -34,6 +34,12 @@ extends Node
 ## giant touches it with the left hand instead (solo VR too). Told events: closing gates are walls in the bot's
 ## paths while up. Prints "BOT DEEP: ..." (mode, gift, world, events told / seen, marble run) and fails a pick
 ## board that never ends.
+## THIRD PASS (race.gd, mazegen.gd board types + gadgets): a fresh save starts with TODAY'S RACE (three mazes, one clock)
+## and the RACE / BOBO pick after it: MM_BOT_RACE=again rolls under RACE (the second race shows today's ghost),
+## default BOBO. Warp holes lead one way in the bot's paths. BOT_VR: after a while the giant's free left hand hovers
+## over P2's marble (the helping hand must pull). Prints "BOT DEEP3: ..." (race time / cup, board types and gadgets seen,
+## ghost, helping hand). MM_BOT_EXPECT_RACE=1 fails a run whose race never finished (MM_BOT_RACE=again: or showed no
+## ghost); BOT_VR=1 with MM_BOT_EXPECT_HAND=1 fails a run where the helping hand never pulled.
 
 const FAKE_PAD := 40
 const BotEnd := preload("res://tests/bot_end.gd")  # check(): counted checks, so every run ends with a real BOT RESULT
@@ -67,6 +73,7 @@ var cues := {}  # simple mode: picture cues seen / learned
 var plug_phase := 0
 const WORDS := ["", "GO!", "HOORAY!", "PAUSED", "HELLO!", "TODAY", "Connecting to the VR player…"]  # (TODAY: the daily maze's name)
 const HUD_WORDS := ["", "HOME!", "Syncing with the VR player…"]
+var hand_t := 0.0  # BOT_VR: the helping-hand test's clock
 
 
 func _ready() -> void:
@@ -296,6 +303,19 @@ func _vr_drive(tl, want: Vector2, delta: float) -> void:
 				set_meta("vr_pick_said", true)
 				print("BOT: VR left hand touches the %s orb" % o.id)
 			return
+	# Third pass: the helping hand. Now and then the free left hand hovers low over P2's marble for a moment.
+	if main.state == "play" and main.state_t > 3.0:
+		hand_t += delta
+	var m2 = main.players[1] if main.players.size() > 1 else null
+	if hand_t > 4.0 and hand_t < 6.5 and m2 != null and m2.active and not m2.home and not m2.falling:
+		tl.hand_l.global_position = board.to_global(Vector3(m2.lp.x + 0.03, 0.06, m2.lp.z))
+		if main.hand_pulling > 0.0 and not has_meta("hand_said"):
+			set_meta("hand_said", true)
+			print("BOT: the giant's helping hand pulls P2 (t=%.0f)" % t)
+		if hand_t > 6.4:
+			hand_t = -20.0  # again in a while
+		_vr_tilt_only(tl, want, delta)
+		return
 	var waiting: bool = main.state == "practice" and not saw_hands
 	if waiting or main.state != "play" and main.state != "practice":
 		if tl.grabbing:
@@ -322,6 +342,20 @@ func _vr_drive(tl, want: Vector2, delta: float) -> void:
 			if vr_grab_t > 6.0:  # let go now and then (re-grab at the current tilt)
 				tl.fake_trigger = 0.0
 	# Left hand: toys.
+	_vr_toys(tl, delta)
+
+
+func _vr_tilt_only(tl, want: Vector2, delta: float) -> void:
+	if tl.grabbing:
+		tl.fake_trigger = 1.0
+		vr_grab_t += delta
+		var g: Vector2 = tl.grab_tilt
+		var d := want.limit_length(1.0) - g
+		var gain: float = tl.HAND_GAIN
+		tl.hand_r.global_position = tl.grab_r + Vector3(0.0, -d.x / gain, d.y / gain)
+
+
+func _vr_toys(tl, delta: float) -> void:
 	var pr = main.props
 	if pr == null:
 		return
@@ -344,6 +378,11 @@ func _pick_orb():
 	var want_id := ""
 	if po.stage == "mode":
 		want_id = OS.get_environment("MM_BOT_MODE") if OS.has_environment("MM_BOT_MODE") else "hard"
+	elif po.stage == "race":
+		# MM_BOT_RACE=again: race once more (only the first time: then on with the story)
+		want_id = "again" if OS.get_environment("MM_BOT_RACE") == "again" and not has_meta("raced_again") else "story"
+		if want_id == "again" and main.picks.chosen >= 0:
+			set_meta("raced_again", true)
 	elif OS.has_environment("MM_BOT_GIFT"):
 		want_id = OS.get_environment("MM_BOT_GIFT")
 	for o in po.orbs:
@@ -404,7 +443,34 @@ func _deep_notes() -> void:
 	if main.world_id != "" and not notes.has("world"):
 		notes["world"] = main.world_id
 		print("BOT: today's world %s (fx %s)" % [main.world_id, main.world_fx != null])
-	set_meta("deep", notes)
+	# Third pass: board types, gadgets, the race, its ghost.
+	var b3: Dictionary = get_meta("deep3", {})
+	if main.state == "play":
+		var cur: Dictionary = main.board.cur
+		if cur.has("style") and not b3.has("style_" + str(cur.style)):
+			b3["style_" + str(cur.style)] = true
+			print("BOT: board type %s (%s)" % [cur.style, cur.get("name", "")])
+		for row in main.board.rows:
+			for ch in ["N", "W", "H", "V", "-", "|"]:
+				if str(row).contains(ch) and not b3.has("tile_" + ch):
+					b3["tile_" + ch] = true
+					print("BOT: gadget '%s' in %s" % [ch, cur.get("name", "")])
+	if main.race != null:
+		if main.race.on and main.race.running and not b3.has("race"):
+			b3["race"] = true
+			print("BOT: TODAY'S RACE clock running (leg %d)" % main.race.leg)
+		if main.race.ghost_node != null and main.race.ghost_node.visible and not b3.has("ghost"):
+			b3["ghost"] = true
+			print("BOT: the race ghost rolls (leg %d)" % main.race.leg)
+		if main.race.clock3d != null and main.race.clock3d.visible and not b3.has("clock3d"):
+			b3["clock3d"] = true
+			print("BOT: the race clock shows %s" % main.race.clock3d.text)
+		if not main.race.last.is_empty() and not b3.has("race_done"):
+			b3["race_done"] = true
+			print("BOT: race finished: %s" % str(main.race.last))
+	if main.hand_pulling > 0.0:
+		b3["hand"] = true
+	set_meta("deep3", b3)
 
 
 func mode_is_client() -> bool:
@@ -457,12 +523,19 @@ func _bfs_from(targets: Array) -> Dictionary:
 		var c: Vector2i = tc
 		out[c] = 0
 		q.append(c)
+	var warp_out: Vector2i = board.cell_of(board.warp_out) if board.warp_out != Vector2.INF else Vector2i(-99, -99)
+	var warp_in: Vector2i = board.cell_of(board.warp_in) if board.warp_in != Vector2.INF else Vector2i(-99, -99)
 	while not q.is_empty():
 		var c: Vector2i = q.pop_front()
+		if c == warp_out and not out.has(warp_in):
+			out[warp_in] = int(out[c]) + 1  # rolling into the warp hole lands you here
+			q.append(warp_in)
 		var nbs: Array[Vector2i] = [c + Vector2i(1, 0), c + Vector2i(-1, 0), c + Vector2i(0, 1), c + Vector2i(0, -1)]
 		for nb in nbs:
 			if not _step_ok(board, nb, c) or not _open_here(board, nb):
 				continue
+			if board.ch(nb.x, nb.y) == "W":
+				continue  # a warp hole is reached from its exit's distance (below), never by walking back
 			if board.tp_dest.has(nb):
 				# Arriving on teleporter nb, you can roll on to c: so entering nb's twin is 2 steps from c.
 				var twin: Vector2i = board.cell_of(board.tp_dest[nb])
@@ -667,7 +740,8 @@ func _note_cues() -> void:
 	for p in main.players:
 		if not p.active or not p.has_meta("view"):
 			continue
-		if p.hud_label != null and p.hud_label.is_visible_in_tree() and not HUD_WORDS.has(p.hud_label.text.strip_edges()):
+		if p.hud_label != null and p.hud_label.is_visible_in_tree() and not HUD_WORDS.has(p.hud_label.text.strip_edges()) \
+				and not _is_clock(p.hud_label.text.strip_edges().trim_prefix("HOME!").strip_edges()):
 			_tip_error("P%d HUD line" % (p.index + 1), p.hud_label.text)
 		var edge = p.get_meta("edge") if p.has_meta("edge") else null
 		if edge != null and edge.on:
@@ -720,6 +794,12 @@ func _check_headline(who: String, text: String) -> void:
 	_tip_error(who, tx)
 
 
+## TODAY'S RACE clock in a HUD ("0:42"): a number, not words.
+func _is_clock(text: String) -> bool:
+	var re := RegEx.create_from_string("^\\d+:\\d\\d$")
+	return re.search(text) != null
+
+
 func _tip_error(who: String, text: String) -> void:
 	if not cues.has("tip_text"):
 		print("BOT: ERROR instruction text on %s: %s" % [who, text.replace("\n", " / ")])
@@ -732,6 +812,21 @@ func _exit_tree() -> void:
 		# (A 60 s local run is still rolling through its first maze: there, the maze must be in play.)
 		BotEnd.check(cleared >= 1 or (t < 90.0 and main.state == "play"), "a maze was cleared, or a short run is playing one (mode %s, t=%.0f, level %d, state %s)" % [main.net.mode, t, main.level, main.state])
 		BotEnd.check(main.state != "over" or not main.simple, "no game over in simple mode")
+		var b3: Dictionary = get_meta("deep3", {})
+		var ks3: Array = b3.keys()
+		ks3.sort()
+		print("BOT DEEP3: mode=%s seen=%s race=%s cups=%s best=%s" % [main.net.mode, ",".join(PackedStringArray(ks3)),
+			str(main.race.last) if main.race != null else "-", str(main.save.data.cups) if main.save != null else "-",
+			str(main.save.data.race_best) if main.save != null else "-"])
+		if OS.has_environment("MM_BOT_EXPECT_RACE") and main.net.mode != "client":
+			BotEnd.check(b3.has("race_done") and b3.has("clock3d"), "TODAY'S RACE finished with its clock showing (%s)" % str(ks3))
+			BotEnd.check(main.save != null and (main.save.data.cups as Array).size() > 0, "a cup on Bobo's trophy shelf")
+			if OS.get_environment("MM_BOT_RACE") == "again":
+				BotEnd.check(b3.has("ghost"), "the second race rolled today's ghost")
+		if OS.has_environment("MM_BOT_EXPECT_RACE") and main.net.mode == "client":
+			BotEnd.check(b3.has("clock3d"), "the TV machine shows the race clock")
+		if OS.has_environment("MM_BOT_EXPECT_HAND") and main.players[0].vr:
+			BotEnd.check(b3.has("hand"), "the giant's helping hand pulled a marble")
 	if main != null and is_instance_valid(main) and main.simple:
 		var ks: Array = cues.keys()
 		ks.sort()

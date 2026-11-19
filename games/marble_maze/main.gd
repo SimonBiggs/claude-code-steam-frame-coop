@@ -66,7 +66,15 @@ const Worlds := preload("res://games/marble_maze/worlds.gd")
 const PicksScript := preload("res://games/marble_maze/picks.gd")
 const EventsScript := preload("res://games/marble_maze/events.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
+const RaceScript := preload("res://games/marble_maze/race.gd")
 const JAR_SAVE_MAX := 200
+## THIRD PASS: the giant's HELPING HAND. A VR hand (not on a handle) held low over the board pulls the marbles near it
+## (a sparkly ring shows under it): fish a friend out of a corner, nudge one past a magnet. Weaker than a marble's own
+## push, so the marble's player is always in charge.
+const HAND_REACH := 0.1  # metres (one cell) round the hand, flat on the board
+const HAND_LOW := 0.13  # the hand must be this low over the board (metres)
+const HAND_PULL := 0.32
+const RACE_CLEAR_TIME := 2.0  # TODAY'S RACE: a short HOORAY between legs (the clock waits)
 const RACK_SAVE_MAX := 120
 ## SECOND PASS (worlds.gd, picks.gd, events.gd): the PICK BOARD, an open room where the mode / gift orbs hover near
 ## the giant's edge (marbles start at the far side and roll under one).
@@ -214,6 +222,11 @@ var world_fx: Node3D
 var pick_next := 1  # host: the level the pick board leads to
 var maze_events := 0  # host: events told in this maze (telemetry)
 var story_lag := 0.0  # host: seconds the next maze's intro cards wait (a pick card is showing)
+# THIRD PASS: TODAY'S RACE (race.gd), the helping hand.
+var race: RaceScript
+var clear_secs := SIMPLE_CLEAR_TIME
+var hand_rings: Array[MeshInstance3D] = []
+var hand_pulling := 0.0
 
 
 func _ready() -> void:
@@ -238,7 +251,7 @@ func _ready() -> void:
 	best = _load_best()
 	save = Save.new()
 	save.game_id = "marble_maze"
-	save.version = 1
+	save.use_layout(preload("res://games/marble_maze/progress.gd"))  # SAVE_VERSION 2: twelve places, races
 	save.defaults = Story.save_defaults()
 	add_child(save)
 	if int(save.data.world) < 0:
@@ -540,6 +553,9 @@ func _build_world() -> void:
 		picks = PicksScript.new()
 		picks.main = self
 		add_child(picks)
+		race = RaceScript.new()
+		race.main = self
+		add_child(race)
 
 
 ## The cosy play-room round the table, baked into ONE mesh: floorboards, walls with windows, a rug,
@@ -1163,6 +1179,9 @@ func _process(delta: float) -> void:
 		_layout_views()
 	_update_vr_text()
 	_update_extras(delta)
+	if race != null:
+		race.tick(delta)
+	_update_hand_rings(delta)
 	if simple:
 		_update_simple(delta)
 		_update_cues(delta)
@@ -1223,7 +1242,7 @@ func _process(delta: float) -> void:
 				time_left = 0.0
 				_game_over()
 		"clear":
-			if state_t > (SIMPLE_CLEAR_TIME if simple else CLEAR_TIME) or (state_t > 1.5 and cont_edge):
+			if state_t > (clear_secs if simple else CLEAR_TIME) or (state_t > 1.5 and cont_edge):
 				_next_level(level + 1)
 		"over":
 			if state_t > 1.5 and cont_edge:
@@ -1454,6 +1473,11 @@ func _start_level(n: int) -> void:
 	for p in players:
 		if p.index > 0:
 			p.reset_to_start()
+	if race != null and net.mode != "client":
+		if str(level_desc.get("k", "")) == "daily":
+			race.begin_leg(int(level_desc.get("leg", 0)), def)
+		else:
+			race.stop()
 	var count := maxi(1, active_marbles().size())
 	time_left = board.level_time(n) + EXTRA_TIME_PER_PLAYER * (count - 1)
 	last_tick = -1
@@ -1520,11 +1544,24 @@ func _pick_due(n: int) -> String:
 		return ""
 	if not session.has("mode"):
 		return "mode"
+	if k == "story" and not session.has("race_asked_%d" % n) and _race_offer(n):
+		return "race"
 	if int(session.get("gift_n", -1)) >= n - 1:
 		return ""  # one gift pick a maze at most (today's maze, then a new place: the gift carries on)
-	if not session.has("gift") or k == "daily" or int(Story.where(int(d.get("i", 0)))[1]) == 0:
+	var first_race := k == "daily" and int(d.get("leg", 0)) == 0 and (session.get("race_ks", []) as Array).size() <= 1
+	if not session.has("gift") or first_race or (k == "story" and int(Story.where(int(d.get("i", 0)))[1]) == 0):
 		return "gift"
 	return ""
+
+
+## Race again? Offered after today's race (its last leg just cleared) and at a session's first maze when today's
+## race was run already (in an earlier session).
+func _race_offer(n: int) -> bool:
+	var before := desc_for(n - 1) if n > 1 else {}
+	if str(before.get("k", "")) == "daily" and int(before.get("leg", 0)) == Story.RACE_LEGS - 1:
+		return true
+	var race_d: Dictionary = save.data.race if save != null and save.data.get("race") is Dictionary else {}
+	return str(before.get("k", "")) != "story" and (session.get("race_ks", []) as Array).is_empty() and race_d.has(Seeded.today())
 
 
 ## Host / local: the pick board for `stage` ("mode" / "gift"), leading to level n.
@@ -1536,12 +1573,19 @@ func _begin_pick(n: int, stage: String) -> void:
 	_restart_pick_board()
 	var entries: Array = []
 	var opts: Array = []
+	if race != null:
+		race.stop()
 	if stage == "mode":
 		for id in PickOrbs.mode_ids(_mode_now({})):
 			var md := PickOrbs.mode(str(id))
 			entries.append({"id": md.id, "name": md.name, "pic": md.pic, "color": md.color})
 			opts.append(str(id))
 		_story(_bobo("How brave today?"), 0.3)
+	elif stage == "race":
+		entries = [{"id": "again", "name": "RACE", "pic": "mmwatch", "color": Color(1.0, 0.8, 0.25)},
+			{"id": "story", "name": "BOBO", "pic": "kaiju", "color": Story.BOBO_COLOR}]
+		opts = ["again", "story"]
+		_story(_bobo("Race again?"), 0.3)
 	else:
 		var seed_v := Seeded.derive(int(save.data.world), "gift%d_%s" % [int(nd.get("i", -1)), Seeded.today()])
 		for id in Worlds.gift_choices((save.data.rack as Array).size(), str(session.get("gift", "")), seed_v):
@@ -1584,6 +1628,15 @@ func _on_pick_done(stage: String, opt: Variant, slot: int) -> void:
 		_story_now({"who": str(md.name), "line": str(PickOrbs.MODE_LINES.get(str(opt), "")), "pic": str(md.pic), "color": md.color,
 			"duration": 2.5})
 		prefetch_desc(desc_for(pick_next))  # the maze in this mode, made while the gift is picked
+	elif stage == "race":
+		session["race_asked_%d" % pick_next] = true
+		if str(opt) == "again":
+			var ks: Array = session.get("race_ks", [])
+			ks.append(_story_k(pick_next))
+			session["race_ks"] = ks
+			_story_now({"who": "TODAY", "line": "Ready, steady, GO!", "pic": "mmwatch", "color": Color(1.0, 0.8, 0.25), "duration": 2.5})
+		else:
+			_story_now(_bobo("More marbles to find!"))
 	else:
 		session["gift"] = str(opt)
 		session["gift_n"] = pick_next
@@ -1897,6 +1950,87 @@ func guide_pull(m, here: Vector2) -> Vector2:
 	return Vector2.ZERO
 
 
+## THIRD PASS: the giant's helping hands over the board, as board-local points (y = height over the floor). On the host
+## the real VR hands; on the TV machine the ghost hands from the host's snapshots (so its own marbles feel them too).
+func helper_hands() -> Array[Vector3]:
+	var out: Array[Vector3] = []
+	if players.is_empty() or board == null:
+		return out
+	var tl = players[0]
+	var pts: Array = []
+	if tl.ghost:
+		for tr in [tl.net_hand_l, tl.net_hand_r]:
+			if tr != Transform3D():
+				pts.append((tr as Transform3D).origin)
+	elif tl.vr and tl.hand_r != null:
+		if not tl.grabbing:
+			pts.append((tl.hand_r as Node3D).global_position)
+		if not (tl.grabbing and tl.left_on):
+			pts.append((tl.hand_l as Node3D).global_position)
+	var hs: Vector2 = board.half_size()
+	for wp in pts:
+		var lp: Vector3 = board.to_local(wp)
+		if lp.y > 0.0 and lp.y < HAND_LOW and absf(lp.x) < hs.x and absf(lp.z) < hs.y:
+			out.append(lp)
+	return out
+
+
+## A marble near a helping hand is pulled towards the spot under it (every machine that rolls marbles).
+func hand_pull(m, here: Vector2) -> Vector2:
+	if m.home or m.falling or (state != "play" and state != "pick"):
+		return Vector2.ZERO
+	for h in helper_hands():
+		var d := Vector2(h.x, h.z) - here
+		var l := d.length()
+		if l < HAND_REACH and l > 0.004:
+			hand_pulling = 0.3
+			return d / l * HAND_PULL * (1.0 - l / HAND_REACH * 0.5)
+	return Vector2.ZERO
+
+
+## Every machine: a sparkly ring under each helping hand (so the giant sees it works, and the marbles see it coming).
+func _update_hand_rings(delta: float) -> void:
+	hand_pulling = maxf(0.0, hand_pulling - delta)
+	var hands := helper_hands() if (state == "play" or state == "pick") else ([] as Array[Vector3])
+	while hand_rings.size() < hands.size():
+		var r := MeshInstance3D.new()
+		var tm := TorusMesh.new()
+		tm.inner_radius = HAND_REACH * 0.85
+		tm.outer_radius = HAND_REACH
+		tm.rings = 24
+		tm.ring_segments = 3
+		r.mesh = tm
+		r.material_override = make_material(Color(1.0, 0.9, 0.45), 1.6)
+		r.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		r.name = "HelpingHandRing"
+		board.add_child(r)
+		hand_rings.append(r)
+	for i in hand_rings.size():
+		var ring := hand_rings[i]
+		ring.visible = i < hands.size()
+		if ring.visible:
+			ring.position = Vector3(hands[i].x, 0.004, hands[i].z)
+			var s := 1.0 + sin(board.t * 8.0) * (0.12 if hand_pulling > 0.0 else 0.04)
+			ring.scale = Vector3(s, 1.0, s)
+
+
+## Host / local: TODAY'S RACE is over: its cup and time on story cards, Bobo's trophy shelf and the BEST TIMES board.
+func _race_cards(r: Dictionary) -> void:
+	var medal := str(r.medal)
+	var names := {"gold": "Gold cup!", "silver": "Silver cup!", "bronze": "Bronze cup!"}
+	_story({"who": Story.clock(float(r.secs)), "line": str(names.get(medal, "")), "pic": "mmcup", "color": Story.MEDALS[medal],
+		"duration": 3.5}, 0.6)
+	if bool(r.get("best_ever", false)):
+		_story({"who": "NEW BEST!", "line": "Fastest ever!", "pic": "mmwatch", "color": Color(1.0, 0.85, 0.3), "duration": 3.0}, 0.2)
+	elif bool(r.best_today):
+		_story({"who": "BEST TODAY!", "line": "Your ghost is ready!", "pic": "mmwatch", "color": Color(0.75, 0.95, 1.0), "duration": 3.0}, 0.2)
+	_send_town()
+	if town != null:
+		town.cheer_shelf()
+	print("Race done: %s (%s, %d steps, %d marbles)%s" % [Story.clock(float(r.secs)), medal, int(r.steps), int(r.marbles),
+		" NEW BEST" if bool(r.get("best_ever", false)) else ""])
+
+
 ## Respawning marbles go to the team's furthest checkpoint if it beats their own.
 func best_checkpoint(own: int) -> int:
 	if team_cp >= 0 and board.checkpoint_dist(team_cp) < board.checkpoint_dist(own):
@@ -1909,8 +2043,16 @@ func _level_clear() -> void:
 	state_t = 0.0
 	levels_cleared += 1
 	if simple:
-		_show_center("HOORAY!", SIMPLE_CLEAR_TIME)
+		clear_secs = SIMPLE_CLEAR_TIME
+		var raced := {}
+		if race != null and race.on and net.mode != "client":
+			raced = race.leg_cleared()
+			if int(level_desc.get("leg", 0)) < Story.RACE_LEGS - 1:
+				clear_secs = RACE_CLEAR_TIME
+		_show_center("HOORAY!", clear_secs)
 		sound("hooray", 0.0, 1.0, true)
+		if not raced.is_empty():
+			_race_cards(raced)
 		var gw := board_world(board.goal, 0.08)
 		for c in [Color(1.0, 0.9, 0.3), Color(0.4, 1.0, 0.5), Color(1.0, 0.5, 0.8), Color(0.4, 0.8, 1.0)]:
 			burst(gw, c, 24)
@@ -1921,6 +2063,7 @@ func _level_clear() -> void:
 		return
 	var bonus := int(time_left) * 2
 	score += bonus
+	clear_secs = CLEAR_TIME
 	var all_gems: bool = not board.gem_taken.has(false)
 	level_stars = 1 + (1 if all_gems else 0) + (1 if time_left >= board.level_time(level) * 0.4 else 0)
 	stars += level_stars
@@ -2022,7 +2165,10 @@ func _session_plan() -> Dictionary:
 	var d: Dictionary = save.data
 	var skip := bool(d.lessons_done) or OS.has_environment("BOT_STORY") or OS.has_environment("BOT_STORY_I")
 	var daily_due := not (d.daily as Dictionary).has(Seeded.today()) and not OS.has_environment("BOT_NO_DAILY")
-	var plan := {"lessons": not skip, "daily": daily_due, "base": int(d.story_i)}
+	if OS.get_environment("MM_TRY") == "race":
+		daily_due = true  # What's New "try": straight into TODAY'S RACE
+	# race_ks: where TODAY'S RACE runs, counted in mazes after the lessons (1 = first); "again" picks add more.
+	var plan := {"lessons": not skip, "daily": daily_due, "base": int(d.story_i), "race_ks": [1] if daily_due else []}
 	if OS.has_environment("BOT_STORY_I"):
 		plan.base = int(OS.get_environment("BOT_STORY_I"))
 	return plan
@@ -2041,16 +2187,24 @@ func desc_for(n: int, plan: Dictionary = {}) -> Dictionary:
 			return {"k": "lesson", "i": k}
 		k -= count
 	var extra := {"m": _mode_now(sess), "wd": str(sess.get("world", "sunny")), "g": str(sess.get("gift", ""))}
-	if bool(sess.get("daily", false)):
-		if k == 1:
-			var dd := {"k": "daily", "d": Seeded.today()}
+	var story_k := k
+	for start in sess.get("race_ks", []):
+		var s0 := int(start)
+		if k >= s0 and k < s0 + Story.RACE_LEGS:
+			var dd := {"k": "daily", "d": Seeded.today(), "leg": k - s0}
 			dd.merge(extra)
 			return dd
-		k -= 1
+		if k >= s0 + Story.RACE_LEGS:
+			story_k -= Story.RACE_LEGS
 	var world: int = int(save.data.world) if save != null else 0
-	var sd := {"k": "story", "i": int(sess.get("base", 0)) + k - 1, "w": world}
+	var sd := {"k": "story", "i": int(sess.get("base", 0)) + story_k - 1, "w": world}
 	sd.merge(extra)
 	return sd
+
+
+## Level n counted in mazes after the lessons (desc_for's k).
+func _story_k(n: int) -> int:
+	return n - (LevelsData.SIMPLE_LEVELS.size() if bool(session.get("lessons", true)) else 0)
 
 
 ## The session's mode (picked on the pick board), else the family's last one.
@@ -2120,7 +2274,7 @@ static func _gen_job(desc: Dictionary) -> Callable:
 		var m := str(d.get("m", ""))
 		var wd := str(d.get("wd", ""))
 		if str(d.get("k", "")) == "daily":
-			def = Story.daily(str(d.get("d", "")), m, wd)
+			def = Story.daily(str(d.get("d", "")), m, wd, int(d.get("leg", 0)))
 			def["shiny_color"] = Story.GOLDEN[1]
 		else:
 			var i := int(d.get("i", 0))
@@ -2204,7 +2358,10 @@ func _story_intro_beats() -> void:
 			if int(level_desc.get("i", 0)) == 1:
 				_story(_bobo("Hi! I'm Bobo!"), 0.5)
 		"daily":
-			_story({"who": "TODAY", "line": "A brand new maze!", "pic": "sun", "color": Color(1.0, 0.8, 0.3), "duration": 3.5}, 0.5)
+			if int(level_desc.get("leg", 0)) == 0:
+				var ghost_on: bool = race != null and not race.ghost_pts.is_empty()
+				_story({"who": "TODAY'S RACE", "line": "Beat your ghost!" if ghost_on else "Three mazes! Go go go!", "pic": "mmwatch",
+					"color": Color(1.0, 0.8, 0.3), "duration": 3.0}, 0.5)
 		"story":
 			var i := int(level_desc.get("i", 0))
 			var w := Story.where(i)
@@ -2279,7 +2436,9 @@ func _send_town(quiet: bool = false) -> void:
 	if rack_l.size() > TownScript.RACK_MAX:
 		rack_l = rack_l.slice(rack_l.size() - TownScript.RACK_MAX)
 	town.set_rack(rack_l, quiet)
-	net.event("town", [lit, jar_l, quiet, rack_l])
+	var times := RaceScript.board_data(save.data)
+	town.set_times(times, quiet)
+	net.event("town", [lit, jar_l, quiet, rack_l, times])
 
 
 ## Host / local, a maze cleared: progress (saved), the place lighting up, and a RUN line.
@@ -2307,11 +2466,15 @@ func _progress() -> void:
 				d.lessons_done = true
 				_story(_bobo("Now help me find my marbles!"), 1.0)
 		"daily":
-			var days: Dictionary = d.daily
-			days[str(level_desc.get("d", ""))] = true
-			while days.size() > 40:
-				days.erase(days.keys()[0])
-			_story({"who": "TODAY", "line": "Well done!", "pic": "sun", "color": Color(1.0, 0.8, 0.3), "duration": 3.0}, 1.0)
+			info["leg"] = int(level_desc.get("leg", 0))
+			if int(info.leg) == Story.RACE_LEGS - 1 and race != null and not race.last.is_empty():
+				info["race"] = race.last.secs
+				info["medal"] = race.last.medal
+				info["best"] = bool(race.last.best_today)
+				var days: Dictionary = d.daily
+				days[str(level_desc.get("d", ""))] = true  # today's race FINISHED (progress.gd daily)
+				while days.size() > 40:
+					days.erase(days.keys()[0])
 		"story":
 			var i := int(level_desc.get("i", 0))
 			var w := Story.where(i)
@@ -2351,6 +2514,23 @@ func on_wall_hit(p, impact: float) -> void:
 	sound("clack", linear_to_db(clampf(impact * 2.0, 0.1, 1.0)) - 4.0, randf_range(0.8, 1.3))
 	if p.joy >= 0 and impact > 0.4:
 		Input.start_joy_vibration(p.joy, 0.2, 0.3, 0.06)
+	if impact > 0.4:
+		_tilter_feel(0.25 * clampf(impact, 0.0, 1.0), 0.05)
+
+
+## The giant feels the marbles through the board: a little buzz in the flat tilter's pad or the VR hands holding it.
+func _tilter_feel(strength: float, secs: float) -> void:
+	if players.is_empty():
+		return
+	var tl = players[0]
+	if tl.ghost or tl.remote:
+		return
+	if tl.vr:
+		for h in [tl.hand_r, tl.hand_l]:
+			if h != null and tl.grabbing:
+				(h as XRController3D).trigger_haptic_pulse("haptic", 0.0, clampf(strength, 0.0, 1.0), secs, 0.0)
+	elif tl.joy >= 0:
+		Input.start_joy_vibration(tl.joy, clampf(strength, 0.0, 1.0), clampf(strength * 0.6, 0.0, 1.0), secs)
 
 
 func on_marble_fell(p) -> void:
@@ -2359,6 +2539,7 @@ func on_marble_fell(p) -> void:
 		sound("fall", -10.0, 1.4)
 		if p.joy >= 0:
 			Input.start_joy_vibration(p.joy, 0.4, 0.3, 0.2)
+		_tilter_feel(0.45, 0.15)
 		return
 	sound("fall", -2.0)
 	burst(wp, p.color, 10, false)
@@ -2398,9 +2579,12 @@ func on_checkpoint(p) -> void:
 func on_teleport(p, from: Vector2, to: Vector2) -> void:
 	var a := board_world(from, 0.03)
 	var b := board_world(to, 0.03)
-	sound("teleport", -4.0, randf_range(0.9, 1.2))
+	var warp: bool = board.ch(board.cell_of(from).x, board.cell_of(from).y) == "W"
+	sound("teleport", -4.0, randf_range(0.55, 0.65) if warp else randf_range(0.9, 1.2))  # a warp hole: a deep whoosh
 	burst(a, Color(0.85, 0.5, 1.0), 10, false)
-	burst(b, Color(0.4, 1.0, 0.9), 12, false)
+	burst(b, board.WARP_COLOR if warp else Color(0.4, 1.0, 0.9), 16 if warp else 12, false)
+	if warp:
+		p.bump_squash()
 	if net.mode != "client":
 		_stat(p.index, "tp", 1.0)
 	_forward_fx("tp", [a, b], p)
@@ -2958,6 +3142,11 @@ func apply_event(kind: String, args: Array) -> void:
 				town.set_jar(args[1])
 				if args.size() > 3:
 					town.set_rack(args[3], bool(args[2]))
+				if args.size() > 4 and args[4] is Dictionary:
+					town.set_times(args[4], bool(args[2]))
+		"race":
+			if race != null:
+				race.apply(args)
 		"prop":
 			if props != null:
 				props.react(int(args[0]), false)
@@ -3033,6 +3222,8 @@ func hud_text(p) -> String:
 func _simple_hud(p) -> String:
 	if state == "clear":
 		return ""  # the big HOORAY! says it (no second copy in each view)
+	if race != null and race.on and (state == "play" or state == "intro"):
+		return "HOME!  " + Story.clock(race.t) if p.home else Story.clock(race.t)  # TODAY'S RACE: the clock
 	if p.index == 0:
 		return ""  # the tilt cue low in the view shows it
 	if p.home:

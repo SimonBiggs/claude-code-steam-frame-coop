@@ -5,12 +5,15 @@ extends RefCounted
 const Contrast := preload("res://core/contrast.gd")
 const Levels := preload("res://games/marble_maze/levels.gd")
 const Worlds := preload("res://games/marble_maze/worlds.gd")
+const Board := preload("res://games/marble_maze/board.gd")
 
 
 static func key_colors() -> Dictionary:
 	# The players' marbles (slot 0 is the giant, who tilts the board; its solo marble is P2's colour).
 	var out := Contrast.named("marble", Worlds.PLAYER_COLORS.slice(1))
-	return Contrast.merge(out, Contrast.named("warning", Worlds.EVENT_COLORS))
+	out = Contrast.merge(out, Contrast.named("warning", Worlds.EVENT_COLORS))
+	# Third pass: a moving wall's track is its warning, painted on the floor.
+	return Contrast.merge(out, {"moving wall track": Board.TRACK_COLOR})
 
 
 static func backgrounds() -> Dictionary:
@@ -18,4 +21,5 @@ static func backgrounds() -> Dictionary:
 	for th in Levels.THEMES:
 		out["%s floor" % th] = Levels.THEMES[th][0]
 		out["%s floor 2" % th] = Levels.THEMES[th][1]
+	out["magnet tile"] = Board.MAGNET_FLOOR  # third pass: marbles roll over magnet tiles too
 	return out

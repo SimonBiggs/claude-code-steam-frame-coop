@@ -179,7 +179,7 @@ static func gate_spots(def: Dictionary) -> Array:
 		var c: Vector2i = path[i]
 		if MazeGen._at(g, c) != ".":
 			continue
-		if MazeGen._near(g, c, "SGOBTPDEQ*I><^v", true):
+		if MazeGen._near(g, c, "SGOBTPDEQ*I><^vNWwHV-|_", true):
 			continue
 		var lr: bool = MazeGen._at(g, c + Vector2i(1, 0)) == "#" and MazeGen._at(g, c + Vector2i(-1, 0)) == "#"
 		var ud: bool = MazeGen._at(g, c + Vector2i(0, 1)) == "#" and MazeGen._at(g, c + Vector2i(0, -1)) == "#"
