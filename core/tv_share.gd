@@ -20,8 +20,9 @@ extends Node
 ## file (lines "pid cmdline") instead of /proc; TV_SHARE_FORCE_VR=1 counts this run as a VR one (offscreen checks).
 
 const POLL := 3.0
-## Steam apps that are not "a game on the TV": SteamVR and its parts.
-const IGNORE_APPS := ["250820", "1009850", "1635730", "2252370"]
+## Steam apps that are not "a game on the TV": SteamVR (Steam's gameprocess_log, 2026-11-14: the arcade came in as
+## "reaper SteamLaunch AppId=2443052841", Stick Fight as AppId=674940; SteamVR started inside the arcade's tree, no reaper).
+const IGNORE_APPS := ["250820"]
 const CARD_LINE := "TV busy: playing in VR only"
 const META := "tv_share_hidden"
 
