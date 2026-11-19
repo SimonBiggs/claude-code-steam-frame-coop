@@ -23,8 +23,13 @@ const WHEEL_TILT := 55.0  # degrees: rim faces the driver and up
 const HOLD_IN := 0.05  # a hand counts as holding anywhere from here...
 const HOLD_OUT := 0.36  # ...to here from the centre (generous: kids hold it all sorts of ways)
 const HOLD_DEPTH := 0.22
+const RIM_TOUCH := 0.08  # a bare hand this close to the rim (radially) takes hold...
+const RIM_KEEP := 0.13  # ...and keeps holding while within this
+const LAP_Y := 0.10  # a bare hand this far below the hub (in the wheel plane) is resting on the lap, not holding
 const FULL_LOCK := 1.5  # radians of wheel turn for full steering
 const FRAME_VY := 3.0  # m/s: the most the seat frame moves up or down (ramps and bumps stay gentle)
+const MITTEN_COLOR := Color(1.0, 0.85, 0.35)
+const HELD_COLOR := Color(0.35, 1.0, 0.45)  # a mitten that holds the wheel
 const GhostHand := preload("res://core/ghost_hand.gd")
 const UiKit := preload("res://core/ui_kit.gd")
 const PANEL_OFF := Vector3(0.78, -0.6, -2.3)  # text panels, relative to the eyes
@@ -67,6 +72,7 @@ var held_l := false
 var held_r := false
 var grip := ""  # which hands hold the wheel: "", "L", "R", "LR"
 var grip_offset := 0.0
+var last_want := NAN  # the wheel angle the holding hands asked for last frame
 var grip_raw := 0.0  # last measured hand angle (for unwrapping)
 var grip_acc := 0.0  # unwrapped hand angle
 var unheld_t := 0.0
@@ -80,11 +86,25 @@ var fake_r := Vector3.ZERO
 var fake_trigger := 0.0
 var fake_a := false
 var fake_stick := Vector2.ZERO
+var fake_trigger_l := 0.0
+var fake_stick_r := Vector2.ZERO
+var fake_grip_l := 0.0
+var fake_grip_r := 0.0
+# How this race was steered (main.gd puts it on the Telemetry RUN line).
+var st_held_t := 0.0
+var st_stick_t := 0.0
+var st_race_t := 0.0
+var st_steer_sum := 0.0
+var st_grabs := 0
 
 var seat: Node3D  # the stable seat frame (yaw only, eased height): wheel, dash, panels and mittens
 var wheel_root: Node3D  # seat-local, at the wheel centre, tilted
 var wheel_spin: Node3D
 var hub_bar: MeshInstance3D
+var rim_glow: MeshInstance3D
+var rim_glow_mat: StandardMaterial3D
+var mitten_mat_l: StandardMaterial3D
+var mitten_mat_r: StandardMaterial3D
 var hub_bar_mat: StandardMaterial3D
 var grip_mat: StandardMaterial3D
 var needle: Node3D
@@ -127,6 +147,8 @@ func setup(k, origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right: 
 		_build_vignette(cam)
 	mitten_l = _mitten()
 	mitten_r = _mitten()
+	mitten_mat_l = mitten_l.get_meta("mat")
+	mitten_mat_r = mitten_r.get_meta("mat")
 	if main.SIMPLE_MODE:
 		hub_bar.visible = false  # no boost meter
 		_build_ghost_hands()
@@ -136,7 +158,11 @@ func setup(k, origin: XROrigin3D, cam: XRCamera3D, left: XRController3D, right: 
 func _mitten() -> MeshInstance3D:
 	var m := MeshInstance3D.new()
 	m.mesh = main.sphere_mesh(0.045)
-	m.material_override = main.make_material(Color(1.0, 0.85, 0.35), 0.2)
+	var mat := StandardMaterial3D.new()
+	mat.albedo_color = MITTEN_COLOR
+	mat.roughness = 0.8
+	m.material_override = mat
+	m.set_meta("mat", mat)
 	m.scale = Vector3(0.9, 0.75, 1.3)
 	m.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	seat.add_child(m)
@@ -162,6 +188,16 @@ func _build_wheel() -> void:
 	rim.mesh = main.torus_mesh(WHEEL_R - 0.025, WHEEL_R + 0.025)
 	rim.material_override = main.make_material(Color(0.15, 0.15, 0.2), 0.0)
 	wheel_spin.add_child(rim)
+	# A glow round the rim that pulses while nobody holds the wheel ("grab me"), and goes out once held.
+	rim_glow_mat = StandardMaterial3D.new()
+	rim_glow_mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+	UiKit.see_through(rim_glow_mat)
+	rim_glow_mat.albedo_color = Color(0.5, 1.0, 0.6, 0.0)
+	rim_glow = MeshInstance3D.new()
+	rim_glow.mesh = main.torus_mesh(WHEEL_R - 0.04, WHEEL_R + 0.04)
+	rim_glow.material_override = rim_glow_mat
+	rim_glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	wheel_spin.add_child(rim_glow)
 	# Grips at 9 and 3 o'clock (they glow in the drift-spark colour), a top marker, and spokes.
 	grip_mat = StandardMaterial3D.new()
 	grip_mat.albedo_color = kart.color
@@ -299,9 +335,33 @@ func _on_wheel(p: Vector3) -> Vector3:
 	return Vector3(d.dot(b.x), d.dot(b * Vector3(0, 0, -1)), d.dot(b.y))
 
 
-func _holding(w: Vector3) -> bool:
+## Grabbing (forgiving for first-timers, and never by accident):
+## - squeeze GRIP on either hand anywhere near the wheel: that hand holds it for as long as grip stays
+##   down (pulling it away a little doesn't drop it);
+## - TRIGGER (which is also GO, so it's held all race) only takes hold close to the rim: a hand on the lap
+##   pulling the trigger to drive must not grab the wheel;
+## - or just put a hand ON the rim (no button): it holds while it stays near the rim. Not the bottom of
+##   the rim, where seated drivers rest their hands on their lap: a lap must never steer (2026-11-19, a
+##   seated VR guest's lap "held" the wheel, so the stick, the ghost-hand demo and the haptic grab were all
+##   off and the wheel only moved when the hands came up from the lap: "He wasn't turning!").
+func _near(w: Vector3) -> bool:  # generous zone: keeps a squeezed grab
 	var r := Vector2(w.x, w.y).length()
 	return r > HOLD_IN and r < HOLD_OUT and absf(w.z) < HOLD_DEPTH
+
+
+## A hand on the rim (looser to keep than to start; `loose` also for a trigger grab).
+func _on_rim(w: Vector3, keep: bool, loose := false) -> bool:
+	var r := Vector2(w.x, w.y).length()
+	var wide := keep or loose
+	if absf(r - WHEEL_R) > (RIM_KEEP if wide else RIM_TOUCH) or absf(w.z) > (0.18 if wide else 0.12):
+		return false
+	return w.y > -(LAP_Y + (0.06 if keep else 0.0))  # the bottom of the rim is where the lap is
+
+
+func _holding(w: Vector3, was: bool, squeeze: bool, trigger: bool) -> bool:
+	if squeeze and (_near(w) or (was and Vector2(w.x, w.y).length() < HOLD_OUT + 0.12)):
+		return true
+	return _on_rim(w, was, trigger)
 
 
 func wheel_held() -> bool:
@@ -310,17 +370,19 @@ func wheel_held() -> bool:
 
 ## Wheel angle from the hands (+ = anticlockwise = turning left), or NAN when no hand holds it.
 ## Measured relative to the grip: when the set of holding hands changes, the wheel carries on from
-## its current angle.
-func wheel_from_hands(pl: Vector3, pr: Vector3, track_l: bool, track_r: bool) -> float:
+## its current angle. sq_l / sq_r: that hand squeezes grip; tr_l / tr_r: its trigger.
+func wheel_from_hands(pl: Vector3, pr: Vector3, track_l: bool, track_r: bool, sq_l := false, sq_r := false,
+		tr_l := false, tr_r := false) -> float:
 	var wl := _on_wheel(pl)
 	var wr := _on_wheel(pr)
-	held_l = track_l and _holding(wl)
-	held_r = track_r and _holding(wr)
+	held_l = track_l and _holding(wl, held_l, sq_l, tr_l)
+	held_r = track_r and _holding(wr, held_r, sq_r, tr_r)
 	if held_l and held_r and Vector2(wr.x - wl.x, wr.y - wl.y).length() < 0.08:
 		held_l = false  # both hands in one spot: treat it as one hand
 	var key := ("L" if held_l else "") + ("R" if held_r else "")
 	if key == "":
 		grip = ""
+		last_want = NAN
 		return NAN
 	var m := 0.0
 	if held_l and held_r:
@@ -330,48 +392,83 @@ func wheel_from_hands(pl: Vector3, pr: Vector3, track_l: bool, track_r: bool) ->
 	else:
 		m = atan2(-wl.y, -wl.x)
 	if key != grip:
+		# Carry on from where the hands had the wheel (not the eased wheel, which lags a little behind:
+		# re-basing on it lost a bit of the turn every time a hand let go).
+		var from := last_want if (grip != "" and grip != "?" and not is_nan(last_want)) else wheel_angle
 		grip = key
 		grip_raw = m
 		grip_acc = m
-		grip_offset = wheel_angle - m
+		grip_offset = from - m
 	else:
 		grip_acc += wrapf(m - grip_raw, -PI, PI)  # unwrap: hands may go round past 9 o'clock
 		grip_raw = m
-	return grip_acc + grip_offset
+	last_want = grip_acc + grip_offset
+	return last_want
 
 
 ## [throttle, brake, steer, item pressed, boost pressed]
+## Either hand works: grip (or trigger close to the rim) grabs the wheel, either trigger goes, either A uses the item,
+## and either stick steers too (a stick push always wins over the hands, so a driver who never finds
+## the wheel can still drive). Right stick up/down still moves the seat.
 func read_input(delta: float) -> Array:
 	var hp: Array = hand_positions()
-	var want := wheel_from_hands(hp[0], hp[1], hp[2], hp[3])
 	var stick := fake_stick
 	var trig := fake_trigger
+	var trig_l := fake_trigger_l
+	var grip_l := fake_grip_l
+	var grip_r := fake_grip_r
 	var a := fake_a
 	if not fake:
 		stick = hand_l.get_vector2("primary")
 		trig = hand_r.get_float("trigger")
-		a = hand_r.is_button_pressed("ax_button")
-		var rs := hand_r.get_vector2("primary")
-		if absf(rs.y) > 0.6:
-			seat_adj = clampf(seat_adj - signf(rs.y) * 0.25 * delta, -0.35, 0.35)
+		trig_l = hand_l.get_float("trigger")
+		grip_l = hand_l.get_float("grip")
+		grip_r = hand_r.get_float("grip")
+		a = hand_r.is_button_pressed("ax_button") or hand_l.is_button_pressed("ax_button")
+	var rs := fake_stick_r if fake else hand_r.get_vector2("primary")
+	if absf(rs.y) > 0.6 and absf(rs.y) > absf(rs.x):
+		seat_adj = clampf(seat_adj - signf(rs.y) * 0.25 * delta, -0.35, 0.35)
+	elif absf(rs.x) > absf(stick.x):
+		stick.x = rs.x  # either stick steers
+	var was_l := held_l
+	var was_r := held_r
+	var want := wheel_from_hands(hp[0], hp[1], hp[2], hp[3], grip_l > 0.5, grip_r > 0.5, trig_l > 0.5, trig > 0.5)
 	var was_held := has_meta("held")
-	if is_nan(want):
-		remove_meta("held")
-		unheld_t += delta
+	var stick_steer := absf(stick.x) > 0.3
+	var racing: bool = main.state == "race"
+	if stick_steer and racing:
+		st_stick_t += delta
+	if is_nan(want) or stick_steer:
+		if is_nan(want):
+			remove_meta("held")
+			unheld_t += delta
 		var spring := 0.0
-		if absf(stick.x) > 0.2:
+		if stick_steer or absf(stick.x) > 0.2:
 			spring = -stick.x * FULL_LOCK * 0.8
-		wheel_angle = move_toward(wheel_angle, spring, 3.0 * delta)
-	else:
+		wheel_angle = move_toward(wheel_angle, spring, (4.0 if stick_steer else 3.0) * delta)
+		if stick_steer and grip != "":
+			grip = "?"  # hands holding on: carry on from the stick's angle once it's let go
+	if not is_nan(want):
 		set_meta("held", true)
 		unheld_t = 0.0
-		if not was_held and not fake:
-			(hand_r if held_r else hand_l).trigger_haptic_pulse("haptic", 0.0, 0.3, 0.05, 0.0)
-		wheel_angle = lerpf(wheel_angle, clampf(want, -FULL_LOCK * 1.2, FULL_LOCK * 1.2), 1.0 - exp(-14.0 * delta))
+		if racing:
+			st_held_t += delta
+		if not fake:  # a buzz in each hand as it takes hold
+			if held_l and not was_l:
+				hand_l.trigger_haptic_pulse("haptic", 0.0, 0.35, 0.06, 0.0)
+			if held_r and not was_r:
+				hand_r.trigger_haptic_pulse("haptic", 0.0, 0.35, 0.06, 0.0)
+		if not stick_steer:
+			wheel_angle = lerpf(wheel_angle, clampf(want, -FULL_LOCK * 1.2, FULL_LOCK * 1.2), 1.0 - exp(-14.0 * delta))
+	if not was_held and has_meta("held"):
+		st_grabs += 1
 	var steer := -wheel_angle / FULL_LOCK
 	if absf(steer) < 0.06:
 		steer = 0.0
-	var throttle := trig
+	if racing:
+		st_race_t += delta
+		st_steer_sum += absf(steer) * delta
+	var throttle := maxf(trig, trig_l)
 	var brake := 0.0
 	if stick.y > 0.3:
 		throttle = maxf(throttle, stick.y)
@@ -382,6 +479,21 @@ func read_input(delta: float) -> Array:
 	var use_item: bool = press and kart.item != ""
 	var use_boost: bool = press and kart.item == ""
 	return [clampf(throttle, 0.0, 1.0), brake, clampf(steer, -1.0, 1.0), use_item, use_boost]
+
+
+## How the VR driver steered this race (Telemetry RUN line: did they find the wheel?).
+func steer_stats() -> Dictionary:
+	var rt := maxf(st_race_t, 0.001)
+	return {"vr_held": snappedf(minf(1.0, st_held_t / rt), 0.01),
+		"vr_stick": snappedf(minf(1.0, st_stick_t / rt), 0.01), "vr_steer": snappedf(st_steer_sum / rt, 0.01), "vr_grabs": st_grabs}
+
+
+func reset_steer_stats() -> void:
+	st_held_t = 0.0
+	st_stick_t = 0.0
+	st_race_t = 0.0
+	st_steer_sum = 0.0
+	st_grabs = 0
 
 
 func haptic(amp: float, dur: float = 0.1) -> void:
@@ -415,6 +527,7 @@ func place(delta: float) -> void:
 	mitten_r.position = pr
 	mitten_l.visible = bool(hp[2])
 	mitten_r.visible = bool(hp[3])
+	_update_grab_look(pl, pr)
 	var ch: float = kart.charge
 	hub_bar.scale = Vector3(maxf(0.05, ch) * 1.0, 1, 1)
 	var ready: bool = ch >= 1.0 and kart.item == ""
@@ -471,6 +584,23 @@ func place(delta: float) -> void:
 	var v := maxf(vignette_k, fade_k)
 	vignette.visible = v > 0.02
 	vignette_mat.set_shader_parameter("strength", v)
+
+
+## Show what holds: a holding hand's mitten turns green, and the rim pulses green while nobody holds it
+## (racing or about to), brighter as a hand comes near.
+func _update_grab_look(pl: Vector3, pr: Vector3) -> void:
+	mitten_mat_l.albedo_color = HELD_COLOR if held_l else MITTEN_COLOR
+	mitten_mat_r.albedo_color = HELD_COLOR if held_r else MITTEN_COLOR
+	var want := 0.0
+	if not wheel_held() and not kart.finished and main.state != "results":
+		var near := 0.0
+		for p in [pl, pr]:
+			var w := _on_wheel(p)
+			near = maxf(near, 1.0 - clampf((absf(Vector2(w.x, w.y).length() - WHEEL_R) + absf(w.z)) / 0.3, 0.0, 1.0))
+		var t := Time.get_ticks_msec() * 0.001
+		want = 0.25 + 0.2 * sin(t * 4.0) + 0.35 * near
+	rim_glow_mat.albedo_color.a = want
+	rim_glow.visible = want > 0.01
 
 
 ## Simple mode: two see-through ghost hands (core/ghost_hand.gd, the left one mirrored) grip the
