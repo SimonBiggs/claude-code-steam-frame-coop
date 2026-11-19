@@ -189,12 +189,13 @@ func _sign(kind: String, col: Color) -> Sprite3D:
 	vp.size = Vector2i(SIGN_PX, SIGN_PX)
 	vp.transparent_bg = true
 	vp.disable_3d = true
-	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 	var disc := PanelContainer.new()
 	disc.add_theme_stylebox_override("panel", UiKit.stylebox(col.darkened(0.5), 1.0, 200.0, col.lightened(0.35), 8.0, 0.0, Vector2(10, 10)))
 	disc.size = Vector2(SIGN_PX, SIGN_PX)
-	disc.add_child(StoryCard.picture(kind, SIGN_PX * 0.78, col.lightened(0.15)))
+	var pic := StoryCard.picture(kind, SIGN_PX * 0.78, col.lightened(0.15))
+	disc.add_child(pic)
 	vp.add_child(disc)
+	StoryCard.redraw_only(vp, [disc, pic])  # renders when the picture redraws, not every frame
 	var s := Sprite3D.new()
 	s.name = "Sign_" + kind
 	s.add_child(vp)
