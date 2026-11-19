@@ -112,7 +112,7 @@ func _watch() -> String:
 			nb += 1 if main.level.box_open(i) else 0
 		boxes_seen = maxi(boxes_seen, nb)
 		for rb in main.robots.values():
-			sprung = sprung or (rb as CharacterBody3D).velocity.y > 10.0
+			sprung = sprung or main.level.boings > 0
 			fanned = fanned or main.gadget_push(rb, false).y > 0.0
 	hats_seen = hats_seen or (main.net.state_get("hats", []) as Array).size() == 10
 	var hp: Array = main.net.state_get("hubp", [])

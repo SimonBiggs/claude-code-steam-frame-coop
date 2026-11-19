@@ -71,7 +71,8 @@ var spring_t: Array[float] = []  ## seconds since each spring last boinged (its 
 var fans: Array[Node3D] = []
 var belt_arrows: Array = []  ## [{node, dir, x0, len}] arrows that run along each belt
 var boxes: Array[Node3D] = []
-var box_bits := 0  ## the bot boxes opened (host -> state "boxes")
+var box_bits := 0
+var boings := 0  ## springs boinged on this island, seen here (every machine: its own robots, the others' events)  ## the bot boxes opened (host -> state "boxes")
 var _static: StaticBody3D
 
 
@@ -402,6 +403,7 @@ func box_near(p: Vector3, r: float) -> int:
 
 ## Every machine: spring i boinged (its top squashes and springs back).
 func spring_boing(i: int) -> void:
+	boings += 1
 	if i >= 0 and i < spring_t.size():
 		spring_t[i] = 0.0
 

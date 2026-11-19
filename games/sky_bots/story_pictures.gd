@@ -128,7 +128,7 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 					pic._poly([[0.5, 0.18 + bob], [0.56, 0.32 + bob], [0.7, 0.33 + bob], [0.59, 0.42 + bob], [0.63, 0.56 - 0.1 + bob],
 						[0.5, 0.4 + bob], [0.37, 0.46 + bob], [0.41, 0.42 + bob], [0.3, 0.33 + bob], [0.44, 0.32 + bob]], Color(1.0, 0.9, 0.35))
 		"skybot":  # a little robot with a propeller cap, in the card's colour
-			var spin := sin(t * 20.0) * 0.12
+			var spin := sin(t * 20.0) * 0.08  # (never past the cap's half width: the quad would cross itself)
 			pic._poly([[0.5 - 0.12 - spin, 0.14 + bob], [0.5 + 0.12 + spin, 0.14 + bob], [0.5 + 0.12 + spin, 0.17 + bob], [0.5 - 0.12 - spin, 0.17 + bob]], color.lightened(0.3))
 			pic.draw_line(pic._p(0.5, 0.17 + bob), pic._p(0.5, 0.24 + bob), Color(0.6, 0.62, 0.66), 3.0)
 			pic._poly([[0.3, 0.24 + bob], [0.7, 0.24 + bob], [0.7, 0.5 + bob], [0.3, 0.5 + bob]], Color(0.86, 0.89, 0.93))

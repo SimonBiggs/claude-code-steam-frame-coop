@@ -255,6 +255,10 @@ func _begin_session() -> void:
 			_story(k)
 	else:
 		_story("back")
+	if int(save.data.cleared) & 4 and not bool(save.data.ch2):  # (Crab Cove done before chapter two came: tell it now)
+		save.data.ch2 = true
+		save.mark_dirty()
+		_story("chapter2")
 	_go_hub()
 
 
@@ -1079,6 +1083,7 @@ func _island_cleared(by: int) -> void:
 	elif first_spark and isle == 3:
 		_story("all_sparks")
 		_story("chapter2")  # (the far islands open: Snowy Peaks next)
+		save.data.ch2 = true
 	else:
 		_story("spark")
 	if vr_rig != null:
@@ -1135,13 +1140,15 @@ func _feature_hints() -> void:
 		feats["belt"] = minf(float(feats.get("belt", INF)), float((bp.c as Vector3).x) - float((bp.s as Vector2).x) * 0.5)
 	if not (level.lv.get("boxes", []) as Array).is_empty() and int(save.data.tiny) < 3:
 		feats["tiny_box"] = float(((level.lv.boxes as Array)[0].pos as Vector3).x)
-	if int(save.data.tiny) >= 1 and island_t > 20.0:
+	if int(save.data.tiny) >= 1 and island_t > 20.0 and not has_meta("told_moves"):
 		feats["moves"] = -INF  # (once a session, after the first rescue: the air moves)
 	if not (level.lv.secret as Dictionary).is_empty():
 		feats["secret_hint"] = float(((level.lv.secret as Dictionary).wall as Vector3).x)
 	for f in feats:
 		if not told.has(f) and front > float(feats[f]) - 7.0:
 			told[f] = true
+			if f == "moves":
+				set_meta("told_moves", true)
 			_story(String(f))
 			return
 
