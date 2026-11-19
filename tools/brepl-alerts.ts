@@ -160,6 +160,12 @@ const suspends = async () => {
   for (const f of ["success", "fail"]) n += parseInt(await Bun.file(`/sys/power/suspend_stats/${f}`).text().catch(() => "0")) || 0;
   return n;
 };
+// Seconds the machine has slept since boot (CLOCK_BOOTTIME - CLOCK_MONOTONIC). /sys/power/suspend_stats misses
+// hibernate (2026-11-19: a 9 h hibernate posted "brepl frozen 33387 s"), and Bun's clocks all count sleep.
+const sleptSecs = async () => {
+  const p = Bun.spawn(["python3", "-c", "import time;print(time.clock_gettime(time.CLOCK_BOOTTIME)-time.clock_gettime(time.CLOCK_MONOTONIC))"], { stdout: "pipe", stderr: "ignore" });
+  return parseFloat(await new Response(p.stdout).text()) || 0;
+};
 const WORKER_SRC = `
 const fs = require("fs");
 let hb, lab, len, pid, snapped = false;
@@ -200,7 +206,7 @@ function startFreezeWatch() {
   let snap: any = null;
   worker.onmessage = (e) => { snap = e.data; };
   worker.postMessage({ sab, pid: process.pid });
-  let last = Date.now(), susp: Promise<number> = suspends(), suspAt = last;
+  let last = Date.now(), susp: Promise<number> = suspends(), suspAt = last, slept: Promise<number> = sleptSecs();
   const tick = origSI(async () => {
     const now = Date.now(), lag = now - last - 250;
     last = now; hb[0] = now;
@@ -209,11 +215,11 @@ function startFreezeWatch() {
     const b = running.length ? `running jobs: ${running.join(", ").slice(0, 600)}` : "";
     if (b !== base) { base = b; label(); }
     if (lag < FREEZE_MS) return;
-    const was = await susp;
-    susp = suspends();
+    const was = await susp, sleptWas = await slept;
+    susp = suspends(); slept = sleptSecs();
     await Bun.sleep(300);  // the worker's report arrives on the next turns of the loop
     const s = snap; snap = null;
-    const suspended = (await susp) !== was;
+    const suspended = (await susp) !== was || (await slept) - sleptWas > lag / 2000;
     const what = !s ? "no snapshot from the watchdog thread"
       : [s.label || "no timer callback or job was running",
          s.state === "R" ? "main thread was busy running JS (a CPU loop, big JSON / regex / sort, or a sync fs call)"
