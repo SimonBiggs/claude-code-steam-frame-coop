@@ -31,10 +31,10 @@ const RUN_SPEED := 0.12
 ## Third pass: the BEST TIMES board (TODAY'S RACE, race.gd: today's best times with their cups, the best ever under a
 ## star) on two posts at the back left, with BOBO'S TROPHY SHELF under it: one cup per day the family raced, gold /
 ## silver / bronze (it grows). Host data via set_times (the "town" event's 5th part).
-const TIMES_POS := Vector3(-0.62, 0.0, -1.0)
-const TIMES_W := 0.56
-const TIMES_H := 0.5
-const TIMES_Y := 1.2
+const TIMES_POS := Vector3(-1.5, 0.0, 0.2)  # left of the table, beside Bobo's jar, turned to the giant
+const TIMES_W := 0.5
+const TIMES_H := 0.46
+const TIMES_Y := 1.08
 const SHELF_Y := 0.62
 const CUPS_SHOWN := 30
 const TIMES_ROWS := 5
@@ -333,7 +333,7 @@ func _build_times() -> void:
 	var parts: Array = []
 	for sx in [-TIMES_W * 0.5 + 0.02, TIMES_W * 0.5 - 0.02]:
 		parts.append([main.box_mesh(Vector3(0.03, TIMES_Y + TIMES_H * 0.5, 0.03)), Transform3D(Basis(), Vector3(sx, (TIMES_Y + TIMES_H * 0.5) * 0.5, -0.02)), wood])
-	parts.append([main.box_mesh(Vector3(TIMES_W, TIMES_H, 0.02)), Transform3D(Basis(), Vector3(0, TIMES_Y, 0)), Color(0.18, 0.22, 0.32)])
+	parts.append([main.box_mesh(Vector3(TIMES_W, TIMES_H, 0.02)), Transform3D(Basis(), Vector3(0, TIMES_Y, 0)), Color(0.16, 0.3, 0.26)])  # a chalkboard
 	parts.append([main.box_mesh(Vector3(TIMES_W + 0.04, 0.03, 0.03)), Transform3D(Basis(), Vector3(0, TIMES_Y + TIMES_H * 0.5 + 0.01, 0)), wood])
 	parts.append([main.box_mesh(Vector3(TIMES_W + 0.04, 0.03, 0.03)), Transform3D(Basis(), Vector3(0, TIMES_Y - TIMES_H * 0.5 - 0.01, 0)), wood])
 	for k in 2:  # the trophy shelf: two planks
@@ -349,7 +349,7 @@ func _build_times() -> void:
 	times_root.add_child(stand)
 	for i in TIMES_ROWS:
 		var y := TIMES_Y + TIMES_H * 0.5 - 0.07 - i * 0.075
-		var l := _times_label(40)
+		var l := _times_label(32)
 		l.position = Vector3(0.04, y, 0.012)
 		times_root.add_child(l)
 		var cup := MeshInstance3D.new()
@@ -358,7 +358,7 @@ func _build_times() -> void:
 		cup.material_override = main.make_material(Color(1, 1, 1), 0.2)
 		times_root.add_child(cup)
 		time_rows.append([l, cup])
-	best_label = _times_label(34)
+	best_label = _times_label(30)
 	best_label.position = Vector3(0.04, TIMES_Y - TIMES_H * 0.5 + 0.045, 0.012)
 	best_label.modulate = Color(1.0, 0.85, 0.3)
 	times_root.add_child(best_label)
@@ -380,8 +380,8 @@ func _build_times() -> void:
 	var mat := StandardMaterial3D.new()
 	mat.vertex_color_use_as_albedo = true
 	mat.vertex_color_is_srgb = true
-	mat.metallic = 0.6
-	mat.roughness = 0.25
+	mat.metallic = 0.25
+	mat.roughness = 0.35
 	mmi.material_override = mat
 	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	times_root.add_child(mmi)
@@ -402,9 +402,9 @@ func _times_label(size: int) -> Label3D:
 
 func _cup_mesh() -> Mesh:
 	var cm := CylinderMesh.new()
-	cm.top_radius = 0.022
-	cm.bottom_radius = 0.01
-	cm.height = 0.045
+	cm.top_radius = 0.015
+	cm.bottom_radius = 0.008
+	cm.height = 0.036
 	cm.radial_segments = 10
 	cm.rings = 1
 	return cm
