@@ -192,7 +192,7 @@ func _run() -> void:
 	# 4e. MENU pressed again resumes, a bounce (twice within 0.4 s) doesn't flip it back.
 	await _frames(30, func(_i: int) -> void: _rest())
 	net._vr_toggle("test MENU")
-	net._vr_toggle("test MENU bounce")
+	net._vr_toggle("test MENU bounce")  # (same frame)
 	await _frames(3)
 	_check(get_tree().paused, "4e. a bounced MENU press still pauses (not pause + resume)")
 	await _frames(30, func(_i: int) -> void: _rest())

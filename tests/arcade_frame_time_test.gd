@@ -4,14 +4,19 @@ extends SceneTree
 ## pictures all redrew every frame (re-triangulating their polygons), because their set_process(false) ran before
 ## add_child and Godot switches _process back on at NOTIFICATION_READY. Checks, on every tab and with the VR walls:
 ##  - at most MAX_PROCESSING nodes under the arcade run _process (a still picture that animates shows up here first);
-##  - the best of several 30-frame windows averages under FLAT_MS / VR_MS of process time per frame (Godot's own
-##    TIME_PROCESS: every _process; headless draws nothing and paces frames itself, so wall time can't see the cost and
-##    the processing count above is what catches redrawing pictures).
+##  - at most MAX_REDRAWS canvas items redraw a frame (their `draw` signal, counted over REDRAW_FRAMES frames): pulsing
+##    badges are fine, a board of pictures redrawing is not (~300 a frame before the fix, VR walls another ~90);
+##  - the arcade's own per-frame work stays under FLAT_MS / VR_MS (best of several timed runs, see _measure; headless
+##    draws nothing, so the processing count above is what catches redrawing pictures).
 ##   godot-test --headless --path . -s res://tests/arcade_frame_time_test.gd     Prints ARCADE FRAME TIME: PASS / FAIL.
 
 const MAX_PROCESSING := 8
-const FLAT_MS := 8.0  # VR runs at 90 Hz = 11.1 ms for everything, rendering included
-const VR_MS := 8.0  # (headless base ~2.3 ms: services + tree; the arcade ~1 ms)
+const MAX_REDRAWS := 80  # (2026-11-19: 112 flat / 366 VR before the fix, 39 / 39 after)
+const REDRAW_FRAMES := 30
+var redraws := 0
+var redraw_from := 0
+const FLAT_MS := 1.5  # VR runs at 90 Hz = 11.1 ms for everything, rendering included; the menu's script is a sliver
+const VR_MS := 1.5
 const WINDOWS := 6
 const WINDOW_FRAMES := 30
 
@@ -21,10 +26,7 @@ var arcade: Node
 var step := "load"
 var tab := 0
 var wait := 0
-var win_sum := 0.0
-var win_frames := 0
 var best_ms := INF
-var windows := 0
 var report: Array[String] = []
 
 
@@ -55,22 +57,36 @@ func _processing() -> Array[String]:
 	return out
 
 
+func _count_redraws() -> void:
+	redraws = 0
+	for n in root.find_children("*", "CanvasItem", true, false):
+		if not n.draw.is_connected(_on_draw):
+			n.draw.connect(_on_draw)
+
+
+func _on_draw() -> void:
+	redraws += 1
+
+
 func _check_processing(where: String) -> void:
 	var p := _processing()
 	_expect(p.size() <= MAX_PROCESSING, "%s: %d nodes run _process every frame (max %d; a still picture from StoryCard.picture(..., false)?): %s" % [where, p.size(), MAX_PROCESSING, ", ".join(p.slice(0, 6))])
 
 
-## Times WINDOWS windows of WINDOW_FRAMES frames; true when done (best window kept: a busy machine slows some).
-func _measure() -> bool:
-	win_sum += Performance.get_monitor(Performance.TIME_PROCESS) * 1000.0
-	win_frames += 1
-	if win_frames < WINDOW_FRAMES:
-		return false
-	best_ms = minf(best_ms, win_sum / WINDOW_FRAMES)
-	win_frames = 0
-	win_sum = 0.0
-	windows += 1
-	return windows >= WINDOWS
+## The arcade's own per-frame work (its _process: lobby net, hall loading, VR list / walls), timed by calling it
+## WINDOW_FRAMES times in a row, WINDOWS times spread out, keeping the best (a busy machine slows some; TestTime's
+## idea). Frame-to-frame wall time can't be used headless (Godot paces frames and draws nothing), and Godot's
+## TIME_PROCESS swung 5-190 ms between identical runs on the shared test threads.
+func _measure() -> float:
+	var best := INF
+	for w in WINDOWS:
+		if w > 0:
+			OS.delay_msec(30)
+		var t0 := Time.get_ticks_usec()
+		for i in WINDOW_FRAMES:
+			arcade._process(1.0 / 60.0)
+		best = minf(best, (Time.get_ticks_usec() - t0) / 1000.0 / WINDOW_FRAMES)
+	return best
 
 
 func _process(_delta: float) -> bool:
@@ -101,20 +117,39 @@ func _process(_delta: float) -> bool:
 			tab += 1
 			wait = 4
 		"flat":
-			if _measure():
+			if redraw_from == 0:
+				_count_redraws()
+				redraw_from = frames
+				return false
+			if frames - redraw_from < REDRAW_FRAMES:
+				return false
+			var per := float(redraws) / REDRAW_FRAMES
+			report.append("flat %.0f redraws/frame" % per)
+			_expect(per <= MAX_REDRAWS, "flat menu: %.0f canvas items redraw every frame (max %d): pictures meant to stand still?" % [per, MAX_REDRAWS])
+			redraw_from = 0
+			best_ms = _measure()
+			if true:
 				report.append("flat %.2f ms" % best_ms)
 				_expect(best_ms < FLAT_MS, "flat menu: %.1f ms a frame (budget %.1f)" % [best_ms, FLAT_MS])
 				arcade._build_vr_view()
 				arcade.vr_cam.position = Vector3(0, 1.6, 0)
-				best_ms = INF
-				windows = 0
 				step = "vr"
 				wait = 20
 		"vr":
 			wait -= 1
 			if wait > 0:
 				return false
-			if _measure():
+			if redraw_from == 0:
+				_count_redraws()
+				redraw_from = frames
+				return false
+			if frames - redraw_from < REDRAW_FRAMES:
+				return false
+			var per_vr := float(redraws) / REDRAW_FRAMES
+			report.append("VR %.0f redraws/frame" % per_vr)
+			_expect(per_vr <= MAX_REDRAWS, "VR lobby: %.0f canvas items redraw every frame (max %d): the walls' pictures / badges meant to hold still?" % [per_vr, MAX_REDRAWS])
+			best_ms = _measure()
+			if true:
 				report.append("VR %.2f ms" % best_ms)
 				_expect(best_ms < VR_MS, "VR lobby: %.1f ms a frame (budget %.1f)" % [best_ms, VR_MS])
 				_check_processing("VR lobby")

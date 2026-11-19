@@ -327,6 +327,7 @@ func show_fill(i: int, frac: float, color: Color = Color(1, 1, 0.6)) -> void:
 		mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
 		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
 		mat.vertex_color_use_as_albedo = true
+		mat.vertex_color_is_srgb = true
 		UiKit.see_through(mat)
 		mi.material_override = mat
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF

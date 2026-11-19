@@ -11,6 +11,7 @@ extends SceneTree
 
 const PickFlow := preload("res://core/pick_flow.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
+const UiKit := preload("res://core/ui_kit.gd")
 
 var fails := 0
 const DT := 1.0 / 60.0
@@ -91,6 +92,11 @@ func _orb(i: int) -> Vector3:
 	return flow.orb_position(i)
 
 
+## The controller's -Z towards `at`.
+func _aim(at: Vector3) -> void:
+	flow.ctrl.global_basis = UiKit.aim((at - flow.ctrl.global_position).normalized())
+
+
 func _pull() -> void:
 	flow.ctrl.set_meta("trigger", 1.0)
 	_ticks(DT * 2)
@@ -121,7 +127,7 @@ func _run() -> void:
 	_expect(flow.orbs.hint_text() == PickFlow.VR_HINT, "2. the line says reach in or point and pull (got '%s')" % flow.orbs.hint_text())
 	var from := _orb(2) + Vector3(0.0, -0.1, 0.4)
 	flow.ctrl.global_position = from
-	flow.ctrl.look_at(_orb(2))
+	_aim(_orb(2))
 	flow.note_press(0)  # 2a. a burst: a press just before
 	_pull()
 	_expect(flow.chosen < 0, "2a. a pull right after another press (a burst) doesn't pick")
@@ -135,7 +141,7 @@ func _run() -> void:
 	_begin()
 	flow.hands = {"r": [Vector3(0.6, 0.6, 0.0), 0, "hand"]}
 	flow.ctrl.global_position = Vector3(0.6, 0.6, 0.3)
-	flow.ctrl.look_at(Vector3(0.6, 0.6, 1.0))  # pointing away from the row
+	_aim(Vector3(0.6, 0.6, 1.0))  # pointing away from the row
 	_ticks(1.0)
 	flow.hands = {"r": [_orb(0), 0, "hand"]}
 	_ticks(flow.hand_dwell * 0.5)
@@ -151,6 +157,6 @@ func _run() -> void:
 	_ticks(1.0)
 	_expect(flow.orbs.hint_text() == "", "4. flat players: no VR how-to line (got '%s')" % flow.orbs.hint_text())
 	flow.ctrl.global_position = _orb(1) + Vector3(0, 0, 0.4)
-	flow.ctrl.look_at(_orb(1))
+	_aim(_orb(1))
 	_pull()
 	_expect(flow.chosen < 0, "4. no VR hands: a pull doesn't pick")

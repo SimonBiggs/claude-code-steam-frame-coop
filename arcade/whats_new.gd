@@ -683,6 +683,10 @@ static func vr_panel() -> Sprite3D:
 
 static func vr_update(wall: Sprite3D, games: Array, seen: Dictionary, selected: int) -> void:
 	var vp := wall.get_node("NewsView") as SubViewport
+	# Still: the wall's viewport draws a few times a second, but its pulsing badges / stars / twinkles redrew ~90
+	# canvas items EVERY frame (2026-11-19 VR hub at 7-11 fps; tests/arcade_frame_time_test.gd counts redraws). With
+	# the viewport's processing off their tweens hold still and nothing redraws between updates.
+	vp.process_mode = Node.PROCESS_MODE_DISABLED
 	for c in vp.get_children():
 		vp.remove_child(c)
 		c.queue_free()
