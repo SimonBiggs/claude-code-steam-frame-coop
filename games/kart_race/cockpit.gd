@@ -194,7 +194,7 @@ func _build_wheel() -> void:
 	UiKit.see_through(rim_glow_mat)
 	rim_glow_mat.albedo_color = Color(0.5, 1.0, 0.6, 0.0)
 	rim_glow = MeshInstance3D.new()
-	rim_glow.mesh = main.torus_mesh(WHEEL_R - 0.04, WHEEL_R + 0.04)
+	rim_glow.mesh = main.torus_mesh(WHEEL_R - 0.033, WHEEL_R + 0.033)
 	rim_glow.material_override = rim_glow_mat
 	rim_glow.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	wheel_spin.add_child(rim_glow)
@@ -598,7 +598,7 @@ func _update_grab_look(pl: Vector3, pr: Vector3) -> void:
 			var w := _on_wheel(p)
 			near = maxf(near, 1.0 - clampf((absf(Vector2(w.x, w.y).length() - WHEEL_R) + absf(w.z)) / 0.3, 0.0, 1.0))
 		var t := Time.get_ticks_msec() * 0.001
-		want = 0.25 + 0.2 * sin(t * 4.0) + 0.35 * near
+		want = 0.2 + 0.14 * sin(t * 4.0) + 0.3 * near
 	rim_glow_mat.albedo_color.a = want
 	rim_glow.visible = want > 0.01
 
