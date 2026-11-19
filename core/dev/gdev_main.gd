@@ -318,6 +318,16 @@ func _poll_commands() -> void:
 				recording = parts.size() < 2 or parts[1] != "off"
 			"quit":
 				get_tree().quit()
+			"run":
+				# run PATH: compile a GDScript file (func run(tree: SceneTree) -> Variant) and call it live.
+				var src := FileAccess.get_file_as_string(parts[1]) if parts.size() > 1 else ""
+				var g := GDScript.new()
+				g.source_code = src
+				if src == "" or g.reload() != OK:
+					_log("run: can't compile " + line)
+				else:
+					var o = g.new()
+					_log("run result: " + str(o.call("run", get_tree())))
 			_:
 				_log("unknown command: " + line)
 
