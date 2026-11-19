@@ -223,4 +223,4 @@ func _fullscreen() -> void:
 
 
 func _quit() -> void:
-	get_tree().quit()
+	preload("res://core/vr_watch.gd").quit_on_purpose(get_tree())  # (only quits nobody asked for restart: core/vr_watch.gd)

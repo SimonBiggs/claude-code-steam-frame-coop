@@ -1166,7 +1166,7 @@ func _toggle_quit_menu() -> void:
 	t.add_theme_font_size_override("font_size", 34)
 	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(t)
-	for item in [["Keep playing", _toggle_quit_menu], ["Quit", func() -> void: get_tree().quit()]]:
+	for item in [["Keep playing", _toggle_quit_menu], ["Quit", func() -> void: preload("res://core/vr_watch.gd").quit_on_purpose(get_tree())]]:
 		var b := Button.new()
 		b.text = item[0]
 		b.custom_minimum_size = Vector2(360, 64)

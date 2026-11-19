@@ -317,7 +317,7 @@ func _poll_commands() -> void:
 			"record":
 				recording = parts.size() < 2 or parts[1] != "off"
 			"quit":
-				get_tree().quit()
+				preload("res://core/vr_watch.gd").quit_on_purpose(get_tree())
 			"run":
 				# run PATH: compile a GDScript file (func run(tree: SceneTree) -> Variant) and call it live.
 				_log(run_file(parts[1] if parts.size() > 1 else "", get_tree()))

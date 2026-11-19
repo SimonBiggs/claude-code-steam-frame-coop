@@ -25,7 +25,8 @@ RESTART (gdev run only). The launcher decides nothing; the game does. A game may
   {"args": [...extra godot args], "env": {NAME: value}, "unset": [NAME...], "now": bool, "reason": "..."}
 gdev run starts it again with those args / env when the game died of a crash signal (ABRT, SEGV, BUS, ILL, FPE: e.g.
 SteamVR's vrclient.so aborting the game when vrserver dies, 2026-11-13) or exited any way with "now": true (the game
-asked). No file, or a normal exit / SIGTERM, ends gdev run as before. Each start deletes the file (start unarmed);
+asked; core/vr_watch.gd writes "now" when the arcade closes and nobody asked). No file, a `gdev stop`, or Steam
+stopping gdev run (SIGTERM) ends gdev run as before. Each start deletes the file (start unarmed);
 more than 4 restarts in 2 minutes stops trying (said in the log and on the brepl channel, never quietly).
 Tests: GDEV_GODOT (default: godot on PATH) and GDEV_GODOT_ARGS (e.g. "--headless") change how Godot is started.
 DISPLAY: a visible (non-headless) start from a shell with no DISPLAY / WAYLAND_DISPLAY (Claude Code, ssh, tmux) borrows
@@ -145,6 +146,12 @@ def restart_file(proj: Path) -> Path:
     return dev_dir(proj) / "restart.json"
 
 
+def stop_marker(proj: Path) -> Path:
+    """gdev stop / restart --hard was asked: the exit that follows is on purpose, never a restart (the game writes a
+    "now" restart when it closes and nobody asked, core/vr_watch.gd, and a SIGTERM looks like that from inside)."""
+    return dev_dir(proj) / "stopping"
+
+
 def _say(proj: Path, msg: str) -> None:
     """A supervisor line: printed, in the game log and on the brepl channel (never a quiet restart)."""
     print(msg, file=sys.stderr)
@@ -233,6 +240,7 @@ def cmd_run(proj: Path, args) -> None:
     unset: list = []
     while True:
         restart_file(proj).unlink(missing_ok=True)  # every start begins unarmed
+        stop_marker(proj).unlink(missing_ok=True)
         p = cmd_start(proj, args, extra_args, extra_env, unset)
         if p is None:
             return
@@ -241,6 +249,9 @@ def cmd_run(proj: Path, args) -> None:
             forward(stopping["sig"], None)
         code = p.wait()
         if stopping["sig"]:
+            sys.exit(code)
+        if stop_marker(proj).exists():  # gdev stop: on purpose
+            stop_marker(proj).unlink(missing_ok=True)
             sys.exit(code)
         spec = _restart_spec(proj, code)
         if spec is None:
@@ -305,6 +316,7 @@ def cmd_stop(proj: Path, args) -> None:
     if not pid:
         print("not running")
         return
+    stop_marker(proj).write_text(str(time.time()))
     os.killpg(pid, signal.SIGTERM)
     for _ in range(25):
         time.sleep(0.2)

@@ -43,8 +43,7 @@ static func stars(rows: Dictionary) -> Vector2i:
 
 ## A picture that draws once and then stands still (dozens of tiles: only the friend in focus moves).
 static func still(kind: String, px: float, color: Color) -> Control:
-	var p := StoryCard.picture(kind, px, color)
-	p.set_process(false)
+	var p := StoryCard.picture(kind, px, color, false)
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return p
 
