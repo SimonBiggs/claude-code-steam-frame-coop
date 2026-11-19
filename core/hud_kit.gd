@@ -950,8 +950,10 @@ class BannerFx extends Control:
 		_title.position = Vector2(0, cy - total * 0.5)
 		_sub.size = Vector2(size.x * 0.8, ss.y)
 		_sub.position = Vector2(size.x * 0.1, cy - total * 0.5 + ts.y + 6.0 * _s)
-		set_meta("band", Vector3(cy, total * 0.5 + 26.0 * _s, ease_open * (1.0 - close_k * 0.6)))
-		queue_redraw()
+		var band := Vector3(cy, total * 0.5 + 26.0 * _s, ease_open * (1.0 - close_k * 0.6))
+		if not has_meta("band") or get_meta("band") != band:  # redraw only while the band moves (tests/*_vr_frame_test.gd)
+			set_meta("band", band)
+			queue_redraw()
 
 	func _draw() -> void:
 		if not has_meta("band"):

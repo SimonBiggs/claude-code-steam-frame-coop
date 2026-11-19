@@ -283,15 +283,27 @@ static func picture(kind: String, px: float = 96.0, color: Color = Color(1.0, 0.
 	return StoryCardPics.make(kind, px, color, animate)
 
 
+## A picture's own little SubViewport renders only when something in it redrew (not every frame: 2026-11-19 every
+## pick orb / VR card picture re-rendered its viewport each frame while the headset needs 90 Hz). Call after adding
+## the canvas items whose redraws must show (their `draw` signal asks for one more render).
+static func redraw_only(vp: SubViewport, items: Array) -> void:
+	vp.render_target_update_mode = SubViewport.UPDATE_ONCE
+	for c in items:
+		(c as CanvasItem).draw.connect(func() -> void:
+			if is_instance_valid(vp):
+				vp.render_target_update_mode = SubViewport.UPDATE_ONCE)
+
+
 ## The same picture in the 3D world: a billboard Sprite3D one unit wide (scale it), drawn by a small viewport of its
-## own (it keeps its animation). Pick orbs (core/pick_orbs.gd), gift tags and warning pictures over the ground use it.
+## own (it keeps its animation: StoryCard.redraw_only renders it when the picture redraws). Pick orbs (core/pick_orbs.gd), gift tags and warning pictures over the ground use it.
 static func sprite(kind: String, px: int = 192, color: Color = Color(1.0, 0.75, 0.3)) -> Sprite3D:
 	var vp := SubViewport.new()
 	vp.size = Vector2i(px, px)
 	vp.transparent_bg = true
 	vp.disable_3d = true
-	vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
-	vp.add_child(picture(kind, px, color))
+	var pic := picture(kind, px, color)
+	vp.add_child(pic)
+	redraw_only(vp, [pic])
 	var s := Sprite3D.new()
 	s.add_child(vp)
 	s.texture = vp.get_texture()
@@ -440,6 +452,8 @@ class Card extends Control:
 
 ## Builds pictures (a tiny indirection so Card, an inner class, can reach the outer static func).
 class StoryCardPics:
+	const Outer := preload("res://core/story_card.gd")
+
 	static func make(kind: String, px: float, color: Color, animate: bool = true) -> Control:
 		if not (SHARED_PICTURES.has(kind) or Registry.find(kind) != null):
 			var ic := UiKit.icon(kind, color, px)
@@ -463,12 +477,13 @@ class StoryCardPics:
 		vp.size = Vector2i(PX, PX)
 		vp.transparent_bg = true
 		vp.disable_3d = true
-		vp.render_target_update_mode = SubViewport.UPDATE_ALWAYS
 		var disc := PanelContainer.new()
 		disc.add_theme_stylebox_override("panel", UiKit.stylebox(col.darkened(0.45), 1.0, 200.0, col.lightened(0.3), 6.0, 0.0, Vector2(12, 12)))
 		disc.size = Vector2(PX, PX)
-		disc.add_child(make(kind, PX * 0.8, col.lightened(0.15)))
+		var pic := make(kind, PX * 0.8, col.lightened(0.15))
+		disc.add_child(pic)
 		vp.add_child(disc)
+		Outer.redraw_only(vp, [disc, pic])
 		var s := Sprite3D.new()
 		s.name = "StoryPicture"
 		s.add_child(vp)
@@ -489,14 +504,25 @@ class Picture extends Control:
 	var color := Color(1.0, 0.75, 0.3)
 	var t := 0.0
 	var animate := true  # false: drawn once (see StoryCard.picture)
+	var _drawn_t := -1.0
+	## Animated pictures redraw at most FPS times a second (each redraw re-triangulates every polygon; a 90 Hz headset
+	## doesn't need a bobbing HUD bolt drawn 90 times a second) and not at all while hidden (2026-11-19: Sky Bots kept
+	## 33 HUD / card pictures ticking, 13 redrawing a frame). tests/<game>_vr_frame_test.gd count redraws.
+	const FPS := 30.0
 
 	func _ready() -> void:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
-		set_process(animate)
+		set_process(animate and is_visible_in_tree())
+
+	func _notification(what: int) -> void:
+		if what == NOTIFICATION_VISIBILITY_CHANGED and is_inside_tree():
+			set_process(animate and is_visible_in_tree())
 
 	func _process(delta: float) -> void:
 		t += delta
-		queue_redraw()
+		if t - _drawn_t >= 1.0 / FPS or t < _drawn_t:
+			_drawn_t = t
+			queue_redraw()
 
 	func _p(x: float, y: float) -> Vector2:
 		return Vector2(x, y) * size
@@ -507,13 +533,22 @@ class Picture extends Control:
 	## Pictures whose polygons can't be drawn (self-crossing or flat: Godot prints "triangulation failed" and draws
 	## nothing): kind -> true. tests/story_pictures_test.gd fails on any.
 	static var bad_polys := {}
+	## Each kind's polygons are checked over its first POLY_CHECKS polygon draws (any instance), then trusted: the
+	## check triangulated every polygon a second time on every redraw (draw_colored_polygon triangulates too).
+	static var poly_checks := {}
+	const POLY_CHECKS := 400
 
 	func _poly(pts: Array, c: Color) -> void:
 		var arr := PackedVector2Array()
 		for q in pts:
 			arr.append(_p(q[0], q[1]))
-		if Geometry2D.triangulate_polygon(arr).is_empty():
-			bad_polys[kind] = true
+		var n: int = poly_checks.get(kind, 0)
+		if n < POLY_CHECKS:
+			poly_checks[kind] = n + 1
+			if Geometry2D.triangulate_polygon(arr).is_empty():
+				bad_polys[kind] = true
+				return
+		elif bad_polys.has(kind) and Geometry2D.triangulate_polygon(arr).is_empty():
 			return
 		draw_colored_polygon(arr, c)
 
