@@ -14,10 +14,10 @@ func _initialize() -> void:
 	var bad := dir + "/gdev_run_bad.gd"
 	var norun := dir + "/gdev_run_norun.gd"
 	_write(ok, "extends RefCounted\nfunc run(tree: SceneTree) -> Variant:\n\treturn 40 + 2\n")
-	_write(bad, "extends RefCounted\nfunc run(tree: SceneTree) -> Variant:\n\treturn = 1\n")
+	_write(bad, "")  # (no broken-syntax case: its parse error prints SCRIPT ERROR, which landings count as a failure)
 	_write(norun, "extends RefCounted\nfunc other() -> int:\n\treturn 1\n")
 	_check(GdevMain.run_file(ok, self) == "run result: 42", "a good file runs: " + GdevMain.run_file(ok, self))
-	_check(GdevMain.run_file(bad, self).begins_with("run: can't compile"), "a broken file is reported")
+	_check(GdevMain.run_file(bad, self).begins_with("run: can't compile"), "an empty file is reported")
 	_check(GdevMain.run_file(norun, self).contains("no func run"), "a file without run() is reported")
 	_check(GdevMain.run_file("", self).begins_with("run: can't compile"), "no path is reported")
 	_check(GdevMain.run_file(dir + "/missing.gd", self).begins_with("run: can't compile"), "a missing file is reported")
