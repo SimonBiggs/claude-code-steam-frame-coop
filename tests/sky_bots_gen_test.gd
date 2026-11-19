@@ -8,7 +8,10 @@ extends SceneTree
 ## wall, zap floors with a safe lane and a tell of 1 s+, grumbles on their floors, checkpoints close enough, the spark
 ## on the last floor, Cranky Crab's arena on Crab Cove), the same description gives the same island on every machine,
 ## every section shows up, harder modes have wider hops, and it all stays fast (< 100 ms on a Deck). The real proof is
-## the bot playing islands (tests/sky_bots_bot.gd). Prints "SKY BOTS GEN: PASS" (or FAIL with SCRIPT ERROR lines).
+## the bot playing islands (tests/sky_bots_bot.gd). Every island has its own GIANT JOB (it really shuts the way:
+## check() proves it) and its own layout: the islands' shapes (how high, how long their floors, how they wind) must
+## differ from each other - "they're all the exact same level" (David, 2026-11-19) must never come back - and the
+## boss-less islands hide a MEGA GRUMBLE. Prints "SKY BOTS GEN: PASS" (or FAIL with SCRIPT ERROR lines).
 
 const G := preload("res://games/sky_bots/levelgen.gd")
 const Seeded := preload("res://core/seeded.gd")
@@ -23,6 +26,8 @@ func _initialize() -> void:
 	var kinds := {}
 	var widest := {}
 	var total := 0
+	var shape := {}  # island -> [sum of floor heights, of floor lengths, of |z|, floors counted]
+	var jobs_seen := {}
 	for island in range(1, G.ISLANDS + 1):
 		for m in G.MODES:
 			var r := Seeded.validate(func(s: int) -> Dictionary: return G.generate({"i": island, "s": s, "m": m}),
@@ -42,6 +47,22 @@ func _initialize() -> void:
 				kinds["fan"] = int(kinds.get("fan", 0)) + (lv.fans as Array).size()
 				kinds["box"] = int(kinds.get("box", 0)) + (lv.boxes as Array).size()
 				kinds[G.boss_of(island) + " boss"] = int(kinds.get(G.boss_of(island) + " boss", 0)) + (0 if (lv.boss as Dictionary).is_empty() else 1)
+				var sh: Array = shape.get(island, [0.0, 0.0, 0.0, 0])
+				for p in lv.plats:
+					if String(p.k) == "solid":
+						sh[0] = float(sh[0]) + float((p.c as Vector3).y)
+						sh[1] = float(sh[1]) + float((p.s as Vector2).x)
+						sh[2] = float(sh[2]) + absf(float((p.c as Vector3).z))
+						sh[3] = int(sh[3]) + 1
+				shape[island] = sh
+				for jb in lv.get("jobs", []):
+					jobs_seen[String(jb.kind)] = int(jobs_seen.get(String(jb.kind), 0)) + 1
+					_expect(String(jb.kind) == String(G.JOBS[island]), "island %d's job is its own (%s)" % [island, String(jb.kind)])
+				_expect((lv.get("jobs", []) as Array).size() >= 1, "island %d seed %d has a giant job" % [island, 500 + s * 7])
+				var megas := 0
+				for gd in lv.grumbles:
+					megas += 1 if bool(gd.get("big", false)) else 0
+				_expect(megas == (1 if bool(G.STYLE[island].mega) and G.boss_of(island) == "" else 0), "island %d seed %d: %d mega grumbles" % [island, 500 + s * 7, megas])
 				for hop in lv.chain:
 					if (hop as Array).size() > 2:
 						continue  # (spring hops and fan floats aren't jumps)
@@ -56,9 +77,24 @@ func _initialize() -> void:
 					"island %d %s seed %d: the description rebuilds the island" % [island, m, 500 + s * 7])
 				_expect((G.boss_of(island) == "") == (lv.boss as Dictionary).is_empty(), "island %d: a boss only on a boss island" % island)
 				_expect((lv.boss as Dictionary).is_empty() or String(lv.boss.kind) == G.boss_of(island), "island %d has its own boss" % island)
-	for k in ["solid", "mover", "lift", "side", "arena", "grumble", "zap", "belt", "spring", "fan", "box", "crab boss", "king boss"]:
+	for k in ["solid", "mover", "lift", "side", "arena", "gate", "grumble", "zap", "belt", "spring", "fan", "box", "crab boss", "king boss"]:
 		_expect(int(kinds.get(k, 0)) >= 5, "%s shows up (%s)" % [k, str(kinds)])
 	_expect(float(widest.get("hard", 0.0)) > float(widest.get("gentle", 0.0)), "harder modes have wider hops (%s)" % str(widest))
+	for k in G.JOB_KINDS:
+		_expect(int(jobs_seen.get(k, 0)) >= 5, "the %s job shows up (%s)" % [k, str(jobs_seen)])
+	# Every two islands differ in shape: average floor height (0.6+), floor length (0.8+) or winding (0.3+).
+	var prof := {}
+	for i in shape:
+		var sh: Array = shape[i]
+		var n0 := maxf(1.0, float(sh[3]))
+		prof[i] = Vector3(float(sh[0]) / n0, float(sh[1]) / n0, float(sh[2]) / n0)
+	print("sky bots gen: island shapes (height, floor length, winding) %s" % str(prof))
+	for a in range(1, G.ISLANDS + 1):
+		for b in range(a + 1, G.ISLANDS + 1):
+			var pa: Vector3 = prof[a]
+			var pb: Vector3 = prof[b]
+			_expect(absf(pa.x - pb.x) >= 0.6 or absf(pa.y - pb.y) >= 0.8 or absf(pa.z - pb.z) >= 0.3,
+				"islands %d and %d are shaped alike (%s vs %s)" % [a, b, str(pa), str(pb)])
 	# TODAY'S ISLAND over 400+ days: the same all day, fair, called TODAY'S ISLAND.
 	var rd := Seeded.validate_days(func(date: String) -> Dictionary: return G.generate(G.daily_desc("brave", date)),
 		func(lv: Dictionary) -> Array:

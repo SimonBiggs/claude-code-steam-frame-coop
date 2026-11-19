@@ -11,6 +11,13 @@ extends RefCounted
 ##   spring  a SPRING PAD throws you up onto a high ledge nothing else reaches (SNOWY PEAKS loves them)
 ##   fan     a gap far too wide to hop with a WIND FAN in it: its updraft floats you across (JUNGLE JUMBLE)
 ##   belt    a CONVEYOR BELT floor carries you along, forwards or backwards (CLOCKWORK KEEP)
+##   job     a GIANT JOB: the way on is shut until the VR giant's hands open it - each island its own (JOBS): MEADOW
+##           HOP's two DRAWBRIDGES (pull them down), GEAR WORKS' CRANK (turn it round: the bridge rises), CRAB COVE's
+##           BOULDER (grab it and throw it away), SNOWY PEAKS' ICE WALL (smash it), JUNGLE JUMBLE's PALM TREES (push them
+##           over: they fall across the gap), CLOCKWORK KEEP's CLOCK HAND (swing it round: a swing bridge). A robot
+##           BUTTON by it opens it too when there's no VR giant (or the giant takes too long: never stuck).
+## Every island has its own STYLE (floor lengths, how it climbs, winding stepping stones) and look (level.gd), and
+## the islands without a boss hide a MEGA GRUMBLE on a patrol floor (it drops out of the sky: 3+ hits, or one flick).
 ## two BOT BOXES (a little bot inside: rescue it and it moves to Gizmo Town), then the SPARK on its pedestal at the end
 ## (the goal), or a boss arena first: CRAB COVE's CRANKY CRAB, CLOCKWORK KEEP's KING KEYWIND (the spark drops when
 ## the boss is beaten). check() proves every island can be finished from the robots' real jump numbers.
@@ -32,8 +39,8 @@ const REACH_K := 0.68  ## a jump may use this share of the robot's best jump
 const MAX_RISE := 1.15  ## the highest step up a jump may need (a jump reaches ~1.69)
 const HEAD_ROOM := 2.4  ## nothing hangs lower than this over a floor
 const THICK := 0.8  ## platform slab
-const X_MIN := -34.0  ## the islands stay within the giant's walk (giant.gd WALK_X) ...
-const X_MAX := 34.0
+const X_MIN := -44.0  ## the islands stay within the giant's walk (giant.gd WALK_X) ...
+const X_MAX := 44.0
 const Y_MIN := 0.0
 const Y_MAX := 6.0
 const FALL_BELOW := 4.0  ## a robot this far under the lowest floor pops back at its checkpoint
@@ -58,7 +65,7 @@ const POUND_V := 16.0
 const POUND_R := 1.6  ## a pound's landing pops grumbles and opens bot boxes this near
 const BOX_R := 0.75  ## a BOT BOX (a little bot inside): a robot this near opens it (or a punch / a pound)
 
-const SIZE := {"spring": 13.5, "fan": 12.5, "belt": 11.5}  ## the longest a gadget section gets (the others fit in 9)
+const SIZE := {"spring": 13.5, "fan": 12.5, "belt": 11.5, "job": 19.5, "patrol": 12.5}  ## the longest a gadget section gets (the others fit in 9)
 const ISLANDS := 6
 const ISLAND_NAMES: Array[String] = ["MEADOW HOP", "GEAR WORKS", "CRAB COVE", "SNOWY PEAKS", "JUNGLE JUMBLE", "CLOCKWORK KEEP"]
 const ISLAND_PICS: Array[String] = ["meadowisle", "gearisle", "coveisle", "snowisle", "jungleisle", "clockisle"]
@@ -66,6 +73,26 @@ const THEMES: Array[String] = ["meadow", "gears", "cove", "snow", "jungle", "clo
 const BOSSES := {3: "crab", 6: "king"}
 const SIGNATURE := {4: "spring", 5: "fan", 6: "belt"}  ## each far island's own gadget (always there, early on)  ## the islands that end on a boss arena: Cranky Crab, King Keywind
 const DAILY_NAME := "TODAY'S ISLAND"
+## Each island's GIANT JOB (TODAY'S ISLAND takes its theme's).
+const JOBS := {1: "bridge", 2: "crank", 3: "boulder", 4: "ice", 5: "tree", 6: "clock"}
+const JOB_KINDS: Array[String] = ["bridge", "crank", "boulder", "ice", "tree", "clock"]
+const BLOCK_JOBS: Array[String] = ["boulder", "ice"]  ## a wall on a floor (the others: a bridge over a wide gap)
+const JOB_GAP := 9.4  ## a bridge job's gap: far wider than a jump (even hovering)
+const BLOCK_H := 2.9  ## a block job's wall: far higher than a jump
+const BRIDGE_W := 2.0
+const BUTTON_R := 0.55  ## a robot's feet this near the BUTTON press it
+const BUTTON_RATE := 0.45  ## a held button opens a job this fast (per second)
+const GIANT_WAIT := 22.0  ## a robot waited this long at a job and the VR giant didn't open it: the button wakes up
+## Each island's own layout: the steps' rises (rise2 after the middle: a mountain), floor lengths, winding stepping
+## stones (zig: z offsets), the first floor's height, floor width scale, the islands without a boss get a MEGA GRUMBLE.
+const STYLE := {
+	1: {"rise": [-0.5, 0.0, 0.0, 0.5], "len": [4.5, 6.5], "zig": 0.0, "y0": 1.0, "w": 1.15, "ymax": 2.5, "mega": true},  ## rolling lawns, low and wide
+	2: {"rise": [-1.0, 1.0, 1.0, -1.0], "len": [2.2, 3.0], "zig": 0.0, "y0": 2.5, "w": 0.92, "mega": true, "steps": [4, 5]},  ## little metal plates high up, up and down
+	3: {"rise": [-0.5, 0.0, 0.5], "len": [2.0, 2.8], "zig": 1.3, "y0": 0.0, "w": 1.0, "ymax": 1.0, "mega": false, "steps": [4, 5]},  ## stepping stones just over the sea
+	4: {"rise": [0.5, 1.0, 1.0], "rise2": [-1.0, -0.5, -1.0], "len": [3.0, 4.0], "zig": 0.0, "y0": 0.0, "w": 1.0, "mega": true},  ## up the mountain and down
+	5: {"rise": [-1.0, -0.5, 0.5, 1.0], "len": [2.6, 4.0], "zig": 1.0, "y0": 1.5, "w": 0.95, "ymax": 3.0, "mega": true},  ## through the canopy, winding
+	6: {"rise": [1.0, 1.0, 0.5], "len": [3.0, 4.0], "zig": 0.0, "y0": 2.5, "w": 1.0, "mega": false},  ## up and up the clock tower
+}
 ## Each island's sections (shuffled, "steps" first; the secret is never first; the goal / boss arena comes last).
 const POOLS := {
 	1: ["steps", "lift", "patrol", "secret", "zap"],
@@ -121,6 +148,19 @@ static func boss_of(island: int) -> String:
 	return String(BOSSES.get(island, ""))
 
 
+## The island whose style / job / look an island uses (TODAY'S ISLAND: its theme's).
+static func style_isle(lv_or_desc: Dictionary) -> int:
+	var d: Dictionary = lv_or_desc.get("desc", lv_or_desc)
+	var i := int(d.get("i", 1))
+	if i == 0:
+		return THEMES.find(theme_of(d)) + 1
+	return clampi(i, 1, ISLANDS)
+
+
+static func job_of(d: Dictionary) -> String:
+	return String(JOBS[style_isle(d)])
+
+
 ## Can a robot hop a gap of `gap` (edge to edge) landing dh higher? (the margin REACH_K: little thumbs)
 static func hop_ok(gap: float, dh: float) -> bool:
 	return dh <= MAX_RISE and gap <= reach(dh) * REACH_K
@@ -143,7 +183,7 @@ static func generate(d: Dictionary) -> Dictionary:
 	var m := mode_of(String(d.get("m", "brave")))
 	var best: Dictionary = {}
 	for attempt in 12:
-		var lv := _try(Seeded.rng(seed_value, "island %d try %d" % [island, attempt]), island, m)
+		var lv := _try(Seeded.rng(seed_value, "island %d try %d" % [island, attempt]), island, m, seed_value)
 		lv["desc"] = {"i": island, "s": seed_value, "m": m}
 		lv["attempt"] = attempt
 		if check(lv).is_empty():
@@ -153,30 +193,41 @@ static func generate(d: Dictionary) -> Dictionary:
 	return best
 
 
-static func _try(r: RandomNumberGenerator, island: int, m: String) -> Dictionary:
-	var md: Dictionary = MODES[m]
+static func _try(r: RandomNumberGenerator, island: int, m: String, seed_of_rng: int = 1) -> Dictionary:
+	var md: Dictionary = (MODES[m] as Dictionary).duplicate()
+	var si := style_isle({"i": island, "s": seed_of_rng})
+	var st: Dictionary = STYLE[si]
+	md.w = float(md.w) * float(st.w)
+	md["style"] = st
+	md["ymax"] = float(st.get("ymax", Y_MAX - 1.5))
 	var w := float(md.w)
 	var lv := {"island": island, "mode": m, "theme": "", "plats": [], "chain": [], "bolts": [], "grumbles": [],
 		"zaps": [], "cps": [], "route": [], "secret": {}, "gear": Vector3.INF, "goal": Vector3.INF, "boss": {},
-		"start": Vector3.ZERO, "low_y": 0.0, "w": w, "springs": [], "fans": [], "belts": [], "boxes": []}
+		"start": Vector3.ZERO, "low_y": 0.0, "w": w, "springs": [], "fans": [], "belts": [], "boxes": [], "jobs": [],
+		"style": si, "zk": 0}
+	var mega := bool(st.mega) and boss_of(island) == ""
 	var pool: Array = (POOLS[island] as Array).duplicate()
-	pool.erase("steps")
+	for k in ["steps", "secret", "job"]:
+		pool.erase(k)
+	var sig := String(SIGNATURE.get(island, ""))
+	if sig != "":
+		pool.erase(sig)
+	if mega:
+		pool.erase("patrol")
 	pool = Seeded.shuffled(r, pool)
-	if pool[0] == "secret":
-		pool.remove_at(0)
-		pool.insert(1, "secret")
-	if island == 0 or island > 3:  # (the long-gadget islands: the secret always fits, early on)
-		pool.erase("secret")
-		pool.insert(1, "secret")
-	if SIGNATURE.has(island):  # (... and the island's own gadget comes first, so it always fits)
-		pool.erase(SIGNATURE[island])
-		pool.insert(0, SIGNATURE[island])
-	var sections: Array = ["steps"] + pool
+	# The island's own gadget first, then its GIANT JOB, then the secret (and the MEGA GRUMBLE's patrol) in either
+	# order: they always fit. The rest as there's room.
+	var front: Array = [sig] if sig != "" else []
+	front.append("job")
+	var mid: Array = ["secret"] + (["patrol"] if mega else [])
+	mid = Seeded.shuffled(r, mid)
+	var sections: Array = ["steps"] + front + mid + pool
+	lv["mega"] = mega
 	var boss := boss_of(island) != ""
 	var end_len := 13.0 if boss else 6.0
 	# A first floor to stand on.
 	var x := X_MIN + 1.0
-	var y := 1.0
+	var y := float(st.y0)
 	var first := _plat(lv, x, 6.0, y, w, "solid")
 	lv.start = Vector3(x + 1.6, y, 0.0)
 	_cp(lv, first, x + 1.6)
@@ -195,7 +246,8 @@ static func _try(r: RandomNumberGenerator, island: int, m: String) -> Dictionary
 		var count := (lv.plats as Array).size()
 		match String(s):
 			"steps":
-				var res := _steps(lv, r, x, y, last, md, r.randi_range(2, 3))
+				var sn: Array = (md.style as Dictionary).get("steps", [2, 3])
+				var res := _steps(lv, r, x, y, last, md, r.randi_range(int(sn[0]), int(sn[1])))
 				x = res[0]; y = res[1]; last = res[2]
 				if not boxed:  # a BOT BOX on the first steps' last floor (a little bot to rescue)
 					boxed = true
@@ -223,6 +275,9 @@ static func _try(r: RandomNumberGenerator, island: int, m: String) -> Dictionary
 				x = res[0]; y = res[1]; last = res[2]
 			"secret":
 				var res := _secret(lv, r, x, y, last, md)
+				x = res[0]; y = res[1]; last = res[2]
+			"job":
+				var res := _job(lv, r, x, y, last, md, job_of({"i": island, "s": seed_of_rng}))
 				x = res[0]; y = res[1]; last = res[2]
 		# A checkpoint flag on the section's first steady floor when the last one is far behind.
 		for i in range(count, (lv.plats as Array).size()):
@@ -296,23 +351,30 @@ static func _fit_gap(gap: float, dh: float) -> float:
 	return gap
 
 
-static func _next_y(r: RandomNumberGenerator, y: float, choices: Array) -> float:
-	return clampf(y + float(Seeded.pick(r, choices)), Y_MIN, Y_MAX - 1.5)
+static func _next_y(r: RandomNumberGenerator, y: float, choices: Array, ymax: float = Y_MAX - 1.5) -> float:
+	return clampf(y + float(Seeded.pick(r, choices)), Y_MIN, ymax)
 
 
 static func _steps(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float, last: int, md: Dictionary, n: int) -> Array:
+	var st: Dictionary = md.style
+	var lens: Array = st.len
 	for k in n:
-		var ny := _next_y(r, y, [-1.0, -0.5, 0.0, 0.5, 1.0])
+		var rises: Array = st.rise if not st.has("rise2") or x < 0.0 else st.rise2
+		var ny := clampf(y + float(Seeded.pick(r, rises)), Y_MIN, float(md.ymax))
 		var gap := _fit_gap(r.randf_range(0.9, float(md.gap)), ny - y)
-		var length := r.randf_range(3.0, 5.0)
+		var length := r.randf_range(float(lens[0]), float(lens[1]))
 		var w := float(md.w) * r.randf_range(0.85, 1.0)
-		var p := _plat(lv, x + gap, length, ny, w, "solid")
+		# Winding stepping stones (CRAB COVE, JUNGLE JUMBLE): 0, +zig, 0, -zig ... (the next section starts at z 0).
+		lv.zk = int(lv.zk) + 1
+		var z: float = float(st.zig) * [0.0, 1.0, 0.0, -1.0][int(lv.zk) % 4] if k < n - 1 else 0.0
+		var p := _plat(lv, x + gap, length, ny, w, "solid", z)
 		_hop(lv, last, p)
-		_route(lv, p, Vector3(x + gap + length * 0.5, ny, 0.0), "jump")
+		_route(lv, p, Vector3(x + gap + length * 0.5, ny, z), "jump")
 		# Bolts arc over the gap (the jump's way) and sit on the floor.
-		var mid := Vector3(x + gap * 0.5, maxf(y, ny) + 1.4, 0.0)
+		var lz := float((((lv.plats as Array)[last] as Dictionary).c as Vector3).z)
+		var mid := Vector3(x + gap * 0.5, maxf(y, ny) + 1.4, (lz + z) * 0.5)
 		(lv.bolts as Array).append(mid)
-		_bolt_row(lv, x + gap + 0.8, x + gap + length - 0.8, ny, 0.0, 2)
+		_bolt_row(lv, x + gap + 0.8, x + gap + length - 0.8, ny, z, 2)
 		x += gap + length
 		y = ny
 		last = p
@@ -367,12 +429,20 @@ static func _lift(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float, 
 
 
 static func _patrol(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float, last: int, md: Dictionary) -> Array:
-	var ny := _next_y(r, y, [-0.5, 0.0, 0.5])
+	var ny := _next_y(r, y, [-0.5, 0.0, 0.5], float(md.ymax))
 	var gap := _fit_gap(r.randf_range(0.9, float(md.gap)), ny - y)
 	var length := r.randf_range(9.0, 11.0)
-	var p := _plat(lv, x + gap, length, ny, float(md.w), "solid")
+	var mega := bool(lv.get("mega", false)) and not bool(lv.get("mega_placed", false))
+	if mega:
+		length = r.randf_range(11.0, 12.0)
+	var p := _plat(lv, x + gap, length, ny, float(md.w) + (0.6 if mega else 0.0), "solid")
 	_hop(lv, last, p)
 	var n := int(md.grumbles)
+	if mega:  # the MEGA GRUMBLE: one big one (it drops out of the sky when a robot comes near)
+		lv.mega_placed = true
+		n = 0
+		(lv.grumbles as Array).append({"p": p, "x0": x + gap + 2.4, "x1": x + gap + length - 2.4, "y": ny, "speed": 1.0 * float(md.speed),
+			"dash": float(md.dash) * 0.9, "big": true, "hp": 3 + (1 if String(lv.mode) == "hard" else 0)})
 	for k in n:
 		var a := x + gap + 1.5 + (length - 3.0) * float(k) / float(n)
 		var b := x + gap + 1.5 + (length - 3.0) * float(k + 1) / float(n)
@@ -384,7 +454,7 @@ static func _patrol(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float
 
 
 static func _zap(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float, last: int, md: Dictionary) -> Array:
-	var ny := _next_y(r, y, [-0.5, 0.0, 0.5])
+	var ny := _next_y(r, y, [-0.5, 0.0, 0.5], float(md.ymax))
 	var gap := _fit_gap(r.randf_range(0.9, float(md.gap)), ny - y)
 	var length := r.randf_range(9.0, 12.0)
 	var w := float(md.w)
@@ -404,7 +474,7 @@ static func _zap(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float, l
 
 
 static func _secret(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float, last: int, md: Dictionary) -> Array:
-	var ny := _next_y(r, y, [-0.5, 0.0, 0.5])
+	var ny := _next_y(r, y, [-0.5, 0.0, 0.5], float(md.ymax))
 	var gap := _fit_gap(r.randf_range(0.9, minf(1.8, float(md.gap))), ny - y)
 	var length := 6.5
 	var w := float(md.w)
@@ -433,6 +503,120 @@ static func _secret(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float
 	return [x + gap + length, ny, p]
 
 
+## A GIANT JOB (kind: JOBS): the way on is shut until the giant's hands (or a robot on the BUTTON) open it.
+##   bridge kinds (bridge, crank, tree, clock): floor A, a gap far too wide to hop (JOB_GAP), floor C. Its bridge
+##     pieces are "gate" platforms (where they lie once open): two DRAWBRIDGE leaves / two PALM TREES (each pivots up
+##     from its floor's edge), one CRANK bridge (rises from under the gap), one CLOCK HAND (a swing bridge on a post).
+##   block kinds (boulder, ice): one long floor with a wall across it, far higher than a jump: a BOULDER / an ICE WALL.
+## The robots wait at "wait" (route act "job"); the BUTTON is on the floor before it.
+static func _job(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float, last: int, md: Dictionary, kind: String) -> Array:
+	var ny := _next_y(r, y, [-0.5, 0.0, 0.5], float(md.ymax))
+	var gap := _fit_gap(r.randf_range(0.9, minf(1.8, float(md.gap))), ny - y)
+	var w := float(md.w)
+	var job := {"kind": kind, "plats": [], "pivots": [], "dirs": []}
+	if BLOCK_JOBS.has(kind):
+		var length := 10.0
+		var p := _plat(lv, x + gap, length, ny, w, "solid")
+		_hop(lv, last, p)
+		var bx := x + gap + length * 0.5 + 0.5
+		var bs := Vector3(1.6 if kind == "ice" else 2.6, BLOCK_H, w + 0.6)
+		job.a = p
+		job.block = {"c": Vector3(bx, ny, 0.0), "s": bs}
+		job.wait = Vector3(bx - bs.x * 0.5 - 0.9, ny, 0.0)
+		job.btn = Vector3(x + gap + 1.5, ny, -w * 0.5 + 0.7)
+		job.grab = Vector3(bx, ny + BLOCK_H * 0.6, 0.0)  # (where the giant's hand takes / smashes it)
+		_cp(lv, p, x + gap + 0.9)
+		(lv.jobs as Array).append(job)
+		_route(lv, p, job.wait, "job")
+		_route(lv, p, Vector3(x + gap + length - 0.8, ny, 0.0), "walk")
+		_bolt_row(lv, x + gap + 0.8, job.wait.x - 0.3, ny, 0.0, 2)
+		_bolt_row(lv, bx + bs.x * 0.5 + 0.6, x + gap + length - 0.8, ny, 0.0, 2)
+		(lv.bolts as Array).append(Vector3(bx, ny + 0.6, 0.0))  # (one behind the wall: you see it, you want it)
+		return [x + gap + length, ny, p]
+	var alen := 4.0
+	var a := _plat(lv, x + gap, alen, ny, w, "solid")
+	_hop(lv, last, a)
+	_cp(lv, a, x + gap + 0.9)
+	var ax := x + gap + alen
+	var span := JOB_GAP
+	var clen := r.randf_range(4.0, 5.0)
+	var pieces: Array = []  # [x0, length, pivot, dir]
+	var e := 0.35  # (a bridge leaves this little gap to the floors: nothing overlaps)
+	match kind:
+		"bridge", "tree":  # two leaves, each pivoting up from its own floor's edge
+			var half := span * 0.5
+			pieces.append([ax + e, half - e - 0.15, Vector3(ax + e, ny, 0.0), 1.0])
+			pieces.append([ax + half + 0.15, half - e - 0.15, Vector3(ax + span - e, ny, 0.0), -1.0])
+		"crank":  # one bridge rising from under the gap; the crank wheel on floor A's giant side
+			pieces.append([ax + e, span - 2.0 * e, Vector3(ax + span * 0.5, ny, 0.0), 1.0])
+			job.crank = Vector3(ax - 1.0, ny + 1.6, w * 0.5 + 0.35)
+		"clock":  # one long clock hand on a post in the middle: it swings round (it points at the giant when shut)
+			pieces.append([ax + e, span - 2.0 * e, Vector3(ax + span * 0.5, ny, 0.0), 1.0])
+	var prev := a
+	for pc in pieces:
+		var g := _plat(lv, float(pc[0]), float(pc[1]), ny, BRIDGE_W, "gate")
+		_hop(lv, prev, g)
+		(job.plats as Array).append(g)
+		(job.pivots as Array).append(pc[2])
+		(job.dirs as Array).append(pc[3])
+		prev = g
+	var c := _plat(lv, ax + span, clen, ny, w, "solid")
+	_hop(lv, prev, c)
+	job.a = a
+	job.wait = Vector3(ax - 0.7, ny, 0.0)
+	job.btn = Vector3(ax - 2.4, ny, -w * 0.5 + 0.7)
+	job.grab = Vector3(ax + span * 0.5, ny + 1.0, 0.0)
+	(lv.jobs as Array).append(job)
+	_route(lv, a, job.wait, "job")
+	for g in job.plats:
+		var gp: Dictionary = (lv.plats as Array)[int(g)]
+		_route(lv, int(g), gp.c, "walk")
+	_route(lv, c, Vector3(ax + span + clen * 0.5, ny, 0.0), "walk")
+	for k in 4:  # bolts along the bridge's way (a treat once it's open)
+		(lv.bolts as Array).append(Vector3(ax + span * (k + 1) / 5.0, ny + 0.6, 0.0))
+	_bolt_row(lv, ax + span + 0.8, ax + span + clen - 0.8, ny, 0.0, 2)
+	return [ax + span + clen, ny, c]
+
+
+## A gate piece's look at progress k (0 shut .. 1 open): where its middle is and how it's turned (every machine draws
+## it from this; the giant's hands drive k).
+static func gate_pose(job: Dictionary, piece: int, plat: Dictionary, k: float) -> Transform3D:
+	var c: Vector3 = plat.c
+	var pv: Vector3 = (job.pivots as Array)[piece]
+	var d := float((job.dirs as Array)[piece])
+	k = clampf(k, 0.0, 1.0)
+	match String(job.kind):
+		"bridge", "tree":  # up on its pivot (shut) .. lying flat across (open)
+			var ang := (1.0 - k) * PI * 0.5
+			var half := float((plat.s as Vector2).x) * 0.5
+			var mid := pv + Vector3(d * cos(ang), sin(ang), 0.0) * (half + 0.0)
+			return Transform3D(Basis(Vector3(0, 0, 1), ang * d), mid)
+		"crank":  # down in the clouds (shut) .. up level (open)
+			return Transform3D(Basis(), c + Vector3(0.0, -(1.0 - k) * 6.0, 0.0))
+		"clock":  # pointing at the giant (+Z, shut) .. along the way (open)
+			return Transform3D(Basis(Vector3.UP, -(1.0 - k) * PI * 0.5), c)
+	return Transform3D(Basis(), c)
+
+
+## The point of a job's piece the giant's hand takes (a leaf's / a tree's / the clock hand's tip, the crank's handle,
+## the boulder, the ice wall) at progress k (crank: its turned angle).
+static func gate_handle(job: Dictionary, piece: int, plats: Array, k: float) -> Vector3:
+	match String(job.kind):
+		"boulder", "ice":
+			return job.grab
+		"crank":
+			var ang := k * TAU * 2.0
+			return (job.crank as Vector3) + Vector3(cos(ang), sin(ang), 0.0) * 1.0 + Vector3(0, 0, 0.5)
+	var pl: Dictionary = plats[int((job.plats as Array)[piece])]
+	var tr := gate_pose(job, piece, pl, k)
+	var half := float((pl.s as Vector2).x) * 0.5
+	if String(job.kind) == "clock":
+		return tr * Vector3(half - 0.3, 0.5, 0.0)  # (the near tip when shut points at the giant)
+	if String(job.kind) == "bridge":  # (the knob on a stick at the plank's tip, out towards the giant)
+		return tr * Vector3((half - 0.2) * float((job.dirs as Array)[piece]), 0.0, BRIDGE_W * 0.5 + 1.05)
+	return tr * Vector3(half * float((job.dirs as Array)[piece]), 0.0, 0.0)
+
+
 ## A BOT BOX on floor p's back edge (out of the way: never blocks the path), a little bot inside. The route walks up
 ## to it (punch it, pound it, or just bump into it) and comes back to the middle.
 static func _box(lv: Dictionary, r: RandomNumberGenerator, p: int) -> void:
@@ -448,7 +632,7 @@ static func _box(lv: Dictionary, r: RandomNumberGenerator, p: int) -> void:
 
 ## SPRING: a floor with a SPRING PAD near its end, and a high ledge past it that only a spring's throw reaches.
 static func _spring(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float, last: int, md: Dictionary) -> Array:
-	var ny := _next_y(r, y, [-1.0, -0.5, 0.0])
+	var ny := _next_y(r, y, [-1.0, -0.5, 0.0], float(md.ymax))
 	var gap := _fit_gap(r.randf_range(0.9, float(md.gap)), ny - y)
 	var length := r.randf_range(4.0, 5.0)
 	var w := float(md.w)
@@ -473,7 +657,7 @@ static func _spring(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float
 ## FAN: a gap far too wide to hop, a WIND FAN down in it: walk off the edge and its updraft floats you across.
 static func _fan(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float, last: int, md: Dictionary) -> Array:
 	var span := r.randf_range(5.5, 7.0)
-	var ny := _next_y(r, y, [-0.5, 0.0, 0.5])
+	var ny := _next_y(r, y, [-0.5, 0.0, 0.5], float(md.ymax))
 	var length := r.randf_range(4.0, 5.5)
 	var w := float(md.w)
 	var q := _plat(lv, x + span, length, ny, w, "solid")
@@ -489,7 +673,7 @@ static func _fan(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float, l
 
 ## BELT: a long CONVEYOR BELT floor carrying robots along (some forwards, some backwards: run against it).
 static func _belt(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float, last: int, md: Dictionary) -> Array:
-	var ny := _next_y(r, y, [-0.5, 0.0, 0.5])
+	var ny := _next_y(r, y, [-0.5, 0.0, 0.5], float(md.ymax))
 	var gap := _fit_gap(r.randf_range(0.9, float(md.gap)), ny - y)
 	var length := r.randf_range(7.0, 9.0)
 	var p := _plat(lv, x + gap, length, ny, float(md.w), "belt")
@@ -722,6 +906,7 @@ static func check(lv: Dictionary) -> Array:
 			out.append("%s has no %s arena" % [island_name(lv.get("desc", {"i": lv.island})), bk])
 	elif not (lv.get("boss", {}) as Dictionary).is_empty():
 		out.append("a boss on an island without one")
+	out.append_array(_job_problems(lv))
 	var start: Vector3 = lv.get("start", Vector3.INF)
 	if not _on(plats[0], start, 0.0):
 		out.append("the start isn't on the first floor")
@@ -729,6 +914,93 @@ static func check(lv: Dictionary) -> Array:
 	if route.is_empty() or String((route[-1] as Dictionary).act) != "goal":
 		out.append("the route doesn't end at the goal")
 	return out
+
+
+## A GIANT JOB's problems: one on every island (its own kind), the robots wait on a still floor, the BUTTON on that
+## floor (not by a zap), the job really shuts the way (a bridge gap far wider than any jump, hovering included; a wall
+## far higher than a jump, across the whole floor, with room before and after it), the bridge pieces are "gate"
+## floors on the path, and every handle is where the giant's hands reach (over the islands, towards the giant).
+static func _job_problems(lv: Dictionary) -> Array:
+	var out: Array = []
+	var plats: Array = lv.plats
+	var jobs: Array = lv.get("jobs", [])
+	if jobs.is_empty():
+		return ["no giant job"]
+	var want := job_of(lv.get("desc", {"i": lv.get("island", 1)}))
+	var on_path := {}
+	for hop in lv.get("chain", []):
+		on_path[int(hop[0])] = true
+		on_path[int(hop[1])] = true
+	for job in jobs:
+		var kind := String(job.kind)
+		if kind != want:
+			out.append("a %s job on an island whose job is %s" % [kind, want])
+		var a: Dictionary = plats[int(job.a)]
+		if a.has("b") or not on_path.has(int(job.a)):
+			out.append("the %s job's floor isn't a still floor on the path" % kind)
+		if not _on(a, job.wait, -0.3):
+			out.append("the %s job's waiting spot isn't on its floor" % kind)
+		var bp: Vector3 = job.btn
+		if not _on(a, bp, -(BUTTON_R + 0.05)):
+			out.append("the %s job's button isn't well on its floor" % kind)
+		for z in lv.get("zaps", []):
+			if Vector2(bp.x - (z.pos as Vector3).x, bp.z - (z.pos as Vector3).z).length() < float(z.r) + 1.0:
+				out.append("the %s job's button is by a zap pad" % kind)
+		if BLOCK_JOBS.has(kind):
+			var bc: Vector3 = job.block.c
+			var bs: Vector3 = job.block.s
+			var ac: Vector3 = a.c
+			var asz: Vector2 = a.s
+			if bs.y < reach_height() + 0.8:
+				out.append("the %s is only %.1f high (a jump reaches %.1f)" % [kind, bs.y, reach_height()])
+			if bs.z < asz.y:
+				out.append("the %s doesn't cross the whole floor" % kind)
+			if bc.x - bs.x * 0.5 < ac.x - asz.x * 0.5 + 2.4 or bc.x + bs.x * 0.5 > ac.x + asz.x * 0.5 - 2.0:
+				out.append("no room before / after the %s" % kind)
+			if (job.wait as Vector3).x > bc.x - bs.x * 0.5 - 0.5 or bp.x > bc.x - bs.x * 0.5 - 1.0:
+				out.append("the %s job's robots wait past it" % kind)
+		else:
+			var gates: Array = job.plats
+			if gates.is_empty():
+				out.append("the %s job has no bridge" % kind)
+				continue
+			var first: Dictionary = plats[int(gates[0])]
+			var last: Dictionary = plats[int(gates[-1])]
+			var a_end := float((a.c as Vector3).x) + float((a.s as Vector2).x) * 0.5
+			var far := float((last.c as Vector3).x) + float((last.s as Vector2).x) * 0.5 + 0.2
+			if far - a_end < JOB_GAP - 0.8:
+				out.append("the %s job's gap is only %.1f (robots could just hop it)" % [kind, far - a_end])
+			if far - a_end < hover_reach():
+				out.append("the %s job's gap %.1f is within a hovering jump (%.1f)" % [kind, far - a_end, hover_reach()])
+			for g in gates:
+				if String((plats[int(g)] as Dictionary).k) != "gate" or not on_path.has(int(g)):
+					out.append("a %s bridge piece isn't a gate on the path" % kind)
+			if String(first.k) != "gate":
+				out.append("the %s bridge doesn't start at its floor" % kind)
+		# The giant reaches every handle (shut and open): over the islands, towards the giant (+Z), not too high.
+		for i in maxi(1, (job.plats as Array).size()):
+			for k in [0.0, 0.5, 1.0]:
+				var hp := gate_handle(job, i, plats, k)
+				if hp.z < -2.0 or hp.z > 7.0 or hp.y > Y_MAX + 6.0 or hp.y < Y_MIN - 7.0 or absf(hp.x) > X_MAX + 1.0:
+					out.append("the %s job's handle at %s is out of the giant's reach" % [kind, str(hp)])
+	return out
+
+
+## How high a robot's jump reaches (its feet).
+static func reach_height() -> float:
+	return JUMP_V * JUMP_V / (2.0 * GRAVITY)
+
+
+## The farthest a robot's jump carries it with every bonus: hovering all the way (HOVER_TIME at HOVER_FALL), then
+## falling back to the floor it left - a dash is the only way past it (a person's daring, never the path).
+static func hover_reach() -> float:
+	var up := JUMP_V / GRAVITY
+	var top := reach_height()
+	var drop := top - HOVER_FALL * HOVER_TIME
+	var after := 0.0
+	if drop > 0.0:
+		after = (-HOVER_FALL + sqrt(HOVER_FALL * HOVER_FALL + 2.0 * GRAVITY * drop)) / GRAVITY
+	return RUN * (up + HOVER_TIME + after)
 
 
 ## Why a robot can't hop from platform a to platform b ("" = it can). Movers at their nearest, lifts: on at the
