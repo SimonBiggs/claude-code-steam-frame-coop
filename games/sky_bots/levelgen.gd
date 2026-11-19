@@ -8,8 +8,12 @@ extends RefCounted
 ##   patrol  a long floor with GRUMBLE bots (punch them, hop on them; they wind up before they charge: a warn line)
 ##   zap     a floor with ZAP PADS (they flash on warn rings before they buzz; there's always a safe lane)
 ##   secret  a little side island with a CRACKED WALL: punch it open, the room behind it hides the GOLD GEAR
-## then the SPARK on its pedestal at the end (the goal), or on CRAB COVE CRANKY CRAB's arena first (the spark drops
-## when the crab is beaten). check() proves every island can be finished from the robots' real jump numbers.
+##   spring  a SPRING PAD throws you up onto a high ledge nothing else reaches (SNOWY PEAKS loves them)
+##   fan     a gap far too wide to hop with a WIND FAN in it: its updraft floats you across (JUNGLE JUMBLE)
+##   belt    a CONVEYOR BELT floor carries you along, forwards or backwards (CLOCKWORK KEEP)
+## two BOT BOXES (a little bot inside: rescue it and it moves to Gizmo Town), then the SPARK on its pedestal at the end
+## (the goal), or a boss arena first: CRAB COVE's CRANKY CRAB, CLOCKWORK KEEP's KING KEYWIND (the spark drops when
+## the boss is beaten). check() proves every island can be finished from the robots' real jump numbers.
 
 const Seeded := preload("res://core/seeded.gd")
 
@@ -41,18 +45,36 @@ const ZAP_TELL := 0.4  ## share of a zap's cycle it flashes on its warn ring fir
 const ZAP_HOT := 0.2  ## ... then buzzes (0.8 s); off the rest of the time
 const ZAP_LANE := 0.8  ## a zap floor always keeps a safe lane this wide
 const ROOM := Vector3(3.0, 2.2, 2.6)  ## the secret room inside (x, height, z)
+# Island gadgets (the second chapter's islands; TODAY'S ISLAND mixes them in too).
+const SPRING_V := 14.0  ## a SPRING PAD throws a robot up this fast (check() proves every spring hop with it)
+const SPRING_R := 0.6  ## a robot's feet this near a spring's middle bounce
+const SPRING_RISE := 3.4  ## the highest ledge a spring hop may need (a spring reaches ~4.1)
+const BELT := 2.2  ## a CONVEYOR BELT carries robots this fast along X (robot.gd adds it while they stand on it)
+const FAN_UP := 3.2  ## a WIND FAN's updraft lifts a robot this fast ...
+const FAN_TOP := 2.6  ## ... up to this high over the floors either side
+# Robot moves that are a bonus (check() never counts on them): X in the air DASHES, B in the air POUNDS.
+const DASH_V := 8.5
+const POUND_V := 16.0
+const POUND_R := 1.6  ## a pound's landing pops grumbles and opens bot boxes this near
+const BOX_R := 0.75  ## a BOT BOX (a little bot inside): a robot this near opens it (or a punch / a pound)
 
-const ISLANDS := 3
-const ISLAND_NAMES: Array[String] = ["MEADOW HOP", "GEAR WORKS", "CRAB COVE"]
-const ISLAND_PICS: Array[String] = ["meadowisle", "gearisle", "coveisle"]
-const THEMES: Array[String] = ["meadow", "gears", "cove"]
+const SIZE := {"spring": 13.5, "fan": 12.5, "belt": 11.5}  ## the longest a gadget section gets (the others fit in 9)
+const ISLANDS := 6
+const ISLAND_NAMES: Array[String] = ["MEADOW HOP", "GEAR WORKS", "CRAB COVE", "SNOWY PEAKS", "JUNGLE JUMBLE", "CLOCKWORK KEEP"]
+const ISLAND_PICS: Array[String] = ["meadowisle", "gearisle", "coveisle", "snowisle", "jungleisle", "clockisle"]
+const THEMES: Array[String] = ["meadow", "gears", "cove", "snow", "jungle", "clock"]
+const BOSSES := {3: "crab", 6: "king"}
+const SIGNATURE := {4: "spring", 5: "fan", 6: "belt"}  ## each far island's own gadget (always there, early on)  ## the islands that end on a boss arena: Cranky Crab, King Keywind
 const DAILY_NAME := "TODAY'S ISLAND"
 ## Each island's sections (shuffled, "steps" first; the secret is never first; the goal / boss arena comes last).
 const POOLS := {
 	1: ["steps", "lift", "patrol", "secret", "zap"],
 	2: ["steps", "mover", "lift", "zap", "secret", "patrol"],
 	3: ["steps", "mover", "patrol", "secret", "zap", "lift"],
-	0: ["steps", "mover", "lift", "patrol", "zap", "secret"],
+	4: ["steps", "spring", "mover", "secret", "spring", "patrol"],
+	5: ["steps", "fan", "lift", "secret", "fan", "zap"],
+	6: ["steps", "belt", "spring", "secret", "fan", "belt"],
+	0: ["steps", "mover", "lift", "patrol", "zap", "secret", "spring", "fan", "belt"],
 }
 ## GENTLE / BRAVE / HARD (core/pick_orbs.gd MODES): floor width, the widest hop, grumbles per patrol, zap pads per
 ## zap floor, how fast movers / grumbles go, Cranky Crab's bonks.
@@ -87,11 +109,16 @@ static func daily_desc(m: String, date: String = "") -> Dictionary:
 # --- Jumps ------------------------------------------------------------------------------------------------------
 
 ## How far (horizontally) a running jump carries the robot's middle when it lands dh higher (INF-safe: -1 = can't).
-static func reach(dh: float) -> float:
-	var disc := JUMP_V * JUMP_V - 2.0 * GRAVITY * dh
+## v: how fast it goes up (a jump, or a spring's throw).
+static func reach(dh: float, v: float = JUMP_V) -> float:
+	var disc := v * v - 2.0 * GRAVITY * dh
 	if disc < 0.0:
 		return -1.0
-	return RUN * (JUMP_V + sqrt(disc)) / GRAVITY
+	return RUN * (v + sqrt(disc)) / GRAVITY
+
+
+static func boss_of(island: int) -> String:
+	return String(BOSSES.get(island, ""))
 
 
 ## Can a robot hop a gap of `gap` (edge to edge) landing dh higher? (the margin REACH_K: little thumbs)
@@ -131,15 +158,21 @@ static func _try(r: RandomNumberGenerator, island: int, m: String) -> Dictionary
 	var w := float(md.w)
 	var lv := {"island": island, "mode": m, "theme": "", "plats": [], "chain": [], "bolts": [], "grumbles": [],
 		"zaps": [], "cps": [], "route": [], "secret": {}, "gear": Vector3.INF, "goal": Vector3.INF, "boss": {},
-		"start": Vector3.ZERO, "low_y": 0.0, "w": w}
+		"start": Vector3.ZERO, "low_y": 0.0, "w": w, "springs": [], "fans": [], "belts": [], "boxes": []}
 	var pool: Array = (POOLS[island] as Array).duplicate()
 	pool.erase("steps")
 	pool = Seeded.shuffled(r, pool)
 	if pool[0] == "secret":
 		pool.remove_at(0)
 		pool.insert(1, "secret")
+	if island == 0 or island > 3:  # (the long-gadget islands: the secret always fits, early on)
+		pool.erase("secret")
+		pool.insert(1, "secret")
+	if SIGNATURE.has(island):  # (... and the island's own gadget comes first, so it always fits)
+		pool.erase(SIGNATURE[island])
+		pool.insert(0, SIGNATURE[island])
 	var sections: Array = ["steps"] + pool
-	var boss := island == 3
+	var boss := boss_of(island) != ""
 	var end_len := 13.0 if boss else 6.0
 	# A first floor to stand on.
 	var x := X_MIN + 1.0
@@ -151,9 +184,10 @@ static func _try(r: RandomNumberGenerator, island: int, m: String) -> Dictionary
 	_bolt_row(lv, x + 2.5, x + 5.5, y, 0.0, 3)
 	x += 6.0
 	var last := first
+	var boxed := false
 	for s in sections:
 		var budget := X_MAX - end_len - 3.0 - x
-		if budget < 9.0:
+		if budget < float(SIZE.get(String(s), 9.0)):
 			if String(s) != "secret":
 				continue
 			if budget < 7.0:
@@ -162,6 +196,18 @@ static func _try(r: RandomNumberGenerator, island: int, m: String) -> Dictionary
 		match String(s):
 			"steps":
 				var res := _steps(lv, r, x, y, last, md, r.randi_range(2, 3))
+				x = res[0]; y = res[1]; last = res[2]
+				if not boxed:  # a BOT BOX on the first steps' last floor (a little bot to rescue)
+					boxed = true
+					_box(lv, r, last)
+			"spring":
+				var res := _spring(lv, r, x, y, last, md)
+				x = res[0]; y = res[1]; last = res[2]
+			"fan":
+				var res := _fan(lv, r, x, y, last, md)
+				x = res[0]; y = res[1]; last = res[2]
+			"belt":
+				var res := _belt(lv, r, x, y, last, md)
 				x = res[0]; y = res[1]; last = res[2]
 			"mover":
 				var res := _mover(lv, r, x, y, last, md)
@@ -195,9 +241,15 @@ static func _try(r: RandomNumberGenerator, island: int, m: String) -> Dictionary
 	var ec: Vector3 = ep.c
 	_cp(lv, end, x + gap + 1.0)
 	if boss:
-		lv.boss = {"c": ec, "r": end_len * 0.5 - 1.2, "hp": int(md.boss_hp)}
+		var kind := boss_of(island)
+		lv.boss = {"c": ec, "r": end_len * 0.5 - 1.2, "hp": int(md.boss_hp) + (1 if kind == "king" else 0), "kind": kind}
 		_route(lv, end, ec, "boss")
 	lv.goal = ec + Vector3(end_len * 0.25 if not boss else 0.0, 0.0, 0.0)
+	# A second BOT BOX by the goal (on a boss arena: the boss kept a little bot; it opens once the boss is beaten).
+	var bz := -((end_len if boss else w + 1.0) * 0.5 - 0.6) if not boss else -2.6
+	var bx := (ec.x - end_len * 0.25) if not boss else ec.x + 2.2
+	(lv.boxes as Array).append({"pos": Vector3(bx, ey, bz), "p": end})
+	_route(lv, end, Vector3(bx, ey, bz + 0.9), "box")
 	_route(lv, end, lv.goal, "goal")
 	_bolt_row(lv, x + gap + 1.0, x + gap + end_len * 0.4, ey, 0.0, 2)
 	var low := INF
@@ -381,6 +433,107 @@ static func _secret(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float
 	return [x + gap + length, ny, p]
 
 
+## A BOT BOX on floor p's back edge (out of the way: never blocks the path), a little bot inside. The route walks up
+## to it (punch it, pound it, or just bump into it) and comes back to the middle.
+static func _box(lv: Dictionary, r: RandomNumberGenerator, p: int) -> void:
+	var pl: Dictionary = (lv.plats as Array)[p]
+	var c: Vector3 = pl.c
+	var s: Vector2 = pl.s
+	var bx := c.x + r.randf_range(-0.25, 0.25) * maxf(0.0, s.x - 2.0)
+	var bz := c.z - s.y * 0.5 + 0.55
+	(lv.boxes as Array).append({"pos": Vector3(bx, c.y, bz), "p": p})
+	_route(lv, p, Vector3(bx, c.y, bz + 0.9), "box")
+	_route(lv, p, Vector3(c.x + s.x * 0.5 - 0.8, c.y, 0.0), "walk")
+
+
+## SPRING: a floor with a SPRING PAD near its end, and a high ledge past it that only a spring's throw reaches.
+static func _spring(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float, last: int, md: Dictionary) -> Array:
+	var ny := _next_y(r, y, [-1.0, -0.5, 0.0])
+	var gap := _fit_gap(r.randf_range(0.9, float(md.gap)), ny - y)
+	var length := r.randf_range(4.0, 5.0)
+	var w := float(md.w)
+	var p := _plat(lv, x + gap, length, ny, w, "solid")
+	_hop(lv, last, p)
+	var sx := x + gap + length - 1.1
+	(lv.springs as Array).append({"pos": Vector3(sx, ny, 0.0), "p": p})
+	var top := minf(ny + r.randf_range(2.4, SPRING_RISE), Y_MAX - 0.5)
+	var g2 := r.randf_range(0.5, 1.1)
+	var ql := r.randf_range(4.0, 5.0)
+	var q := _plat(lv, x + gap + length + g2, ql, top, w, "solid")
+	(lv.chain as Array).append([p, q, "spring"])
+	_route(lv, p, Vector3(x + gap + 1.0, ny, 0.0), "walk")
+	_route(lv, p, Vector3(sx, ny, 0.0), "spring")
+	_route(lv, q, Vector3(x + gap + length + g2 + ql * 0.5, top, 0.0), "jump")
+	(lv.bolts as Array).append(Vector3(sx, ny + 2.2, 0.0))  # (bolts up the spring's way)
+	_bolt_row(lv, x + gap + length + g2 + 0.8, x + gap + length + g2 + ql - 0.8, top, 0.0, 3)
+	_bolt_row(lv, x + gap + 0.8, sx - 1.0, ny, 0.0, 2)
+	return [x + gap + length + g2 + ql, top, q]
+
+
+## FAN: a gap far too wide to hop, a WIND FAN down in it: walk off the edge and its updraft floats you across.
+static func _fan(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float, last: int, md: Dictionary) -> Array:
+	var span := r.randf_range(5.5, 7.0)
+	var ny := _next_y(r, y, [-0.5, 0.0, 0.5])
+	var length := r.randf_range(4.0, 5.5)
+	var w := float(md.w)
+	var q := _plat(lv, x + span, length, ny, w, "solid")
+	var top := maxf(y, ny) + FAN_TOP
+	(lv.fans as Array).append({"x0": x + 0.15, "x1": x + span - 0.15, "y": minf(y, ny) - 2.2, "top": top, "w": w})
+	(lv.chain as Array).append([last, q, "fan"])
+	_route(lv, q, Vector3(x + span + length * 0.5, ny, 0.0), "fan")
+	for k in 3:  # bolts float at the top of the updraft
+		(lv.bolts as Array).append(Vector3(lerpf(x + 1.4, x + span - 1.4, k / 2.0), top + 0.1, 0.0))
+	_bolt_row(lv, x + span + 0.8, x + span + length - 0.8, ny, 0.0, 2)
+	return [x + span + length, ny, q]
+
+
+## BELT: a long CONVEYOR BELT floor carrying robots along (some forwards, some backwards: run against it).
+static func _belt(lv: Dictionary, r: RandomNumberGenerator, x: float, y: float, last: int, md: Dictionary) -> Array:
+	var ny := _next_y(r, y, [-0.5, 0.0, 0.5])
+	var gap := _fit_gap(r.randf_range(0.9, float(md.gap)), ny - y)
+	var length := r.randf_range(7.0, 9.0)
+	var p := _plat(lv, x + gap, length, ny, float(md.w), "belt")
+	_hop(lv, last, p)
+	var dir := 1.0 if r.randf() < 0.5 else -1.0
+	(lv.belts as Array).append({"p": p, "dir": dir})
+	_route(lv, p, Vector3(x + gap + length - 0.8, ny, 0.0), "walk")
+	_bolt_row(lv, x + gap + 1.0, x + gap + length - 1.0, ny, 0.0, 4)
+	return [x + gap + length, ny, p]
+
+
+## Which spring pad robot feet at p bounce on (-1 none).
+static func spring_at(lv: Dictionary, p: Vector3) -> int:
+	var sp: Array = lv.get("springs", [])
+	for i in sp.size():
+		var s: Vector3 = (sp[i] as Dictionary).pos
+		if Vector2(p.x - s.x, p.z - s.z).length() < SPRING_R and absf(p.y - s.y) < 0.35:
+			return i
+	return -1
+
+
+## The updraft at point p: how fast a fan lifts a robot there (0 = none).
+static func fan_up(lv: Dictionary, p: Vector3) -> float:
+	for f in lv.get("fans", []):
+		if p.x > float(f.x0) and p.x < float(f.x1) and absf(p.z) < float(f.w) * 0.5 and p.y > float(f.y) and p.y < float(f.top):
+			return FAN_UP * clampf((float(f.top) - p.y) / 0.6, 0.0, 1.0)
+	return 0.0
+
+
+## The belt push (x speed) under robot feet at p (0 = not on a belt).
+static func belt_push(lv: Dictionary, p: Vector3) -> float:
+	for bt in lv.get("belts", []):
+		var pl: Dictionary = (lv.plats as Array)[int(bt.p)]
+		if _on_top(pl, p):
+			return BELT * float(bt.dir)
+	return 0.0
+
+
+static func _on_top(pl: Dictionary, p: Vector3) -> bool:
+	var c: Vector3 = pl.c
+	var s: Vector2 = pl.s
+	return absf(p.x - c.x) <= s.x * 0.5 + ROBOT_R and absf(p.z - c.z) <= s.y * 0.5 + ROBOT_R and p.y > c.y - 0.1 and p.y < c.y + 0.3
+
+
 # --- Questions about an island (game, bots, check) ---------------------------------------------------------------
 
 ## The platform under point p at level time t (its top within `up` above / `down` below p.y), -1 none.
@@ -443,11 +596,43 @@ static func check(lv: Dictionary) -> Array:
 				out.append("platform %d at x %.1f leaves the giant's walk" % [i, v.x])
 			if v.y < Y_MIN - 0.01 or v.y > Y_MAX + 0.01:
 				out.append("platform %d at y %.1f" % [i, v.y])
-	# The main path.
+	# The main path (plain hops, spring hops, fan floats).
 	for hop in lv.get("chain", []):
-		var why := _hop_problem(plats[int(hop[0])], plats[int(hop[1])])
+		var how := String(hop[2]) if (hop as Array).size() > 2 else ""
+		var why := ""
+		if how == "spring":
+			why = _spring_problem(lv, int(hop[0]), int(hop[1]))
+		elif how == "fan":
+			why = _fan_problem(lv, plats[int(hop[0])], plats[int(hop[1])])
+		else:
+			why = _hop_problem(plats[int(hop[0])], plats[int(hop[1])])
 		if why != "":
-			out.append("hop %d -> %d: %s" % [int(hop[0]), int(hop[1]), why])
+			out.append("%s hop %d -> %d: %s" % [how, int(hop[0]), int(hop[1]), why])
+	# Gadgets: belts walkable against, fans always on, springs on still floors.
+	if BELT > RUN * 0.5:
+		out.append("belts faster than a robot can walk against")
+	for bt in lv.get("belts", []):
+		if String((plats[int(bt.p)] as Dictionary).k) != "belt":
+			out.append("a belt that isn't a belt floor")
+	for sp in lv.get("springs", []):
+		var pl: Dictionary = plats[int(sp.p)]
+		if pl.has("b") or not _on(pl, sp.pos, 0.0) or absf(float((sp.pos as Vector3).x) - float((pl.c as Vector3).x)) > float((pl.s as Vector2).x) * 0.5 - 0.5:
+			out.append("spring at x %.1f not well on a still floor" % float((sp.pos as Vector3).x))
+	# Bot boxes: on a floor of the main path (at its back edge; they never block: no collision), never on a zap pad.
+	var on_path := {}
+	for hop in lv.get("chain", []):
+		on_path[int(hop[0])] = true
+		on_path[int(hop[1])] = true
+	for bx in lv.get("boxes", []):
+		var pl: Dictionary = plats[int(bx.p)]
+		var bp: Vector3 = bx.pos
+		if not on_path.has(int(bx.p)) or pl.has("b") or not _on(pl, bp, 0.0) or not _on(pl, bp + Vector3(0, 0, 0.9), 0.0):
+			out.append("bot box at x %.1f not on a still floor of the path" % bp.x)
+		for z in lv.get("zaps", []):
+			if Vector2(bp.x - (z.pos as Vector3).x, bp.z - (z.pos as Vector3).z).length() < float(z.r) + 1.2:
+				out.append("bot box at x %.1f by a zap pad" % bp.x)
+	if (lv.get("boxes", []) as Array).size() < 2:
+		out.append("only %d bot boxes" % (lv.get("boxes", []) as Array).size())
 	var chain: Array = lv.get("chain", [])
 	if chain.is_empty() or int(chain[0][0]) != 0:
 		out.append("the path doesn't start on the first floor")
@@ -527,10 +712,16 @@ static func check(lv: Dictionary) -> Array:
 		out.append("the goal isn't on the last floor")
 	elif goal.x - last_x > MAX_CP_GAP:
 		out.append("the goal is %.1f past the last checkpoint" % (goal.x - last_x))
-	if int(lv.get("island", 1)) == 3:
+	var sig := String(SIGNATURE.get(int(lv.get("island", 1)), ""))
+	if sig != "" and (lv.get(sig + "s", []) as Array).is_empty():
+		out.append("no %s on its own island" % sig)
+	var bk := boss_of(int(lv.get("island", 1)))
+	if bk != "":
 		var bd: Dictionary = lv.get("boss", {})
-		if bd.is_empty() or int(bd.get("hp", 0)) <= 0 or end_i < 0 or String((plats[end_i] as Dictionary).k) != "arena":
-			out.append("Crab Cove has no Cranky Crab arena")
+		if bd.is_empty() or int(bd.get("hp", 0)) <= 0 or end_i < 0 or String((plats[end_i] as Dictionary).k) != "arena" or String(bd.get("kind", "")) != bk:
+			out.append("%s has no %s arena" % [island_name(lv.get("desc", {"i": lv.island})), bk])
+	elif not (lv.get("boss", {}) as Dictionary).is_empty():
+		out.append("a boss on an island without one")
 	var start: Vector3 = lv.get("start", Vector3.INF)
 	if not _on(plats[0], start, 0.0):
 		out.append("the start isn't on the first floor")
@@ -568,6 +759,53 @@ static func _hop_problem(a: Dictionary, b: Dictionary, across: bool = false) -> 
 	return best
 
 
+## Why a spring on floor a can't throw a robot onto ledge b ("" = it can): the ledge within the throw's reach from the
+## pad (REACH_K margin), never hanging over the pad, and no higher than SPRING_RISE.
+static func _spring_problem(lv: Dictionary, ai: int, bi: int) -> String:
+	var plats: Array = lv.plats
+	var a: Dictionary = plats[ai]
+	var b: Dictionary = plats[bi]
+	var pad := Vector3.INF
+	for sp in lv.get("springs", []):
+		if int(sp.p) == ai:
+			pad = sp.pos
+	if pad == Vector3.INF:
+		return "no spring on its floor"
+	if b.has("b") or a.has("b"):
+		return "a spring hop needs still floors"
+	var dh := float((b.c as Vector3).y) - pad.y
+	var near := float((b.c as Vector3).x) - float((b.s as Vector2).x) * 0.5
+	var d := near - pad.x
+	if dh > SPRING_RISE + 0.01:
+		return "ledge %.2f up (most %.2f)" % [dh, SPRING_RISE]
+	if d < SPRING_R + 0.3:
+		return "the ledge hangs over the spring"
+	if d > reach(dh, SPRING_V) * REACH_K:
+		return "ledge %.2f away, a spring throws %.2f" % [d, reach(dh, SPRING_V) * REACH_K]
+	if absf(float((b.c as Vector3).z) - pad.z) > float((b.s as Vector2).y) * 0.5 - 0.5:
+		return "the ledge isn't in line with the spring"
+	return ""
+
+
+## Why a fan can't float a robot from floor a to floor b ("" = it can): its updraft fills the whole gap, rises over
+## both floors, and stays out of the way of every floor.
+static func _fan_problem(lv: Dictionary, a: Dictionary, b: Dictionary) -> String:
+	var a_end := float((a.c as Vector3).x) + float((a.s as Vector2).x) * 0.5
+	var b_near := float((b.c as Vector3).x) - float((b.s as Vector2).x) * 0.5
+	for f in lv.get("fans", []):
+		if float(f.x0) > a_end + 0.3 or float(f.x1) < b_near - 0.3 or float(f.x0) < a_end - 0.5:
+			continue
+		var hi := maxf(float((a.c as Vector3).y), float((b.c as Vector3).y))
+		if float(f.top) < hi + FAN_TOP - 0.01:
+			return "the updraft only reaches %.1f" % float(f.top)
+		if float(f.w) < minf(float((a.s as Vector2).y), float((b.s as Vector2).y)) - 0.01:
+			return "the updraft is narrower than the floors"
+		if FAN_UP < 2.0:
+			return "the updraft is too weak"
+		return ""
+	return "no fan fills the gap (%.1f to %.1f)" % [a_end, b_near]
+
+
 ## Where a moving platform is worth checking from: statics where they are; movers at both ends; a lift at its
 ## bottom when you get on (`leaving` false) and its top when you get off (`leaving` true) - or both when unsure.
 static func _poses(p: Dictionary, _other: Dictionary, leaving: bool) -> Array:
@@ -595,6 +833,9 @@ static func _on(p: Dictionary, v: Vector3, margin: float) -> bool:
 
 ## A bolt is fine over any floor (any time) within a jump's height, or over a hop between floors at most 1.9 up.
 static func _bolt_ok(lv: Dictionary, b: Vector3) -> bool:
+	for f in lv.get("fans", []):  # (floating at the top of a fan's updraft)
+		if b.x > float(f.x0) and b.x < float(f.x1) and absf(b.z) < float(f.w) * 0.5 and b.y < float(f.top) + 0.5 and b.y > float(f.top) - 1.5:
+			return true
 	var top := JUMP_V * JUMP_V / (2.0 * GRAVITY) + ROBOT_H * 0.5 + TOUCH - 0.3
 	for p in lv.plats:
 		var a := _sweep(p)

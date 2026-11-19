@@ -3,7 +3,8 @@ extends RefCounted
 ## The robots (player colours and the CPU buddies), the bolts, grumbles and Cranky Crab carry an ink outline
 ## (Contrast.outline); they stand on every island floor (meadow tops in every season, gear works metal, cove sand,
 ## the orange movers and purple lifts) and on Gizmo Town's grass (the meadow tops). The zap pads' flash, a grumble's
-## charge line and the crab's stomp ring lie on those same floors; the gold gear and the spark too.
+## charge line and the crab's stomp ring lie on those same floors; the gold gear and the spark too. Chapter two adds
+## the snow, jungle and clockwork floors, the dark belts (their arrows), spring pads, bot boxes and King Keywind.
 
 const Contrast := preload("res://core/contrast.gd")
 const Party := preload("res://core/party.gd")
@@ -17,6 +18,9 @@ static func key_colors() -> Dictionary:
 	out["bolt"] = Level.BOLT_COLOR
 	out["grumble"] = Level.GRUMBLE_COLOR
 	out["cranky crab"] = Boss.COLOR
+	out["king keywind"] = Boss.KING_COLOR
+	out["spring pad"] = Level.SPRING_COLOR
+	out["bot box"] = Level.BOX_COLOR
 	for k in out:  # (each with the ink outline)
 		out[k] = {"color": out[k], "rim": Robot.OUTLINE}
 	out["gold gear"] = {"color": Level.GEAR_COLOR, "rim": Level.GEAR_COLOR.darkened(0.45)}  # (its dark hub)
@@ -27,10 +31,16 @@ static func key_colors() -> Dictionary:
 	return out
 
 
+## The arrows that run along a belt only ever lie on the belt.
+static func groups() -> Array:
+	return [{"keys": {"belt arrow": Level.BELT_ARROW}, "bgs": {"belt": Level.BELT_TOP}}]
+
+
 static func backgrounds() -> Dictionary:
 	var out := Contrast.named("meadow", (Level.MEADOW_TOPS as Dictionary).values())
 	for th in Level.THEME:
 		out["%s floor" % th] = (Level.THEME[th] as Dictionary).top
 	out["mover"] = Level.MOVER_TOP
 	out["lift"] = Level.LIFT_TOP
+	out["belt"] = Level.BELT_TOP
 	return out

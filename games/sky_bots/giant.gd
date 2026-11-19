@@ -102,6 +102,10 @@ func step(_delta: float) -> void:
 		var k: int = level.bolt_at(p, 0.6)
 		if k >= 0:
 			main.take_bolt(k, 0)
+		var bx: int = level.box_near(p, 0.6)  # (a finger taps a bot box open)
+		if bx >= 0:
+			main.open_box(bx, 0)
+			rig.pulse(h, 0.5, 0.06)
 		if main.boss != null and main.boss.alive() and p.distance_to(main.boss.position + Vector3(0, 0.9, 0)) < 1.4:
 			now["boss"] = true
 			if not touch_on[h].has("boss") and main.boss_hit("giant"):

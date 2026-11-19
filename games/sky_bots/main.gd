@@ -13,6 +13,10 @@ extends Node3D
 ##   flicks grumbles off, pokes the crab and the cracked wall, picks up bolts. A ghost glove (core/ghost_hand.gd) shows
 ##   how to lift a lift. Solo VR: CPU buddies BIP and BOP (brain.gd) run the islands and the giant helps them.
 ## - A spark brought home lights the Sky Lamp and builds Gizmo Town; each gold gear builds more (saved).
+## - CHAPTER TWO (after Crab Cove): SNOWY PEAKS (spring pads), JUNGLE JUMBLE (wind fans), CLOCKWORK KEEP (conveyor
+##   belts, and KING KEYWIND: he tells his charge with a warn line, dashes, bonks the rim, then he's dizzy). Every island
+##   has two BOT BOXES with LITTLE BOTS inside (bump, punch or pound them open): they move to Gizmo Town and sew costume
+##   HATS (hats.gd; Y in town swaps your hat). New moves: X in the air DASHES, B in the air GROUND POUNDS.
 ## - One RUN telemetry line per island (and on quit). The season dresses the town (core/season_kit.gd).
 ## Modes as in games/engine_template: local (split screen), host (VR on the Steam Frame, simulates everything), client
 ## (a TV / Deck machine: its robots move locally and instantly, the rest is mirrored from snapshots).
@@ -43,6 +47,7 @@ const Brain := preload("res://games/sky_bots/brain.gd")
 const Giant := preload("res://games/sky_bots/giant.gd")
 const Boss := preload("res://games/sky_bots/boss.gd")
 const Hub := preload("res://games/sky_bots/hub.gd")
+const Hats := preload("res://games/sky_bots/hats.gd")
 const Story := preload("res://games/sky_bots/story.gd")
 const PicksScript := preload("res://games/sky_bots/picks.gd")
 
@@ -52,6 +57,8 @@ const CHEER_TIME := 5.0
 const BUDDIES := 2  ## solo VR: CPU buddies BIP and BOP
 const VR_CARD_UP := 0.25
 const CLOUD_Y := Giant.FLOOR_Y
+const ISLE_COLORS: Array[Color] = [Color(0.5, 0.9, 0.45), Color(0.6, 0.75, 1.0), Color(1.0, 0.6, 0.45), Color(0.85, 0.93, 1.0),
+	Color(0.35, 0.8, 0.5), Color(0.75, 0.55, 0.95)]
 
 # --- The networking contract ---
 var net: Node
@@ -78,6 +85,8 @@ var cams := {}  ## slot -> CameraRig
 var group_cam: CameraRig  ## the shared view (nobody seated on this screen): frames all the robots
 var huds := {}  ## slot -> UiKit root (-1 = the shared view)
 var bolt_labels := {}  ## slot -> Label
+var tiny_labels := {}  ## slot -> Label (little bots let out on this island)
+var hat_prompts := {}  ## slot -> Control (Y: swap hat, in Gizmo Town)
 var gear_pics := {}  ## slot -> Control
 var prompts := {}  ## slot -> Control
 var join_prompt: Control
@@ -122,6 +131,8 @@ func _ready() -> void:
 	add_child(save)
 	if int(save.data.world) < 0:
 		save.data.world = Seeded.fresh_seed()  # this family's own islands
+		save.mark_dirty()
+	if Story.fix_save(save.data):
 		save.mark_dirty()
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -179,10 +190,10 @@ func _setup(m: String) -> void:
 	net.sticky_event("orbs")  # a machine joining mid-pick sees the orbs
 	if m != "client":
 		if OS.has_environment("SKY_ISLAND"):  # (bots, screenshots, What's New "try": straight onto an island)
-			force_island = clampi(int(OS.get_environment("SKY_ISLAND")), 0, 3)
+			force_island = clampi(int(OS.get_environment("SKY_ISLAND")), 0, G.ISLANDS)
 		_begin_session()
 	else:
-		for k in ["deep", "hubp", "ldesc", "wall", "gear", "goal_on", "bolts", "cp"]:
+		for k in ["deep", "hubp", "ldesc", "wall", "gear", "goal_on", "bolts", "cp", "boxes", "hats"]:
 			if net.state_has(k):
 				_on_state_changed(k, net.state_get(k, null))
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
@@ -235,6 +246,8 @@ func _begin_session() -> void:
 	hub.build(season)
 	hub.apply(Story.power(save.data), false)
 	hub.set_lamp(_sparks_lit())
+	hub.set_tiny(int(save.data.tiny), false)
+	_send_hats()
 	if not bool(save.data.intro):
 		save.data.intro = true
 		save.mark_dirty()
@@ -242,6 +255,10 @@ func _begin_session() -> void:
 			_story(k)
 	else:
 		_story("back")
+	if int(save.data.cleared) & 4 and not bool(save.data.ch2):  # (Crab Cove done before chapter two came: tell it now)
+		save.data.ch2 = true
+		save.mark_dirty()
+		_story("chapter2")
 	_go_hub()
 
 
@@ -252,12 +269,11 @@ func _send_deep() -> void:
 
 ## Host: how far Gizmo Town has grown, for every machine.
 func _send_hub(pop: bool) -> void:
-	net.state_set("hubp", [Story.power(save.data), _sparks_lit(), pop])
+	net.state_set("hubp", [Story.power(save.data), _sparks_lit(), pop, int(save.data.tiny)])
 
 
 func _sparks_lit() -> int:
-	var c := int(save.data.cleared)
-	return (c & 1) + ((c >> 1) & 1) + ((c >> 2) & 1)
+	return Story.sparks_lit(int(save.data.cleared))
 
 
 func phase() -> String:
@@ -289,17 +305,15 @@ func _start_pick(stage: String) -> void:
 		_story("mode")
 	else:
 		var today_done := String(save.data.daily_done) == Seeded.today()
-		var open := Story.open_islands(int(save.data.cleared))
+		var open := Story.pick_set(int(save.data.cleared), today_done)
 		var sug := Story.suggest(int(save.data.cleared), today_done)
-		if today_done:
-			open.erase(0)
 		for i in open:
 			opts.append(int(i))
 			if int(i) == 0:
 				entries.append({"id": "daily", "name": "TODAY", "pic": "skyisland", "color": Color(1.0, 0.85, 0.35)})
 			else:
 				entries.append({"id": "isle%d" % int(i), "name": G.ISLAND_NAMES[int(i) - 1], "pic": G.ISLAND_PICS[int(i) - 1],
-					"color": [Color(0.5, 0.9, 0.45), Color(0.6, 0.75, 1.0), Color(1.0, 0.6, 0.45)][int(i) - 1]})
+					"color": ISLE_COLORS[int(i) - 1]})
 		def = maxi(0, opts.find(sug))
 		_story("pick" if not opts.has(0) or today_done else "daily")
 	net.state_set("phase", "pick")
@@ -359,12 +373,14 @@ func _go_island(i: int) -> void:
 	net.state_set("gear", false)
 	net.state_set("bolts", PackedInt32Array())
 	net.state_set("cp", 0)
+	net.state_set("boxes", 0)
 	net.state_set("ldesc", desc)
 	_build_island(desc)
 	net.state_set("goal_on", (level.lv.boss as Dictionary).is_empty())
 	net.state_set("phase", "play")
 	run = {"island": i, "seed": int(desc.s), "attempt": int(level.lv.get("attempt", 0)), "bolts": 0, "falls": 0, "bumps": 0,
-		"zaps": 0, "pops": 0, "punches": 0, "jumps": 0, "gear": false, "lifts": 0, "flicks": 0, "crab_hits": 0}
+		"zaps": 0, "pops": 0, "punches": 0, "jumps": 0, "gear": false, "lifts": 0, "flicks": 0, "crab_hits": 0, "tiny": 0,
+		"springs": 0, "dashes": 0, "pounds": 0, "boss": String((level.lv.boss as Dictionary).get("kind", ""))}
 	for rid in brains:
 		(brains[rid] as Brain).reset()
 	print("Sky Bots island %d (%s): seed %d, %s, attempt %d, %d platforms, %d bolts" % [i, G.island_name(desc), int(desc.s), mode,
@@ -384,6 +400,7 @@ func _build_island(d: Dictionary) -> void:
 		_place_all_hub()
 		if ghost != null:
 			ghost.hide_demo()
+		_refresh_hud()  # (the island's bolt card goes away in town)
 		return
 	var lv := G.generate(d)
 	hub.visible = false
@@ -391,6 +408,7 @@ func _build_island(d: Dictionary) -> void:
 	level.visible = true
 	level.build(lv, G.theme_of(d), season, net.mode != "client")
 	level.set_bolts(net.state_get("bolts", PackedInt32Array()) if net.mode == "client" else PackedInt32Array())
+	level.set_boxes(int(net.state_get("boxes", 0)) if net.mode == "client" else 0)
 	if boss != null:
 		boss.queue_free()
 		boss = null
@@ -450,6 +468,16 @@ func respawn_point(r: Robot) -> Vector3:
 
 func fall_y() -> float:
 	return (float(level.lv.low_y) - G.FALL_BELOW) if not level.lv.is_empty() else -4.0
+
+
+## Robot r's gadgets this physics frame (robot.gd step): a belt's push under its feet (x) and a fan's updraft (y).
+func gadget_push(r: Robot, on_floor: bool) -> Vector3:
+	if level.lv.is_empty() or phase() != "play":
+		return Vector3.ZERO
+	var out := Vector3(0.0, G.fan_up(level.lv, r.position + Vector3.UP * 0.3), 0.0)
+	if on_floor:
+		out.x = G.belt_push(level.lv, r.position)
+	return out
 
 
 # --- Robots ---------------------------------------------------------------------------------------------------------
@@ -515,6 +543,8 @@ func _remove_robot(rid: int) -> void:
 			h.queue_free()
 		huds.erase(rid)
 	bolt_labels.erase(rid)
+	tiny_labels.erase(rid)
+	hat_prompts.erase(rid)
 	gear_pics.erase(rid)
 	prompts.erase(rid)
 
@@ -608,9 +638,7 @@ func _physics_process(delta: float) -> void:
 					force_island = -1
 					_go_island(fi)
 				else:
-					var open := Story.open_islands(int(save.data.cleared))
-					if String(save.data.daily_done) == Seeded.today():
-						open.erase(0)
+					var open := Story.pick_set(int(save.data.cleared), String(save.data.daily_done) == Seeded.today())
 					if open.size() <= 1:
 						_go_island(1)
 					else:
@@ -660,8 +688,14 @@ func _step_owned(delta: float) -> void:
 		if free and party.just_pressed(slot, "x"):
 			r.inp_punch = true
 			_used(slot, "punch")
+		if free and party.just_pressed(slot, "b"):
+			r.inp_pound = true
+		if ph != "play" and party.just_pressed(slot, "y"):  # in Gizmo Town: swap to the next hat
+			_ask("hat", r, [])
+	var hats: Array = net.state_get("hats", [])
 	for rid in robots:
 		var r: Robot = robots[rid]
+		r.show_hat(int(hats[_hat_slot(int(rid))]) if hats.size() > _hat_slot(int(rid)) else 0)
 		if not r.owned:
 			continue
 		r.step(delta)
@@ -722,6 +756,20 @@ func _robot_rules(r: Robot) -> void:
 				_ask("crab", r, [])
 			elif boss.state != "dizzy" and r.safe_t <= 0.0:
 				r.bump(rel2, 1.0)
+	if r.is_on_floor():
+		var sp := G.spring_at(level.lv, r.position)
+		if sp >= 0:
+			r.spring()
+			level.spring_boing(sp)
+			_local_sound("boing", r.position, -4.0, 1.4)
+			_stat("springs")
+			if net.mode == "host":
+				net.event("boing", [sp])
+			elif net.mode == "client":
+				net.request(r.rid if r.rid < 10 else 1, "boing", [sp])
+	var bx := level.box_near(r.position, G.BOX_R)
+	if bx >= 0:
+		_ask("box", r, [bx])
 	var cp := G.checkpoint_for(level.lv, r.position, r.checkpoint)
 	if cp != r.checkpoint:
 		r.checkpoint = cp
@@ -746,6 +794,29 @@ func _robot_event(r: Robot, e: Array) -> void:
 		"bump":
 			_local_sound("bounce", p, -4.0, 1.3)
 			_stat("bumps")
+		"dash":
+			_local_sound("whoosh", p, -6.0, 1.2)
+			_stat("dashes")
+		"pound_start":
+			_local_sound("whoosh", p, -8.0, 0.7)
+		"pound":
+			_local_sound("land", p, 0.0, 0.6)
+			_stat("pounds")
+			if cams.has(r.rid):
+				(cams[r.rid] as CameraRig).shake(0.2)
+			if phase() != "play":
+				return
+			for i in level.grumbles.size():
+				if level.grumble_alive(i) and Vector2(level.grumble_pos(i).x - p.x, level.grumble_pos(i).z - p.z).length() < G.POUND_R \
+						and absf(level.grumble_pos(i).y - p.y) < 0.8:
+					_ask("pop", r, [i])
+			var bx := level.box_near(p, G.POUND_R)
+			if bx >= 0:
+				_ask("box", r, [bx])
+			if level.near_wall(p + Vector3.UP * 0.5, 1.2):
+				_ask("wall", r, [])
+			if boss != null and boss.state == "dizzy" and Vector2(boss.position.x - p.x, boss.position.z - p.z).length() < 2.2:
+				_ask("crab", r, [])
 		"punch":
 			_local_sound("swish", p, -8.0, 1.4)
 			_stat("punches")
@@ -770,7 +841,7 @@ func _ask(what: String, r: Robot, args: Array) -> void:
 				return
 			asked[key] = true
 			sfx.play_at("coin", r.position, -4.0, 1.3)
-		elif what == "crab" or what == "pop" or what == "cp":
+		elif what == "crab" or what == "pop" or what == "cp" or what == "hat":
 			if asked.has(key) and Time.get_ticks_msec() - int(asked[key]) < 400:
 				return
 			asked[key] = Time.get_ticks_msec()
@@ -832,6 +903,16 @@ func on_request(slot: int, action: String, args: Array) -> void:
 		"crab":
 			if playing:
 				boss_hit(str(slot))
+		"box":
+			if playing and args.size() >= 1:
+				open_box(int(args[0]), slot)
+		"boing":
+			if args.size() >= 1:
+				level.spring_boing(int(args[0]))
+				net.event_except(net.sender_peer(), "boing", [int(args[0])])
+		"hat":
+			if not playing:
+				next_hat(slot)
 		"stat":
 			if args.size() >= 1:
 				_stat(String(args[0]))
@@ -873,6 +954,72 @@ func _take_gear(by: int) -> void:
 	save.mark_dirty()
 	_story("gear")
 	print("Gold gear found by %d" % by)
+
+
+## Host: bot box i opens (a robot bumped / punched / pounded it, or the giant's finger): its little bot is rescued and
+## moves to Gizmo Town; every few rescues the little bots sew a new hat. A boss's box opens once the boss is beaten.
+func open_box(i: int, _by: int) -> void:
+	var bl: Array = level.lv.get("boxes", [])
+	if i < 0 or i >= bl.size() or level.box_open(i):
+		return
+	if boss != null and boss.alive() and String((level.lv.plats as Array)[int((bl[i] as Dictionary).p)].k) == "arena":
+		return
+	var bits := level.box_bits | (1 << i)
+	level.set_boxes(bits)
+	net.state_set("boxes", bits)
+	run["tiny"] = int(run.get("tiny", 0)) + 1
+	var before := Hats.unlocked(int(save.data.tiny))
+	save.data.tiny = int(save.data.tiny) + 1
+	save.mark_dirty()
+	var p: Vector3 = (bl[i] as Dictionary).pos + Vector3(0, 0.6, 0)
+	sound_at("pop", p, -2.0, 1.3)
+	sound_at("sparkle", p, -4.0, 1.2)
+	confetti(p, Level.BOX_COLOR, 24)
+	if net.mode == "host":
+		net.event("confetti", [p, Level.BOX_COLOR, 24])
+	if Hats.unlocked(int(save.data.tiny)) > before:
+		var beat := Story.line("hat")
+		beat.pic = Hats.PICS[Hats.unlocked(int(save.data.tiny)) - 1]
+		_story_beat(beat)
+		_send_hats()
+	elif not told.has("tiny"):
+		_story("tiny")
+	told["tiny"] = true
+	_refresh_hud()
+
+
+## Which hats entry robot rid uses (people by slot 0..6, CPU buddies after them).
+func _hat_slot(rid: int) -> int:
+	return rid if rid < 10 else 7 + (rid - 10) % 3
+
+
+## Host: every robot's hat (state "hats", 10 entries): a player's own pick (saved), else Hats.default_for its slot.
+func _send_hats() -> void:
+	var picked: Dictionary = save.data.hats
+	var n := Hats.unlocked(int(save.data.tiny))
+	var out: Array = []
+	for k in 10:
+		var h := Hats.default_for(k, int(save.data.tiny))
+		if picked.has(str(k)):
+			h = int(picked[str(k)])
+		out.append(clampi(h, 0, n - 1))
+	net.state_set("hats", out)
+
+
+## Host: the player in slot swaps to their next hat (Y in Gizmo Town).
+func next_hat(slot: int) -> void:
+	var n := Hats.unlocked(int(save.data.tiny))
+	if n <= 1 or slot < 0 or slot > 6:
+		return
+	var hats: Array = net.state_get("hats", [])
+	var cur := int(hats[slot]) if hats.size() > slot else 0
+	var picked: Dictionary = save.data.hats
+	picked[str(slot)] = (cur + 1) % n
+	save.data.hats = picked
+	save.mark_dirty()
+	_send_hats()
+	if robots.has(slot):
+		sound_at("power_up", (robots[slot] as Node3D).position + Vector3.UP, -6.0, 1.4)
 
 
 func pop_grumble(i: int, who: String) -> void:
@@ -931,7 +1078,14 @@ func _island_cleared(by: int) -> void:
 	save.data.best_bolts = maxi(int(save.data.best_bolts), int(run.get("bolts", 0)))
 	save.mark_dirty()
 	_telemetry("clear")
-	_story("all_sparks" if first_spark and _sparks_lit() == 3 else "spark")
+	if first_spark and _sparks_lit() == G.ISLANDS:
+		_story("all_keys")
+	elif first_spark and isle == 3:
+		_story("all_sparks")
+		_story("chapter2")  # (the far islands open: Snowy Peaks next)
+		save.data.ch2 = true
+	else:
+		_story("spark")
 	if vr_rig != null:
 		vr_rig.pulse(VrRig.RIGHT, 0.6, 0.2)
 		vr_rig.pulse(VrRig.LEFT, 0.6, 0.2)
@@ -952,6 +1106,7 @@ func _telemetry(end: String) -> void:
 		"bolts_all": (level.lv.bolts as Array).size(), "lifts": giant.lifts_used if giant != null else 0,
 		"flicks_all": giant.flicks if giant != null else 0, "crab_stomps": boss.stomps if boss != null else 0,
 		"cpu_warps": warps, "sparks": int(save.data.sparks), "gears": int(save.data.gears), "grown": Story.power(save.data),
+		"tiny_all": int(save.data.tiny), "hats": Hats.unlocked(int(save.data.tiny)) - 1, "boxes_all": (level.lv.get("boxes", []) as Array).size(),
 		"cp": int(net.state_get("cp", 0))}, true)
 	Telemetry.run(GAME_ID, info)
 
@@ -976,11 +1131,24 @@ func _feature_hints() -> void:
 		feats["grumble"] = minf(float(feats.get("grumble", INF)), float(gd.x0))
 	for z in level.lv.zaps:
 		feats["zap"] = minf(float(feats.get("zap", INF)), float((z.pos as Vector3).x))
+	for sp in level.lv.get("springs", []):
+		feats["spring"] = minf(float(feats.get("spring", INF)), float((sp.pos as Vector3).x) - 2.0)
+	for f in level.lv.get("fans", []):
+		feats["fan"] = minf(float(feats.get("fan", INF)), float(f.x0))
+	for bt in level.lv.get("belts", []):
+		var bp: Dictionary = (level.lv.plats as Array)[int(bt.p)]
+		feats["belt"] = minf(float(feats.get("belt", INF)), float((bp.c as Vector3).x) - float((bp.s as Vector2).x) * 0.5)
+	if not (level.lv.get("boxes", []) as Array).is_empty() and int(save.data.tiny) < 3:
+		feats["tiny_box"] = float(((level.lv.boxes as Array)[0].pos as Vector3).x)
+	if int(save.data.tiny) >= 1 and island_t > 20.0 and not has_meta("told_moves"):
+		feats["moves"] = -INF  # (once a session, after the first rescue: the air moves)
 	if not (level.lv.secret as Dictionary).is_empty():
 		feats["secret_hint"] = float(((level.lv.secret as Dictionary).wall as Vector3).x)
 	for f in feats:
 		if not told.has(f) and front > float(feats[f]) - 7.0:
 			told[f] = true
+			if f == "moves":
+				set_meta("told_moves", true)
 			_story(String(f))
 			return
 
@@ -999,7 +1167,7 @@ func _show_line_tell(p: Vector3, dir: Vector3, length: float) -> void:
 # --- Cranky Crab (boss.gd calls these on the host) -----------------------------------------------------------------
 
 func boss_woke() -> void:
-	_story("crab")
+	_story("crab" if boss == null or boss.kind == "crab" else "king")
 	music.play_mood("boss")
 	if net.mode == "host":
 		net.event("mood", ["boss"])
@@ -1014,6 +1182,33 @@ func boss_tell(p: Vector3, r: float, secs: float) -> void:
 func _show_ring(p: Vector3, r: float, secs: float) -> void:
 	level.rings.warn(p, r, Boss.RING_COLOR, secs, p.y + 0.06)
 	sfx.play_at("alarm", p, -10.0, 1.1)
+
+
+## King Keywind tells his charge: a warn line from p along dir (every machine).
+func boss_line(p: Vector3, dir: Vector3, length: float, secs: float) -> void:
+	_show_boss_line(p, dir, length, secs)
+	if net.mode == "host":
+		net.event("bline", [p, dir, length, secs])
+
+
+func _show_boss_line(p: Vector3, dir: Vector3, length: float, secs: float) -> void:
+	level.rings.shape("line", p + Vector3(0, 0.05, 0) + dir * (length * 0.5), dir, Vector2(length + 1.2, 2.6), Boss.RING_COLOR, secs,
+		{"style": "flash", "y": p.y + 0.06})
+	sfx.play_at("alarm", p, -10.0, 0.9)
+
+
+## King Keywind bonked into the arena's rim (every machine: a clang and a shake).
+func boss_bonk(p: Vector3) -> void:
+	_bonk(p)
+	if net.mode == "host":
+		net.event("bonk", [p])
+
+
+func _bonk(p: Vector3) -> void:
+	sfx.play_at("hit", p, -2.0, 0.6)
+	sfx.play_at("explosion", p, -12.0, 1.4)
+	for slot in cams:
+		(cams[slot] as CameraRig).shake(0.25)
 
 
 func boss_stomp(p: Vector3, r: float) -> void:
@@ -1044,11 +1239,14 @@ func boss_hit(who: String) -> bool:
 	if net.mode == "host":
 		net.event("confetti", [p, Color(1.0, 0.9, 0.4), 20])
 	if not boss.alive():
-		save.data.crabs = int(save.data.crabs) + 1
+		if boss.kind == "king":
+			save.data.kings = int(save.data.kings) + 1
+		else:
+			save.data.crabs = int(save.data.crabs) + 1
 		save.mark_dirty()
 		level.set_goal(true)
 		net.state_set("goal_on", true)
-		_story("crab_down")
+		_story("crab_down" if boss.kind == "crab" else "king_down")
 		sound_at("fanfare", p, -4.0, 0.9)
 		music.play_mood("overworld")
 		if net.mode == "host":
@@ -1094,6 +1292,11 @@ func _process(delta: float) -> void:
 		if is_instance_valid(pr):
 			var u: Dictionary = used.get(slot, {})
 			pr.visible = not (u.has("jump") and u.has("punch")) and phase() == "play"
+	var hats_open := Hats.unlocked(int((net.state_get("hubp", [0, 0, false, 0]) as Array)[3]) if (net.state_get("hubp", []) as Array).size() >= 4 else 0) > 1
+	for slot in hat_prompts:
+		var hpr: Control = hat_prompts[slot]
+		if is_instance_valid(hpr):
+			hpr.visible = hats_open and phase() == "hub"
 	if join_prompt != null:
 		join_prompt.visible = party.local_slots().is_empty()
 	if group_cam != null:
@@ -1174,12 +1377,22 @@ func _make_hud(slot: int, parent: Control) -> void:
 	var gp := StoryCard.picture("goldgear", 40.0)
 	row.add_child(gp)
 	gear_pics[slot] = gp
+	row.add_child(StoryCard.picture("tinybot", 40.0))
+	var tl := UiKit.label("0", "number")
+	row.add_child(tl)
+	tiny_labels[slot] = tl
 	if slot >= 0:
 		var pr := UiKit.panel("pill")
 		pr.add_child(UiKit.prompts([["A", "Jump"], ["X", "Punch"]]))
 		ui.add_child(pr)
 		_bottom(pr)
 		prompts[slot] = pr
+		var hp := UiKit.panel("pill")
+		hp.add_child(UiKit.prompts([["Y", "Hat"]]))
+		ui.add_child(hp)
+		_bottom(hp)
+		hp.visible = false
+		hat_prompts[slot] = hp
 	else:
 		join_prompt = UiKit.panel("pill")
 		join_prompt.add_child(UiKit.prompts([["A", "Join"]]))
@@ -1205,6 +1418,14 @@ func _refresh_hud() -> void:
 		if is_instance_valid(l):
 			l.text = str(got)
 			(l.get_parent().get_parent() as Control).visible = on_island
+	var opened := 0
+	if on_island:
+		for i in (level.lv.get("boxes", []) as Array).size():
+			opened += 1 if level.box_open(i) else 0
+	for slot in tiny_labels:
+		var tl: Label = tiny_labels[slot]
+		if is_instance_valid(tl):
+			tl.text = "%d/%d" % [opened, (level.lv.get("boxes", []) as Array).size()] if on_island else "0"
 	for slot in gear_pics:
 		var gp: Control = gear_pics[slot]
 		if is_instance_valid(gp):
@@ -1303,6 +1524,9 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			level.set_goal(bool(value))
 		"cp":
 			level.light_flags(int(value))
+		"boxes":
+			level.set_boxes(int(value))
+			_refresh_hud()
 		"deep":
 			var dv: Array = value if value is Array else []
 			if dv.size() >= 2:
@@ -1318,6 +1542,8 @@ func _on_state_changed(key: String, value: Variant) -> void:
 			if hv.size() >= 3:
 				hub.apply(int(hv[0]), bool(hv[2]))
 				hub.set_lamp(int(hv[1]))
+				if hv.size() >= 4:
+					hub.set_tiny(int(hv[3]), bool(hv[2]))
 				if bool(hv[2]):
 					sfx.play_at("sparkle", Hub.LAMP_AT + Vector3(0, 4, 0), -2.0)
 		"phase":
@@ -1417,6 +1643,12 @@ func apply_event(kind: String, args: Array) -> void:
 			_show_ring(args[0], float(args[1]), float(args[2]))
 		"shock":
 			_shock(args[0], float(args[1]))
+		"bline":
+			_show_boss_line(args[0], args[1], float(args[2]), float(args[3]))
+		"bonk":
+			_bonk(args[0])
+		"boing":
+			level.spring_boing(int(args[0]))
 		"mood":
 			music.play_mood(String(args[0]))
 		"orbs":
