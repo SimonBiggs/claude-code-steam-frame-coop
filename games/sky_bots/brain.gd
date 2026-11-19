@@ -6,7 +6,8 @@ extends RefCounted
 ## cracked wall open and grabs the gold gear, and on Crab Cove keeps clear of Cranky Crab's stomp and punches it while
 ## it's dizzy; walks onto spring pads and steers onto the ledge, walks off the edge into a fan's updraft and floats
 ## across, runs along belts, opens bot boxes (a jump and a GROUND POUND on top, a punch if that missed), and on
-## Clockwork Keep steps out of King Keywind's charge line. out_* are this frame's wishes; the robot (or the bot's pad)
+## Clockwork Keep steps out of King Keywind's charge line; waits at a GIANT JOB (hopping: "help!") till the giant opens
+## it, or stands on its BUTTON once that wakes up. out_* are this frame's wishes; the robot (or the bot's pad)
 ## does the moving.
 
 const G := preload("res://games/sky_bots/levelgen.gd")
@@ -127,6 +128,35 @@ func think(r: Node3D, level: Node, boss: Node, delta: float) -> void:
 				return
 			"goal":
 				out_move = _toward(flat, 0.0)
+				return
+			"fight":  # a MEGA GRUMBLE on this floor: stand and fight it (punch it, hop on it) till it pops
+				var mg := _mega_here(level, want)
+				if mg >= 0 and step_t < 25.0:
+					var gp: Vector3 = level.grumble_pos(mg)
+					var to := Vector3(gp.x - pos.x, 0.0, gp.z - pos.z)
+					out_move = _toward(to, 1.6) if to.length() > 2.0 else -to.normalized() * 0.4
+					if to.length() < 2.6 and _punch_cd <= 0.0:
+						r.rotation.y = atan2(to.x, to.z)
+						out_punch = true
+						_punch_cd = 0.4
+					return
+				if level.grumble_dropping(want):
+					out_move = Vector3.ZERO  # (it's falling out of the sky: wait for it)
+					return
+			"job":  # a GIANT JOB shuts the way: wait for the giant (hop and wave), or stand on the button once it's awake
+				var j: int = level.job_index_at(st.to)
+				if j < 0 or level.job_open(j):
+					_next(route)
+					return
+				if bool(level.job_btn[j]):
+					var bp: Vector3 = (lv.jobs[j] as Dictionary).btn
+					out_move = _toward(Vector3(bp.x - pos.x, 0.0, bp.z - pos.z), 0.15)
+					return
+				out_move = _toward(flat, 0.2)
+				_wait_t -= delta
+				if arrived and _wait_t <= 0.0:
+					out_jump = true  # (a little hop: "help, giant!")
+					_wait_t = 1.8
 				return
 		out_move = _toward(flat, 0.0)
 		if _zap_wait(pos, flat, level):
@@ -249,13 +279,21 @@ func _zap_wait(pos: Vector3, dir: Vector3, level: Node) -> bool:
 	return false
 
 
+## The MEGA GRUMBLE alive on floor p (-1 none).
+func _mega_here(level: Node, p: int) -> int:
+	for i in level.grumbles.size():
+		if level.grumble_alive(i) and level.grumble_big(i) and int((level.grumbles[i].d as Dictionary).p) == p:
+			return i
+	return -1
+
+
 func _punch_grumbles(r: Node3D, level: Node) -> void:
 	for i in level.grumbles.size():
 		if not level.grumble_alive(i):
 			continue
 		var gp: Vector3 = level.grumble_pos(i)
 		var rel := gp - r.position
-		if absf(rel.y) < 0.8 and Vector2(rel.x, rel.z).length() < 1.7 and _punch_cd <= 0.0:
+		if absf(rel.y) < 0.8 and Vector2(rel.x, rel.z).length() < (2.6 if level.grumble_big(i) else 1.7) and _punch_cd <= 0.0:
 			r.rotation.y = atan2(rel.x, rel.z)
 			out_punch = true
 			_punch_cd = 0.45
