@@ -61,6 +61,11 @@ const PRACTICE_MAX_TIME := 45.0
 ## Simple mode: the wave each monster type first appears in (one new type at a time).
 const KIND_UNLOCK := {"grunt": 1, "runner": 2, "dino": 3, "ptero": 4, "spitter": 6, "raptor": 7, "brute": 8,
 	"ankylo": 9, "splitter": 11}
+## How much of the arena is dinosaurs (Simon 2026-11-19 "fewer dinosaurs": David found them in the way, Nathanael
+## still wants them). 1.0 = the old mix. Every dino pick (dino, raptor, ptero, ankylo; never the KING REX boss) stays a
+## dino with this chance, else re-rolls to a non-dino; it also sizes raptor packs, the DINO STAMPEDE herd and how often
+## a dino charges. tests/duo_arena_dino_test.gd pins the resulting numbers.
+const DINO_SHARE := 0.4
 
 ## Waves 5 and 10 have bosses; wave 15 is the finale (OMEGA OVERLORD + Fishwort). Beat it to win, then
 ## the arena keeps going in endless mode.
@@ -1405,34 +1410,66 @@ func _victory() -> void:
 
 
 func _pick_kind() -> String:
-	if SIMPLE_MODE:
-		if debut_kind != "":
-			var k := debut_kind
-			debut_kind = ""
-			return k
+	if SIMPLE_MODE and debut_kind != "":
+		var k := debut_kind
+		debut_kind = ""
+		return k  # the new monster's debut stays, even a dino: it comes alone so everyone sees it
+	return pick_kind_for(wave, SIMPLE_MODE)
+
+
+## Which monster comes next at wave `w` (`share` = DINO_SHARE; tests pass 1.0 for the old mix).
+static func pick_kind_for(w: int, simple: bool, share: float = DINO_SHARE) -> String:
+	var k := _pick_kind_raw(w, simple)
+	while is_small_dino(k) and randf() >= share:
+		k = _pick_kind_raw(w, simple)
+	return k
+
+
+## A dino that turns up in waves (not the KING REX boss).
+static func is_small_dino(k: String) -> bool:
+	return k != "rex" and bool(EnemyScript.KINDS.get(k, {}).get("dino", false))
+
+
+## Raptors hunt in packs: 3 at the old mix, 2 with fewer dinos.
+static func raptor_pack(share: float = DINO_SHARE) -> int:
+	return maxi(2, roundi(3.0 * share))
+
+
+## DINO STAMPEDE herd size from the full herd of `full`.
+static func stampede_size(full: int, share: float = DINO_SHARE) -> int:
+	return clampi(ceili(full * share), mini(2, full), full)
+
+
+## Seconds between a dino's charges (5 at the old mix, longer with fewer dinos so they are less in the way).
+static func dino_charge_gap(share: float = DINO_SHARE) -> float:
+	return 5.0 + 5.0 * (1.0 - clampf(share, 0.0, 1.0))
+
+
+static func _pick_kind_raw(w: int, simple: bool) -> String:
+	if simple:
 		var pool: Array[String] = []
 		for kk in KIND_UNLOCK:
-			if wave >= int(KIND_UNLOCK[kk]):
+			if w >= int(KIND_UNLOCK[kk]):
 				pool.append(kk)
 		if randf() < 0.45:
 			return "grunt"  # most monsters stay the easy ones
 		return pool.pick_random()
 	var r := randf()
-	if wave >= 3 and r < 0.05 + wave * 0.008:
+	if w >= 3 and r < 0.05 + w * 0.008:
 		return "brute"
-	if wave >= 2 and r < 0.36:
+	if w >= 2 and r < 0.36:
 		return "runner"
-	if wave >= 4 and r < 0.5:
+	if w >= 4 and r < 0.5:
 		return "spitter"
-	if wave >= 3 and r < 0.58:
+	if w >= 3 and r < 0.58:
 		return "ptero"
-	if wave >= 6 and r < 0.66:
+	if w >= 6 and r < 0.66:
 		return "splitter"
-	if wave >= 4 and r < 0.71:
+	if w >= 4 and r < 0.71:
 		return "ankylo"
-	if wave >= 2 and r > 0.9:
+	if w >= 2 and r > 0.9:
 		return "dino"
-	if wave >= 2 and r > 0.84:
+	if w >= 2 and r > 0.84:
 		return "raptor"
 	return "grunt"
 
@@ -1457,10 +1494,11 @@ func edge_point() -> Vector3:
 func _spawn_enemy(kind: String) -> void:
 	var at := edge_point()
 	if kind == "raptor":
-		# Raptors hunt in packs of three.
+		# Raptors hunt in packs (raptor_pack(): 2 with fewer dinos).
 		var side := Vector3(at.z, 0.0, -at.x).normalized()
-		for i in 3:
-			spawn_enemy_at("raptor", at + side * (i - 1) * 1.3)
+		var n := raptor_pack()
+		for i in n:
+			spawn_enemy_at("raptor", at + side * (i - (n - 1) * 0.5) * 1.3)
 		return
 	spawn_enemy_at(kind, at, director().take_golden())
 

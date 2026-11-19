@@ -530,7 +530,7 @@ func _dino_behaviour(delta: float, dist: float) -> void:
 			return
 		charge_dir = to.normalized()
 		windup_t = CHARGE_TELL_GENTLE if main.game_mode == "gentle" else CHARGE_TELL
-		charge_cd = (4.0 if kind == "rex" else 5.0) + windup_t
+		charge_cd = (4.0 if kind == "rex" else main.dino_charge_gap()) + windup_t
 		var lane := speed * _charge_speed() * _charge_secs() + radius
 		main.tell_shape("line", global_position, charge_dir, Vector2(lane, radius * 2.0 + 0.8), Looks.CHARGE_WARN, windup_t,
 			{"style": "flash", "stay": _charge_secs() * 0.6})
