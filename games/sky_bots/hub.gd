@@ -1,4 +1,6 @@
 extends Node3D
+
+const UiKit := preload("res://core/ui_kit.gd")
 ## SKY BOTS: GIZMO TOWN, the home island in the clouds. Granny Gizmo waits by the SKY LAMP (it glows brighter with every
 ## spark brought home), and the town GROWS: every spark and every gold gear builds the next thing (PIECES: a cottage, a
 ## windmill, a fountain, a tree house, a rocket, a big wheel, a rainbow arch, a balloon, a train ...), and stays (saved).
@@ -291,7 +293,7 @@ func _islet(c: Vector3, top: Color) -> Node3D:
 	var from := c + Vector3(-signf(c.x) * (ISLET_R - 0.3), 0.0, 0.0)
 	var mid := (to + from) * 0.5 - Vector3(0, 0.25, 0)
 	var d := to - from
-	b.box(Vector3(d.length(), 0.08, 0.7), Transform3D(Basis.looking_at(Vector3(d.z, 0, -d.x).normalized(), Vector3.UP), mid), Color(0.7, 0.52, 0.32))
+	b.box(Vector3(d.length(), 0.08, 0.7), Transform3D(UiKit.aim(Vector3(d.z, 0, -d.x)), mid), Color(0.7, 0.52, 0.32))
 	n.add_child(MeshKit.instance(b.build()))
 	return n
 
