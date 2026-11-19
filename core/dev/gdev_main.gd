@@ -318,6 +318,9 @@ func _poll_commands() -> void:
 				recording = parts.size() < 2 or parts[1] != "off"
 			"quit":
 				get_tree().quit()
+			"run":
+				# run PATH: compile a GDScript file (func run(tree: SceneTree) -> Variant) and call it live.
+				_log(run_file(parts[1] if parts.size() > 1 else "", get_tree()))
 			_:
 				_log("unknown command: " + line)
 
@@ -325,6 +328,23 @@ func _poll_commands() -> void:
 # --- Frame capture -----------------------------------------------------------
 
 ## Reads the screen back asynchronously when possible so the game never stalls.
+## `run PATH` (live debugging: gdev send run /abs/path.gd): compile the file and call its run(tree). Returns the log line.
+## tests/gdev_run_test.gd checks it.
+static func run_file(path: String, tree: SceneTree) -> String:
+	var src := FileAccess.get_file_as_string(path) if path != "" else ""
+	var g := GDScript.new()
+	g.source_code = src
+	if src == "" or g.reload() != OK:
+		return "run: can't compile " + path
+	var o: Object = g.new()
+	if not o.has_method("run"):
+		return "run: %s has no func run(tree)" % path
+	var out := "run result: " + str(o.call("run", tree))
+	if not (o is RefCounted):
+		o.free()
+	return out
+
+
 func _capture(path: String, width: int, is_frame: bool, group: String = "gdev_capture") -> void:
 	# A game can point recording at another viewport (e.g. a VR mirror) by adding it to group "gdev_capture".
 	var vp: Viewport = get_viewport()
