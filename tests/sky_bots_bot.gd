@@ -79,7 +79,7 @@ func _ready() -> void:
 	kit.every(0.25, _watch)
 	var full := 150.0 if host else (140.0 if client else 120.0)
 	var end: float = preload("res://tests/bot_end.gd").end_at(full)
-	short = preload("res://tests/bot_end.gd").short_run(48.0)  # (an island takes the bots 15-35 s)
+	short = preload("res://tests/bot_end.gd").short_run(80.0)  # (an island takes the bots 21-50 s since the giant jobs + Mega Grumble, plus the picks)
 	kit.at(end, "finish", func() -> void:
 		_checks()
 		kit.finish())
@@ -350,7 +350,7 @@ func _checks() -> void:
 	if mode != "client" and kit.seen("phase", "pick") > 0:
 		kit.assert_true(saw_orbs, "%s: the pick orbs showed" % mode)
 	if main.vr_rig != null and mode != "client" and not short:
-		kit.assert_true(vr_lifted > 0 or main.giant.lifts_used > 0 or not _saw_lift(), "the VR giant lifted a lift")
+		kit.assert_true(vr_lifted > 0 or main.giant.lifts_used > 0 or main.giant.jobs_done > 0 or not _saw_lift(), "the VR giant lifted a lift or did a giant job")
 	if OS.get_environment("SKY_ISLAND") == "3" and not short and mode != "client":
 		kit.assert_true(crab_down, "Cranky Crab was beaten")
 	if OS.get_environment("SKY_ISLAND") == "6" and not short and mode != "client":
