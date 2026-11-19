@@ -47,6 +47,9 @@ var songs_done := 0
 var was_results := false
 var fake_vr := false
 var drum_pressed := {}
+var wrong_pad := {}  # GENTLE flat drummer: note index -> song serial, pressed on the wrong drum on purpose
+var wrong_hits := 0
+var wrong_tries := 0
 var lane_keys: Array[Key] = [KEY_A, KEY_S, KEY_D, KEY_F]
 var my_pause := false
 var paused_t := 0.0
@@ -615,8 +618,21 @@ func _tap_drums() -> void:
 		if main.d_judged[i] == 0 and not drum_pressed.has(i) and _wob(i, 99) > -0.9:
 			if st >= tn + _wob(i, 98) * 0.05:
 				drum_pressed[i] = true
-				_key_press(lane_keys[int(g.d_pad[i])])
+				var pad := int(g.d_pad[i])
+				if main.gentle_any_pad() and i % 3 == 1:  # GENTLE flat drummer: the wrong drum on time still hits
+					pad = (pad + 1) % 4
+					wrong_pad[i] = int(main.song_serial)
+				_key_press(lane_keys[pad])
 		i += 1
+	for k in wrong_pad.keys():
+		if int(wrong_pad[k]) != int(main.song_serial):
+			wrong_pad.erase(k)
+		elif int(k) < main.d_judged.size() and int(main.d_judged[int(k)]) != 0:
+			wrong_pad.erase(k)
+			wrong_hits += 1 if int(main.d_judged[int(k)]) == 2 else 0
+			wrong_tries += 1
+			if wrong_tries == 3:
+				_check("BOT CHECK gentle flat drummer: wrong drum on time hits (%d/%d) -> %s" % [wrong_hits, wrong_tries, "PASS" if wrong_hits == wrong_tries else "FAIL"])
 
 
 ## Fake VR: each hand hovers 30 cm over the drum its next ball goes to, and swings down onto it.

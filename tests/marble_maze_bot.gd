@@ -450,12 +450,16 @@ func _deep_notes() -> void:
 		if cur.has("style") and not b3.has("style_" + str(cur.style)):
 			b3["style_" + str(cur.style)] = true
 			print("BOT: board type %s (%s)" % [cur.style, cur.get("name", "")])
+			BotEnd.check(["rooms", "islands", "pinball", "zigzag"].has(str(cur.style)), "board type '%s' is one of rooms / islands / pinball / zigzag" % str(cur.style))
 		for row in main.board.rows:
 			for ch in ["N", "W", "H", "V", "-", "|"]:
 				if str(row).contains(ch) and not b3.has("tile_" + ch):
 					b3["tile_" + ch] = true
 					print("BOT: gadget '%s' in %s" % [ch, cur.get("name", "")])
+					_gadget_check(ch)
 	if main.race != null:
+		if main.race.on and main.race.running:
+			b3["leg_%d" % main.race.leg] = true
 		if main.race.on and main.race.running and not b3.has("race"):
 			b3["race"] = true
 			print("BOT: TODAY'S RACE clock running (leg %d)" % main.race.leg)
@@ -468,6 +472,7 @@ func _deep_notes() -> void:
 		if not main.race.last.is_empty() and not b3.has("race_done"):
 			b3["race_done"] = true
 			print("BOT: race finished: %s" % str(main.race.last))
+			_race_checks(b3)
 	if main.hand_pulling > 0.0:
 		b3["hand"] = true
 	set_meta("deep3", b3)
@@ -794,6 +799,42 @@ func _check_headline(who: String, text: String) -> void:
 	_tip_error(who, tx)
 
 
+## A gadget tile just showed up in the current maze: it is really there and works (third pass).
+func _gadget_check(ch: String) -> void:
+	var board = main.board
+	match ch:
+		"N":
+			BotEnd.check(not board.magnets.is_empty(), "a MAGNET tile 'N' has a magnet on the board")
+			if not board.magnets.is_empty():
+				var m0: Vector2 = board.magnets[0]
+				var pull: Vector2 = board.magnet_pull(m0 + Vector2(board.CELL * 0.8, 0.0))
+				var cap: float = preload("res://games/marble_maze/mazegen.gd").MAGNET_PULL
+				BotEnd.check(pull.x < 0.0 and pull.length() <= cap + 0.0001, "a MAGNET pulls a marble beside it towards its middle, never harder than MAGNET_PULL (%s)" % str(pull))
+		"W":
+			var exits := 0
+			for row in board.rows:
+				exits += str(row).count("w")
+			BotEnd.check(exits > 0, "a WARP HOLE 'W' has its exit 'w' in the same maze")
+
+
+## TODAY'S RACE just finished (host / local): three legs played, a medal, the time, cup and best saved.
+func _race_checks(b3: Dictionary) -> void:
+	var last: Dictionary = main.race.last
+	var legs: int = preload("res://games/marble_maze/story.gd").RACE_LEGS
+	var seen := 0
+	for i in legs:
+		seen += 1 if b3.has("leg_%d" % i) else 0
+	BotEnd.check(seen == legs, "TODAY'S RACE played all %d mazes on its clock (saw %d)" % [legs, seen])
+	BotEnd.check(float(last.get("secs", 0.0)) > 3.0 and ["bronze", "silver", "gold"].has(str(last.get("medal", ""))), "the race has a time and a medal (%s)" % str(last))
+	if main.save == null:
+		return
+	var cups: Array = main.save.data.cups
+	var today: String = preload("res://core/seeded.gd").today()
+	BotEnd.check(not cups.is_empty() and str(cups[-1][0]) == today, "today's cup is on Bobo's shelf (%s)" % str(cups))
+	var best: Array = main.save.data.race_best
+	BotEnd.check(not best.is_empty() and float(best[0]) <= float(last.get("secs", 0.0)) + 0.001, "the best race time is saved (%s)" % str(best))
+
+
 ## TODAY'S RACE clock in a HUD ("0:42"): a number, not words.
 func _is_clock(text: String) -> bool:
 	var re := RegEx.create_from_string("^\\d+:\\d\\d$")
@@ -818,6 +859,13 @@ func _exit_tree() -> void:
 		print("BOT DEEP3: mode=%s seen=%s race=%s cups=%s best=%s" % [main.net.mode, ",".join(PackedStringArray(ks3)),
 			str(main.race.last) if main.race != null else "-", str(main.save.data.cups) if main.save != null else "-",
 			str(main.save.data.race_best) if main.save != null else "-"])
+		# A fresh save starts with TODAY'S RACE: a default local run long enough to finish it must have (cups and times
+		# are checked in _race_checks); a TV machine shows the race clock.
+		var fresh := not (OS.has_environment("BOT_LEVEL") or OS.has_environment("BOT_LESSONS") or OS.has_environment("BOT_STORY_I"))
+		if fresh and main.net.mode == "local" and t >= 115.0:
+			BotEnd.check(b3.has("race_done"), "a fresh save's TODAY'S RACE finished in a %.0f s run (%s)" % [t, str(ks3)])
+		if fresh and t >= 40.0:
+			BotEnd.check(b3.has("clock3d") or b3.has("race_done"), "the race clock showed (%s, %s)" % [main.net.mode, str(ks3)])
 		if OS.has_environment("MM_BOT_EXPECT_RACE") and main.net.mode != "client":
 			BotEnd.check(b3.has("race_done") and b3.has("clock3d"), "TODAY'S RACE finished with its clock showing (%s)" % str(ks3))
 			BotEnd.check(main.save != null and (main.save.data.cups as Array).size() > 0, "a cup on Bobo's trophy shelf")

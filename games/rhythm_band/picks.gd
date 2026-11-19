@@ -103,7 +103,7 @@ func order_for(idx: int) -> Array:
 
 ## Host / local: player idx pressed button k (0 X, 1 A, 2 B): the k-th orb from their left.
 func press(idx: int, k: int) -> void:
-	if not can_take() or k < 0 or k > 2:
+	if k < 0 or k > 2 or not press_ok(idx):
 		return
 	var ord := order_for(idx)
 	if k < ord.size():

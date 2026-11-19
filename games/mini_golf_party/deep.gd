@@ -67,8 +67,11 @@ const GIFTS: Array[Dictionary] = [
 ]
 const BOUNCY_WALL := 0.86  # wall bounce (first pass 0.7)
 const BOUNCY_BUMPER := 1.3
-const MAGNET_R := 0.6  # the cup's pull reaches this far
-const MAGNET := 2.2
+## The MAGNET CUP multiplies the mode's own pull (it used to set one fixed pull, 0.6 m / 2.2, for every mode: HARD with
+## the magnet played easier than GENTLE without it, balance 3: 6 putts on par 14, 2026-11-15; kid-putter probe 2.62
+## putts a hole for every mode vs GENTLE 2.80 / HARD 3.12).
+const MAGNET_R := 1.5  # x the mode's assist_r
+const MAGNET := 1.8  # x the mode's assist
 const MAGNET_CAPTURE := 2.0
 const GIANT := 1.45  # the cup's radius share (never closer than GIANT_ROOM to a wall)
 const GIANT_ROOM := 0.06
@@ -130,6 +133,14 @@ static func ordered() -> Array:
 		out.append("hard warns under %.1f s" % MIN_WARN)
 	if int(g.from) < 1 or int(b.from) < 1 or int(h.from) < 1:
 		out.append("a surprise on the practice putt")
+	# A gift helps every mode but keeps the order: never one fixed value that makes HARD + gift = GENTLE + gift.
+	for gift in GIFTS:
+		var kg := knobs("gentle", String(gift.id), {})
+		var kb := knobs("brave", String(gift.id), {})
+		var kh := knobs("hard", String(gift.id), {})
+		for k in ["assist_r", "assist"]:
+			if not (float(kg[k]) >= float(kb[k]) and float(kb[k]) >= float(kh[k])) or float(kg[k]) <= float(kh[k]):
+				out.append("%s with %s: not gentle > hard (modes flattened)" % [k, String(gift.id)])
 	return out
 
 
@@ -145,8 +156,8 @@ static func knobs(mode: String, gift_id: String, d: Dictionary) -> Dictionary:
 			k.wall_bounce = BOUNCY_WALL
 			k.bumper_bounce = BOUNCY_BUMPER
 		"magnet":
-			k.assist_r = maxf(float(k.assist_r), MAGNET_R)
-			k.assist = maxf(float(k.assist), MAGNET)
+			k.assist_r = float(k.assist_r) * MAGNET_R
+			k.assist = float(k.assist) * MAGNET
 			k.capture = MAGNET_CAPTURE
 		"giant":
 			k.cup_r = giant_r(d)
