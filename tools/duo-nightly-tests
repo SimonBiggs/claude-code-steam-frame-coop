@@ -5,7 +5,7 @@
 # every date, so nothing the sample skips goes unchecked for more than a day (2026-11-12).
 # Runs on a snapshot of live main (~/.cache/duo-nightly/src, its own project name so user:// is separate), headless
 # via godot-test (no controllers, SCHED_IDLE through test-throttle), 2 at a time. Writes
-#   ~/.cache/duo-arena/nightly/latest.json (partial.json for named tests)  {"date", "commit", "secs", "tests": {name: {"pass", "secs", "tail"}}}
+#   ~/.cache/duo-arena/nightly/latest.json (partial.json for named tests), fail-logs/<date>-<commit>-<test>.log (60 days)  {"date", "commit", "secs", "tests": {name: {"pass", "secs", "tail"}}}
 # and posts a one-line summary to the brepl channel. dev.debt() reports failures and a missing/old run.
 #   duo-nightly-tests [TEST ...]     (names without .gd; default every tests/*_test.gd)
 set -u
@@ -52,5 +52,15 @@ for line in open(os.path.join(out, ".results")):
 res = {"date": datetime.datetime.now().isoformat(timespec="minutes"), "commit": commit, "secs": secs, "tests": tests}
 json.dump(res, open(os.path.join(out, sys.argv[4]), "w"), indent=1)
 fails = sorted(t for t, r in tests.items() if not r["pass"])
+# Keep every failing test's whole log (logs/ is overwritten each night): a one-off failure on an unchanged commit
+# (mini_golf_party_deep_test 11-17, vr_view_check_test 11-18) could not be looked at afterwards (2026-11-19).
+import shutil, time
+keep = os.path.join(out, "fail-logs")
+os.makedirs(keep, exist_ok=True)
+for t in fails:
+    shutil.copy(os.path.join(out, "logs", t + ".log"), os.path.join(keep, f"{datetime.date.today()}-{commit}-{t}.log"))
+for f in os.listdir(keep):
+    if time.time() - os.path.getmtime(os.path.join(keep, f)) > 60 * 86400:
+        os.remove(os.path.join(keep, f))
 print(f"nightly full tests @{commit}: {len(tests) - len(fails)}/{len(tests)} pass in {secs // 60} min" + (f"; FAIL: {', '.join(fails)}" if fails else ""))
 PY

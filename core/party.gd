@@ -522,6 +522,8 @@ func _ignored(device: int) -> bool:
 		return false
 	if ignored_devices.has(device):
 		return true
+	if device < VIRTUAL_PAD_BASE and preload("res://core/tv_share.gd").pads_off():
+		return true  # the TV belongs to another game: its pads are not ours (core/tv_share.gd)
 	return Engine.has_meta(BOT_IGNORE_META) and device < VIRTUAL_PAD_BASE
 
 

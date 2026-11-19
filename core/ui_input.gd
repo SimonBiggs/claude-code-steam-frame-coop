@@ -123,12 +123,15 @@ func state() -> Dictionary:
 				for k in km[a]:
 					if Input.is_physical_key_pressed(k):
 						s[a] = true
+	var real: Array[int] = Input.get_connected_joypads()
+	var tv_busy := preload("res://core/tv_share.gd").pads_off()  # the TV's pads belong to another game (core/tv_share.gd)
 	if device >= 0:
-		_pad_state(device, s)
+		if not (tv_busy and real.has(device)):
+			_pad_state(device, s)
 	elif device == PAD_ANY:
-		var pads: Array[int] = Input.get_connected_joypads()
+		var pads: Array[int] = [] if tv_busy else real.duplicate()
 		for d in _seen_pads:
-			if not pads.has(int(d)):
+			if not pads.has(int(d)) and not (tv_busy and real.has(int(d))):
 				pads.append(int(d))
 		for d in pads:
 			_pad_state(d, s)
