@@ -6,7 +6,9 @@ extends Node
 ## Checks: an island is built (the client builds the very same one) and passes levelgen.gd check(), bolts get
 ## collected, a pick happens on the pick orbs (a robot walks under the glowing one; the giant alone reaches in), the
 ## island gets cleared and everyone goes home to Gizmo Town, which grows; the giant lifted a lift; zero script errors.
-## SKY_ISLAND=n starts straight on island n (3 = Crab Cove: Cranky Crab must be beaten; 0 = TODAY'S ISLAND).
+## SKY_ISLAND=n starts straight on island n (3 = Crab Cove: Cranky Crab must be beaten; 6 = Clockwork Keep: King
+## Keywind must be beaten; 4 Snowy Peaks springs, 5 Jungle Jumble fans; 0 = TODAY'S ISLAND). Every island: a bot box
+## gets opened (a little bot rescued), and the bots' brains ground-pound boxes (B in the air).
 ## Local:     godot-test --headless --path . --fixed-fps 60 --quit-after 7200 res://tests/sky_bots_bot.tscn
 ## Networked: DUO_PORT=2xxxx DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=2xxxx DUO_JOIN=127.0.0.1 ... (real time)
 ## multibot: seconds=180
@@ -37,6 +39,10 @@ var gear_seen := false
 var wall_seen := false
 var crab_down := false
 var built_on_island := false
+var boxes_seen := 0
+var sprung := false
+var fanned := false
+var hats_seen := false
 
 
 func _ready() -> void:
@@ -100,6 +106,15 @@ func _watch() -> String:
 		wall_seen = wall_seen or main.level.wall_broken
 	if main.boss != null and not main.boss.alive():
 		crab_down = true
+	if not main.level.lv.is_empty():
+		var nb := 0
+		for i in (main.level.lv.get("boxes", []) as Array).size():
+			nb += 1 if main.level.box_open(i) else 0
+		boxes_seen = maxi(boxes_seen, nb)
+		for rb in main.robots.values():
+			sprung = sprung or main.level.boings > 0
+			fanned = fanned or main.gadget_push(rb, false).y > 0.0
+	hats_seen = hats_seen or (main.net.state_get("hats", []) as Array).size() == 10
 	var hp: Array = main.net.state_get("hubp", [])
 	if hp.size() >= 1:
 		if grew_from < 0:
@@ -177,6 +192,8 @@ func _tv_bot(slot: int, delta: float) -> void:
 		held[slot] = false
 	if punch:
 		kit.slot_press(main.party, slot, "x")
+	if br.out_pound:
+		kit.slot_press(main.party, slot, "b")
 
 
 ## The fake VR giant: stand like a real player, walk along with the robots, lift lifts, poke grumbles, take picks.
@@ -275,6 +292,15 @@ func _checks() -> void:
 		kit.assert_true(vr_lifted > 0 or main.giant.lifts_used > 0 or not _saw_lift(), "the VR giant lifted a lift")
 	if OS.get_environment("SKY_ISLAND") == "3" and not short and mode != "client":
 		kit.assert_true(crab_down, "Cranky Crab was beaten")
+	if OS.get_environment("SKY_ISLAND") == "6" and not short and mode != "client":
+		kit.assert_true(crab_down, "King Keywind was beaten")
+	if OS.get_environment("SKY_ISLAND") == "4" and not short:
+		kit.assert_true(sprung, "%s: a spring threw a robot up" % mode)
+	if OS.get_environment("SKY_ISLAND") == "5" and not short:
+		kit.assert_true(fanned, "%s: a fan's updraft lifted a robot" % mode)
+	if not short and cleared:
+		kit.assert_true(boxes_seen > 0, "%s: a bot box was opened (%d)" % [mode, boxes_seen])
+	kit.assert_true(hats_seen, "%s: every robot's hat is shared" % mode)
 
 
 func _saw_lift() -> bool:

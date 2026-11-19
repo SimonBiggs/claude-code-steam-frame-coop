@@ -1,6 +1,8 @@
 extends CharacterBody3D
 ## SKY BOTS: one little tin robot with a propeller cap. Run (stick), jump (A), hold A while falling to hover on the
-## propeller, punch (X). That's all.
+## propeller, punch (X). In the air X is a DASH punch (once a jump) and B a GROUND POUND (straight down: a thump that
+## pops grumbles and opens bot boxes). Springs throw it up, belts carry it, fans float it. It may wear a costume HAT
+## (hats.gd, unlocked by rescuing little bots).
 ## owned = true: simulated on this machine (a TV / Deck player's pad, or a CPU buddy on the host); inp_* drive it and
 ## movement is instant. owned = false: a puppet drawn from network updates.
 ## Never punishing: a bump (a grumble, a zap, the crab's stomp) is a short comical tumble, and falling off pops you
@@ -9,6 +11,7 @@ extends CharacterBody3D
 const G := preload("res://games/sky_bots/levelgen.gd")
 const MeshKit := preload("res://core/mesh_kit.gd")
 const Contrast := preload("res://core/contrast.gd")
+const Hats := preload("res://games/sky_bots/hats.gd")
 
 const COYOTE := 0.12
 const JUMP_BUFFER := 0.15
@@ -34,7 +37,9 @@ var is_cpu := false
 var inp_move := Vector3.ZERO  ## world direction, length 0..1
 var inp_jump := false  ## A went down (consumed)
 var inp_hold := false  ## A held (hover)
-var inp_punch := false  ## X went down (consumed)
+var inp_punch := false  ## X went down (consumed): a punch; in the air a DASH (once a jump)
+var inp_pound := false  ## B went down (consumed): in the air a GROUND POUND
+var hat := 0  ## the costume hat this robot wears (Hats.LIST index; 0 none)
 
 var checkpoint := 0
 var bump_t := 0.0
@@ -43,9 +48,17 @@ var punch_t := 0.0
 var punch_cd := 0.0
 var hover_t := 0.0
 var hovering := false
+var dashed := false  ## used this jump's dash
+var pounding := false
+var dash_t := 0.0
 var jumps := 0
 var punches := 0
-var events: Array = []  ## ["jump"] ["land"] ["fell"] ["bump"] ["punch", point] ["hover"] (main plays sounds / hits)
+var dashes := 0
+var pounds := 0
+var events: Array = []  ## ["jump"] ["land"] ["fell"] ["bump"] ["punch", point] ["hover"] ["spring"] ["dash"] ["pound", point]
+## (main plays sounds / hits)
+var hat_node: Node3D
+var _hat_shown := -1
 
 var _air_t := 0.0
 var _jump_buf := 0.0
@@ -110,9 +123,29 @@ func _ready() -> void:
 		foot.position = Vector3(s * 0.14, 0.0, 0.0)
 		add_child(foot)
 		feet.append(foot)
+	hat_node = Node3D.new()
+	hat_node.position = Vector3(0.0, 1.05, 0.0)
+	body.add_child(hat_node)
+	show_hat(hat)
 	_target = position
 	if mat == null:
 		pass
+
+
+## Put on hat h (Hats.LIST index; 0 = none: the propeller cap shows).
+func show_hat(h: int) -> void:
+	hat = h
+	if hat_node == null or h == _hat_shown:
+		return
+	_hat_shown = h
+	for c in hat_node.get_children():
+		c.queue_free()
+	if h > 0:
+		var mi := MeshKit.instance(Hats.mesh(h), false)
+		Contrast.outline(mi, OUTLINE)
+		hat_node.add_child(mi)
+	if prop != null:
+		prop.position.y = 1.16 + Hats.lift(h)
 
 
 ## The robot's body and head in one mesh (front = +Z): a rounded tin body in the player's colour, a silver head with
@@ -152,8 +185,23 @@ func place(p: Vector3) -> void:
 	_knock = Vector3.ZERO
 	bump_t = 0.0
 	hover_t = 0.0
+	pounding = false
+	dash_t = 0.0
 	rotation.y = PI * 0.5
 	_target_yaw = rotation.y
+
+
+## A spring pad throws the robot up (owned robots; main calls it when its feet are on one).
+func spring() -> void:
+	if not owned or velocity.y > G.JUMP_V:
+		return
+	velocity.y = G.SPRING_V
+	pounding = false
+	dashed = false
+	hover_t = 0.0
+	_air_t = COYOTE
+	_squash = 1.0
+	events.append(["spring"])
 
 
 ## A comical bump: hop up and tumble away along `dir` (owned robots only).
@@ -164,6 +212,8 @@ func bump(dir: Vector3, strength: float = 1.0) -> void:
 	dir = dir.normalized() if dir.length() > 0.01 else Vector3.LEFT
 	_knock = dir * 5.0 * strength
 	velocity.y = 5.5 * strength
+	pounding = false
+	dash_t = 0.0
 	bump_t = BUMP_TIME
 	safe_t = SAFE_AFTER + BUMP_TIME
 	events.append(["bump"])
@@ -191,21 +241,43 @@ func step(delta: float) -> void:
 	_jump_buf -= delta
 	var on_floor := is_on_floor()
 	_air_t = 0.0 if on_floor else _air_t + delta
+	dash_t = maxf(0.0, dash_t - delta)
 	if on_floor:
 		hover_t = 0.0
+		dashed = false
+	# Gadgets under / around the robot (main asks the island): a belt's push (x, z), a fan's updraft (y).
+	var push: Vector3 = main.gadget_push(self, on_floor) if main != null and main.has_method("gadget_push") else Vector3.ZERO
 	var want := mv.limit_length(1.0) * G.RUN
 	var h := Vector3(velocity.x, 0.0, velocity.z)
 	if bump_t > 0.0:
 		h = h.move_toward(_knock, 30.0 * delta)
+	elif pounding:
+		h = Vector3.ZERO
+	elif dash_t > 0.0:
+		pass  # (a dash keeps its burst)
 	else:
 		h = h.move_toward(want, (G.ACCEL if on_floor else G.AIR_ACCEL) * delta)
-	if punch_t > PUNCH_TIME - 0.08:
+	if punch_t > PUNCH_TIME - 0.08 and dash_t <= 0.0:
 		h += forward() * 26.0 * delta  # a little lunge with the punch
+	# B in the air: GROUND POUND (straight down, a thump on landing).
+	if inp_pound and not on_floor and not pounding and bump_t <= 0.0 and _air_t > 0.08:
+		pounding = true
+		pounds += 1
+		h = Vector3.ZERO
+		dash_t = 0.0
+		events.append(["pound_start"])
+	inp_pound = false
 	velocity.x = h.x
 	velocity.z = h.z
 	velocity.y -= G.GRAVITY * delta
+	if pounding:
+		velocity.y = -G.POUND_V
+	elif push.y > 0.0 and bump_t <= 0.0:  # a fan's updraft lifts you
+		velocity.y = move_toward(velocity.y, push.y, 30.0 * delta) if velocity.y < push.y else velocity.y
+		hover_t = 0.0
+		dashed = false
 	hovering = false
-	if not on_floor and inp_hold and velocity.y < 0.0 and hover_t < G.HOVER_TIME and bump_t <= 0.0:
+	if not on_floor and inp_hold and velocity.y < 0.0 and hover_t < G.HOVER_TIME and bump_t <= 0.0 and not pounding:
 		if hover_t == 0.0:
 			events.append(["hover"])
 		velocity.y = maxf(velocity.y, -G.HOVER_FALL)
@@ -218,17 +290,37 @@ func step(delta: float) -> void:
 		jumps += 1
 		_squash = 0.6
 		events.append(["jump"])
-	if inp_punch and punch_cd <= 0.0 and bump_t <= 0.0:
+	if inp_punch and punch_cd <= 0.0 and bump_t <= 0.0 and not pounding:
 		punch_t = PUNCH_TIME
 		punch_cd = PUNCH_COOL
 		punches += 1
+		if not on_floor and not dashed and _air_t > 0.05:  # X in the air: a DASH punch (once a jump)
+			dashed = true
+			dashes += 1
+			dash_t = 0.24
+			var f := mv.normalized() if mv.length() > 0.2 else forward()
+			rotation.y = atan2(f.x, f.z)
+			velocity.x = f.x * G.DASH_V
+			velocity.z = f.z * G.DASH_V
+			velocity.y = maxf(velocity.y, 2.5)
+			events.append(["dash"])
 		events.append(["punch", position + Vector3.UP * 0.5 + forward() * PUNCH_REACH * 0.6])
 	inp_punch = false
 	velocity.y = maxf(velocity.y, -30.0)
+	var belt := Vector3(push.x, 0.0, push.z)
+	velocity += belt  # (a belt carries you only while you stand on it)
 	move_and_slide()
+	velocity -= belt
 	if is_on_floor() and not _was_floor:
 		_squash = 0.5
 		events.append(["land"])
+		if pounding:
+			pounding = false
+			_squash = 1.0
+			events.append(["pound", position])
+	if is_on_floor() and pounding:
+		pounding = false
+		events.append(["pound", position])
 	_was_floor = is_on_floor()
 	if Vector2(h.x, h.z).length() > 0.5 and bump_t <= 0.0:
 		rotation.y = lerp_angle(rotation.y, atan2(h.x, h.z), 1.0 - exp(-14.0 * delta))
@@ -239,9 +331,9 @@ func step(delta: float) -> void:
 		events.append(["fell"])
 
 
-## What other machines need: bit 0 bumped, bit 1 hovering, bit 2 punching.
+## What other machines need: bit 0 bumped, bit 1 hovering, bit 2 punching, bit 3 pounding.
 func state_bits() -> int:
-	return (1 if bump_t > 0.0 else 0) | (2 if hovering else 0) | (4 if punch_t > 0.0 else 0)
+	return (1 if bump_t > 0.0 else 0) | (2 if hovering else 0) | (4 if punch_t > 0.0 else 0) | (8 if pounding else 0)
 
 
 ## Puppets: glide towards the last network position.
@@ -251,6 +343,7 @@ func set_remote(p: Vector3, yaw: float, bits: int) -> void:
 	_remote_state = bits
 	bump_t = BUMP_TIME if bits & 1 else 0.0
 	hovering = bits & 2 != 0
+	pounding = bits & 8 != 0
 	if bits & 4 and punch_t <= 0.0:
 		punch_t = PUNCH_TIME
 	if position.distance_to(p) > 4.0:
@@ -288,5 +381,9 @@ func animate(delta: float) -> void:
 	if punch_t > 0.0:  # the right fist shoots forward
 		var k := sin(punch_t / PUNCH_TIME * PI)
 		arms[1].rotation = Vector3(-1.6 * k - 0.2, 0.0, 0.1)
+	if pounding:  # curled up like a cannonball, arms up
+		arms[0].rotation = Vector3(0.0, 0.0, -2.6)
+		arms[1].rotation = Vector3(0.0, 0.0, 2.6)
+		body.scale = Vector3(1.12, 0.85, 1.12)
 	feet[0].position.z = sin(_anim_t) * 0.16 * run
 	feet[1].position.z = -feet[0].position.z

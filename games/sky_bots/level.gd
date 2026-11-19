@@ -18,7 +18,17 @@ const THEME := {
 	"meadow": {"top": Color(0.42, 0.76, 0.34), "side": Color(0.58, 0.4, 0.25), "rock": Color(0.52, 0.44, 0.4)},
 	"gears": {"top": Color(0.44, 0.52, 0.66), "side": Color(0.34, 0.37, 0.45), "rock": Color(0.3, 0.32, 0.4)},
 	"cove": {"top": Color(0.93, 0.82, 0.58), "side": Color(0.64, 0.53, 0.42), "rock": Color(0.5, 0.45, 0.43)},
+	"snow": {"top": Color(0.68, 0.83, 0.97), "side": Color(0.42, 0.5, 0.7), "rock": Color(0.4, 0.44, 0.56)},  ## (icy blue: white snow vanished on the clouds)
+	"jungle": {"top": Color(0.3, 0.58, 0.42), "side": Color(0.45, 0.32, 0.22), "rock": Color(0.36, 0.4, 0.32)},
+	"clock": {"top": Color(0.62, 0.45, 0.56), "side": Color(0.72, 0.56, 0.3), "rock": Color(0.42, 0.36, 0.4)},
 }
+const SPRING_COLOR := Color(1.0, 0.3, 0.55)  ## spring pads: hot pink coils with a white top
+const FAN_COLOR := Color(0.4, 0.85, 1.0)  ## wind fans: a sky-blue fan down in the gap, puffs rising
+const BELT_TOP := Color(0.22, 0.22, 0.27)  ## belts: dark rubber with bright arrows that run the belt's way
+const BELT_ARROW := Color(1.0, 0.78, 0.2)
+const BOX_COLOR := Color(0.95, 0.55, 0.2)  ## bot boxes: orange crates with a window (a little bot waves inside)
+const TINY_COLORS: Array[Color] = [Color(0.5, 0.85, 1.0), Color(1.0, 0.6, 0.8), Color(0.6, 1.0, 0.55), Color(1.0, 0.85, 0.35),
+	Color(0.8, 0.65, 1.0), Color(1.0, 0.55, 0.4)]
 const MEADOW_TOPS := {"spring": Color(0.42, 0.76, 0.34), "summer": Color(0.36, 0.66, 0.28),
 	"autumn": Color(0.62, 0.64, 0.28), "winter": Color(0.86, 0.91, 0.98)}
 const MOVER_TOP := Color(0.98, 0.62, 0.25)  ## movers: warm orange, so kids see they're different
@@ -56,6 +66,13 @@ var gear: Node3D
 var gear_got := false
 var goal: Node3D
 var goal_on := true
+var springs: Array[Node3D] = []
+var spring_t: Array[float] = []  ## seconds since each spring last boinged (its squash)
+var fans: Array[Node3D] = []
+var belt_arrows: Array = []  ## [{node, dir, x0, len}] arrows that run along each belt
+var boxes: Array[Node3D] = []
+var box_bits := 0
+var boings := 0  ## springs boinged on this island, seen here (every machine: its own robots, the others' events)  ## the bot boxes opened (host -> state "boxes")
 var _static: StaticBody3D
 
 
@@ -78,6 +95,12 @@ func build(level: Dictionary, the_theme: String, the_season: String, is_host: bo
 	wall_broken = false
 	gear_got = false
 	cp_lit = 0
+	springs.clear()
+	spring_t.clear()
+	fans.clear()
+	belt_arrows.clear()
+	boxes.clear()
+	box_bits = 0
 	rings = WarnRings.new()
 	add_child(rings)
 	if lv.is_empty():
@@ -101,6 +124,8 @@ func build(level: Dictionary, the_theme: String, the_season: String, is_host: bo
 	_flags()
 	_grumbles()
 	_zaps()
+	_gadgets()
+	_boxes()
 	_goal()
 	set_bolts(PackedInt32Array())
 
@@ -122,6 +147,8 @@ func _floor_mesh(b: MeshKit.Builder, p: Dictionary, at: Vector3) -> void:
 		top = MOVER_TOP
 	elif kind == "lift":
 		top = LIFT_TOP
+	elif kind == "belt":
+		top = BELT_TOP
 	if kind == "arena":
 		var r := s.x * 0.5
 		b.cylinder(r, r, 0.25, MeshKit.at(c + Vector3(0, -0.125, 0)), top, 28)
@@ -141,6 +168,11 @@ func _floor_mesh(b: MeshKit.Builder, p: Dictionary, at: Vector3) -> void:
 		b.box(Vector3(s.x, 0.04, 0.12), MeshKit.at(c + Vector3(0, 0.01, s.y * 0.5 - 0.1)), HANDLE)
 	if kind == "solid" or kind == "side":
 		_dressing(b, c, s)
+	elif kind == "belt":  # rollers at both ends, bright side rails
+		for e in [-1.0, 1.0]:
+			b.cylinder(0.16, 0.16, s.y, MeshKit.at(c + Vector3(e * s.x * 0.5, -0.12, 0), Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.6, 0.62, 0.7), 10)
+		for sz in [-1.0, 1.0]:
+			b.box(Vector3(s.x, 0.08, 0.1), MeshKit.at(c + Vector3(0, 0.03, sz * (s.y * 0.5 - 0.05))), BELT_ARROW.darkened(0.2))
 
 
 ## A few little things on a still floor's back edge and sides (no collision): flowers (snow lumps in winter) on the
@@ -165,6 +197,23 @@ func _dressing(b: MeshKit.Builder, c: Vector3, s: Vector2) -> void:
 					b.dome(0.14, MeshKit.at(Vector3(x, c.y, z)), Color(1.0, 0.75, 0.75), 8)
 				else:
 					b.star(5, 0.14, 0.06, 0.04, MeshKit.at(Vector3(x, c.y + 0.02, z), Vector3.ONE, Vector3(-PI * 0.5, 0, 0)), Color(1.0, 0.55, 0.35))
+			"snow":  # little snowy pine trees and icicles under the edge
+				if k % 2 == 0:
+					b.cylinder(0.05, 0.06, 0.25, MeshKit.at(Vector3(x, c.y + 0.12, z)), Color(0.45, 0.32, 0.22), 5)
+					b.cone(0.28, 0.6, MeshKit.at(Vector3(x, c.y + 0.5, z)), Color(0.25, 0.5, 0.42), 7)
+					b.cone(0.16, 0.3, MeshKit.at(Vector3(x, c.y + 0.78, z)), Color(0.95, 0.97, 1.0), 7)
+				b.cone(0.07, 0.35, MeshKit.at(Vector3(x + 0.4, c.y - 0.4, c.z + s.y * 0.5 - 0.05), Vector3.ONE, Vector3(PI, 0, 0)), Color(0.75, 0.9, 1.0), 5)
+			"jungle":  # big leaves and a vine hanging off the front edge
+				for a in [-0.6, 0.0, 0.6]:
+					b.ellipsoid(Vector3(0.1, 0.03, 0.32), MeshKit.at(Vector3(x, c.y + 0.25, z), Vector3.ONE, Vector3(0.7, a, 0)), Color(0.25, 0.65, 0.3).lightened(absf(a) * 0.15), 6)
+				b.cylinder(0.025, 0.025, 0.9, MeshKit.at(Vector3(x + 0.6, c.y - 0.45, c.z + s.y * 0.5 + 0.02)), Color(0.3, 0.55, 0.25), 4)
+				b.sphere(0.08, MeshKit.at(Vector3(x + 0.6, c.y - 0.9, c.z + s.y * 0.5 + 0.02)), Color(1.0, 0.5, 0.3 + hue * 0.3), 6)
+			"clock":  # brass cogs turning on the front edge and little clock faces at the back
+				b.cylinder(0.32, 0.32, 0.08, MeshKit.at(Vector3(x, c.y - 0.45, c.z + s.y * 0.5 + 0.04), Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.85, 0.68, 0.3), 10)
+				if k % 2 == 0:
+					b.cylinder(0.22, 0.22, 0.06, MeshKit.at(Vector3(x, c.y + 0.3, z), Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.97, 0.95, 0.88), 14)
+					b.box(Vector3(0.03, 0.15, 0.02), MeshKit.at(Vector3(x, c.y + 0.36, z + 0.04)), Color(0.2, 0.2, 0.25))
+					b.box(Vector3(0.1, 0.03, 0.02), MeshKit.at(Vector3(x + 0.04, c.y + 0.3, z + 0.04)), Color(0.2, 0.2, 0.25))
 
 
 func _box_shape(body: Node3D, c: Vector3, s: Vector2, round_one: bool) -> void:
@@ -198,6 +247,165 @@ func _make_mover(i: int, p: Dictionary) -> void:
 	body.position = G.plat_at(p, 0.0)
 	movers[i] = body
 	mover_pos[i] = body.position
+
+
+## Springs (a pink coil with a white top that squashes when it throws), wind fans (a fan in a ring down in the gap,
+## its blades spinning, puffs rising to the top of the updraft) and the arrows that run along each belt.
+func _gadgets() -> void:
+	for sp in lv.get("springs", []):
+		var n := Node3D.new()
+		n.position = sp.pos
+		add_child(n)
+		var top := Node3D.new()
+		top.name = "Top"
+		n.add_child(top)
+		var b := MeshKit.Builder.new()
+		for k in 4:
+			b.torus(G.SPRING_R * 0.7, 0.06, MeshKit.at(Vector3(0, 0.08 + k * 0.1, 0)), SPRING_COLOR, 16, 5)
+		b.cylinder(G.SPRING_R, G.SPRING_R, 0.1, MeshKit.at(Vector3(0, 0.47, 0)), Color(0.97, 0.97, 1.0), 16)
+		b.star(5, 0.22, 0.1, 0.03, MeshKit.at(Vector3(0, 0.53, 0), Vector3.ONE, Vector3(-PI * 0.5, 0, 0)), SPRING_COLOR, true)
+		var mi := MeshKit.instance(b.build(), false)
+		Contrast.outline(mi, Contrast.OUTLINE)
+		top.add_child(mi)
+		springs.append(n)
+		spring_t.append(9.0)
+	for f in lv.get("fans", []):
+		var n := Node3D.new()
+		var fy := float(f.y) + 0.6
+		n.position = Vector3((float(f.x0) + float(f.x1)) * 0.5, fy, 0.0)
+		add_child(n)
+		var b := MeshKit.Builder.new()
+		var r := minf(float(f.w) * 0.5, 1.3)
+		b.torus(r, 0.12, MeshKit.at(Vector3.ZERO), Color(0.85, 0.87, 0.92), 20, 6)
+		b.cylinder(0.12, 0.2, 1.6, MeshKit.at(Vector3(0, -0.8, 0)), Color(0.6, 0.62, 0.7), 8)
+		n.add_child(MeshKit.instance(b.build(), false))
+		var blades := Node3D.new()
+		blades.name = "Blades"
+		n.add_child(blades)
+		var bb := MeshKit.Builder.new()
+		for k in 4:
+			bb.box(Vector3(r * 0.9, 0.04, 0.3), MeshKit.at(Vector3(cos(TAU * k / 4.0) * r * 0.45, 0, sin(TAU * k / 4.0) * r * 0.45), Vector3.ONE, Vector3(0.3, -TAU * k / 4.0, 0)), FAN_COLOR)
+		bb.sphere(0.15, MeshKit.at(Vector3.ZERO), Color(1.0, 0.85, 0.3), 8)
+		blades.add_child(MeshKit.instance(bb.build(), false))
+		# Puffs rising through the whole updraft (so kids see where the wind is).
+		var cp := CPUParticles3D.new()
+		cp.amount = 24
+		cp.lifetime = 1.6
+		cp.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+		cp.emission_box_extents = Vector3((float(f.x1) - float(f.x0)) * 0.5, 0.1, float(f.w) * 0.4)
+		cp.direction = Vector3.UP
+		cp.spread = 5.0
+		cp.gravity = Vector3.ZERO
+		cp.initial_velocity_min = (float(f.top) - fy) / 1.6
+		cp.initial_velocity_max = cp.initial_velocity_min * 1.1
+		cp.scale_amount_min = 0.6
+		cp.scale_amount_max = 1.2
+		var sm := SphereMesh.new()
+		sm.radius = 0.12
+		sm.height = 0.24
+		sm.radial_segments = 6
+		sm.rings = 3
+		sm.material = MeshKit.material(Color(1.0, 1.0, 1.0, 0.7))
+		cp.mesh = sm
+		n.add_child(cp)
+		fans.append(n)
+	for bt in lv.get("belts", []):
+		var p: Dictionary = (lv.plats as Array)[int(bt.p)]
+		var c: Vector3 = p.c
+		var s: Vector2 = p.s
+		var holder := Node3D.new()
+		add_child(holder)
+		var ab := MeshKit.Builder.new()
+		var d := float(bt.dir)
+		ab.polygon(PackedVector2Array([Vector2(0.3 * d, 0.0), Vector2(-0.1 * d, 0.35), Vector2(-0.1 * d, 0.15), Vector2(-0.3 * d, 0.15),
+			Vector2(-0.3 * d, -0.15), Vector2(-0.1 * d, -0.15), Vector2(-0.1 * d, -0.35)]), 0.02, MeshKit.at(Vector3.ZERO, Vector3.ONE, Vector3(-PI * 0.5, 0, 0)), BELT_ARROW, true)
+		var am := ab.build()
+		var count := int(s.x / 1.4)
+		var nodes: Array = []
+		for k in count:
+			var mi := MeshKit.instance(am, false)
+			holder.add_child(mi)
+			nodes.append(mi)
+		belt_arrows.append({"nodes": nodes, "dir": d, "x0": c.x - s.x * 0.5 + 0.35, "len": s.x - 0.7, "y": c.y + 0.02, "z": c.z})
+
+
+## A bot box: an orange crate with a round window, a little bot inside waving (and a sparkle on top).
+func _boxes() -> void:
+	for i in (lv.get("boxes", []) as Array).size():
+		var bx: Dictionary = lv.boxes[i]
+		var n := Node3D.new()
+		n.position = bx.pos
+		add_child(n)
+		var b := MeshKit.Builder.new()
+		b.rounded_box(Vector3(0.8, 0.8, 0.8), 0.08, MeshKit.at(Vector3(0, 0.4, 0)), BOX_COLOR)
+		for e in [-1.0, 1.0]:
+			b.box(Vector3(0.84, 0.08, 0.84), MeshKit.at(Vector3(0, 0.4 + e * 0.3, 0)), BOX_COLOR.darkened(0.3))
+		for k in 4:  # a round window on every side (a little bot peeks out)
+			var a := TAU * k / 4.0
+			b.cylinder(0.24, 0.24, 0.04, MeshKit.at(Vector3(sin(a) * 0.41, 0.42, cos(a) * 0.41), Vector3.ONE, Vector3(PI * 0.5, a, 0)), Color(0.6, 0.85, 1.0), 14)
+		b.sphere(0.1, MeshKit.at(Vector3(0, 0.95, 0)), Color(1.0, 0.9, 0.35), 8, true)
+		var mi := MeshKit.instance(b.build(), false)
+		Contrast.outline(mi, Contrast.OUTLINE)
+		mi.name = "Crate"
+		n.add_child(mi)
+		var tiny := MeshKit.instance(tiny_mesh(TINY_COLORS[i % TINY_COLORS.size()]), false)
+		tiny.name = "Tiny"
+		tiny.position = Vector3(0, 0.25, 0.1)
+		n.add_child(tiny)
+		boxes.append(n)
+
+
+## A LITTLE BOT: a round head on a tiny body, one antenna, big glowing eyes (in Gizmo Town too: hub.gd).
+static func tiny_mesh(col: Color) -> ArrayMesh:
+	var b := MeshKit.Builder.new()
+	b.rounded_box(Vector3(0.26, 0.22, 0.22), 0.07, MeshKit.at(Vector3(0, 0.12, 0)), col)
+	b.sphere(0.17, MeshKit.at(Vector3(0, 0.36, 0)), Color(0.88, 0.9, 0.95), 10)
+	b.rounded_box(Vector3(0.22, 0.12, 0.04), 0.03, MeshKit.at(Vector3(0, 0.37, 0.15)), Color(0.1, 0.14, 0.22))
+	b.sphere(0.035, MeshKit.at(Vector3(-0.05, 0.38, 0.17)), Color(0.45, 1.0, 0.95), 6, true)
+	b.sphere(0.035, MeshKit.at(Vector3(0.05, 0.38, 0.17)), Color(0.45, 1.0, 0.95), 6, true)
+	b.cylinder(0.012, 0.012, 0.1, MeshKit.at(Vector3(0, 0.56, 0)), Color(0.6, 0.62, 0.66), 4)
+	b.sphere(0.04, MeshKit.at(Vector3(0, 0.62, 0)), col, 6, true)
+	return b.build()
+
+
+func box_open(i: int) -> bool:
+	return (box_bits >> i) & 1 == 1
+
+
+## Every machine: which bot boxes are open (bits); a newly opened one bursts: the crate pops away, the little bot hops
+## out and waves.
+func set_boxes(bits: int) -> void:
+	for i in boxes.size():
+		var was := box_open(i)
+		var now := (bits >> i) & 1 == 1
+		var crate: Node3D = boxes[i].get_node("Crate")
+		var tiny: Node3D = boxes[i].get_node("Tiny")
+		crate.visible = not now
+		if now and not was:
+			tiny.position = Vector3(0, 0.0, 0.3)
+			var tw := create_tween()
+			tw.tween_property(tiny, "position", Vector3(0, 1.0, 0.5), 0.3).set_ease(Tween.EASE_OUT)
+			tw.tween_property(tiny, "position", Vector3(0, 0.0, 0.7), 0.3).set_ease(Tween.EASE_IN)
+		elif now:
+			tiny.position = Vector3(0, 0.0, 0.7)
+	box_bits = bits
+
+
+## The bot box near point p (closed ones; -1 none).
+func box_near(p: Vector3, r: float) -> int:
+	var bl: Array = lv.get("boxes", [])
+	for i in bl.size():
+		var bp: Vector3 = (bl[i] as Dictionary).pos
+		if not box_open(i) and Vector2(p.x - bp.x, p.z - bp.z).length() < r and p.y > bp.y - 0.6 and p.y < bp.y + 1.6:
+			return i
+	return -1
+
+
+## Every machine: spring i boinged (its top squashes and springs back).
+func spring_boing(i: int) -> void:
+	boings += 1
+	if i >= 0 and i < spring_t.size():
+		spring_t[i] = 0.0
 
 
 ## The lift's handle (world), for the giant's hand.
@@ -552,6 +760,25 @@ func animate(delta: float) -> void:
 		var sp: Node3D = goal.get_node("Spark")
 		sp.rotation.y = now * 1.6
 		sp.position.y = 1.3 + sin(now * 2.0) * 0.12
+	for i in springs.size():
+		spring_t[i] += delta
+		var k := clampf(spring_t[i] / 0.35, 0.0, 1.0)
+		var top: Node3D = springs[i].get_node("Top")
+		top.scale = Vector3(1.0, 0.55 + 0.45 * (1.0 - cos(k * PI * 2.5) * (1.0 - k)), 1.0) if k < 1.0 else Vector3.ONE
+	for f in fans:
+		(f.get_node("Blades") as Node3D).rotation.y = now * 9.0
+	for ba in belt_arrows:
+		var nodes: Array = ba.nodes
+		var length := float(ba.len)
+		for j in nodes.size():
+			var off := fposmod(float(j) * length / nodes.size() + t * G.BELT * float(ba.dir), length)
+			(nodes[j] as Node3D).position = Vector3(float(ba.x0) + off, float(ba.y), float(ba.z))
+	for i in boxes.size():
+		var crate: Node3D = boxes[i].get_node("Crate")
+		crate.rotation.y = sin(now * 1.6 + i) * 0.35  # (it rattles: someone's inside)
+		crate.position.y = maxf(0.0, sin(now * 5.0 + i * 2.0)) * 0.06
+		var tiny: Node3D = boxes[i].get_node("Tiny")
+		tiny.rotation.z = sin(now * (8.0 if box_open(i) else 3.0) + i) * (0.3 if box_open(i) else 0.1)
 	var zaps: Array = lv.zaps
 	for i in zaps.size():
 		var st := G.zap_state(zaps[i], t)

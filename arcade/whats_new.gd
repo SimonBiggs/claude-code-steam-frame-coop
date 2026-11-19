@@ -33,6 +33,7 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "skybots-isles2", "date": "2026-11-19", "game": "sky_bots", "pic": "tinybot", "line": "New islands! Rescue bots!", "try": {"SKY_ISLAND": "4"}},
 	{"id": "skybots-new", "date": "2026-11-14", "game": "sky_bots", "pic": "skybot", "line": "New game! Robot islands!", "try": {"SKY_ISLAND": "1"}},
 	{"id": "tower4-gifts", "date": "2026-11-14", "game": "tower_stack", "pic": "wrenbasket", "line": "Wren's gifts! Pick one!", "try": {"TS_TRY": "gifts"}},
 	{"id": "tower3-rolo", "date": "2026-11-13", "game": "tower_stack", "pic": "hedgehog", "line": "Rolo rolls balls! Jump!", "try": {"TS_TRY": "rollers"}},
