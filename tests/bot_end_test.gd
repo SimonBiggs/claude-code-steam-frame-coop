@@ -70,9 +70,17 @@ func _initialize() -> void:
 		if not f.ends_with("_test.gd"):
 			continue
 		var code := ""
-		for line in FileAccess.get_file_as_string("res://tests/" + f).split("\n"):
-			if not line.strip_edges().begins_with("#"):
-				code += line + "\n"
+		var path := "res://tests/" + f
+		for _hop in 3:  # a test that extends a shared kit (tests/vr_frame_kit.gd) prints the kit's verdict
+			var base := ""
+			for line in FileAccess.get_file_as_string(path).split("\n"):
+				if not line.strip_edges().begins_with("#"):
+					code += line + "\n"
+				if line.begins_with("extends \"res://tests/"):
+					base = line.get_slice("\"", 1)
+			if base == "":
+				break
+			path = base
 		if not ("PASS" in code or "finish(" in code):
 			flat.append(f + " (prints no PASS verdict: print \"<NAME>: PASS\" when it passed, FAIL when not)")
 		# A SceneTree test that works in _init() runs before the RenderingServer exists: any mesh or material it makes
