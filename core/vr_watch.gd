@@ -25,6 +25,11 @@ extends Node
 ##  - While VR is live the main window's V-Sync is off (Godot's OpenXR docs: the runtime paces frames). With V-Sync
 ##    on, the TV's 60 Hz capped the arcade at 60 fps while the Frame asked for 90 Hz (2026-11-19 "it's going like 50").
 ##    Engine.max_fps caps it at VR_MAX_FPS so a paused session can't spin. Restored when VR ends.
+##  - A CLEAN exit nobody asked for also comes back (2026-11-19 19:44: the headset went to standby, SteamVR went down
+##    and Godot quit by itself, exit 0, no crash signal: the armed "if I crash" restart didn't fire and the arcade was
+##    gone). Deliberate quits (the arcade's / pause menu's Quit, gdev commands) go through VrWatch.quit_on_purpose();
+##    any other end of the tree while VR is live or we wait for it writes a "now" restart (unasked_quit_spec), and
+##    tools/gdev stop marks its own stop so it never restarts.
 ## The launcher decides nothing (Simon's rule): every decision is here, hot-reloadable.
 ## Tests (fake VR, no SteamVR): VR_WATCH_FAKE=1 with BOT_VR=1 counts as a live session (unless --xr-mode off was
 ## passed); VR_WATCH_SERVER names the runtime process to watch (default vrserver), VR_WATCH_LINK_LOG the headset
@@ -42,6 +47,7 @@ const LINK_LOG := "~/.local/share/Steam/logs/driver_vrlink.txt"
 const LINK_UP := "ReceivedHMDStaticProps"
 const LINK_DOWN := ["startup with PID", "Connection inactive", "SVLServer::Shutdown"]
 const VR_MAX_FPS := 150  # above the Frame's 90 / 120 Hz; only stops a paused session spinning
+const QUIT_META := "duo_quit_on_purpose"
 
 var started_at := 0.0  # unix time this process started watching
 var lost_at := 0.0  # > 0: this is the flat run after VR stopped (DUO_VR_LOST) or a rejoin that found no headset
@@ -63,6 +69,7 @@ var _rejoin_t := -1.0
 var launch_flat := false  # VR was wanted at launch but OpenXR didn't start (SteamVR not running): waiting quietly
 var _vsync_saved := -1  # the window's V-Sync mode before VR turned it off (-1: not changed)
 var _max_fps_saved := -1
+var _handed_off := false  # replaced by a newer VrWatch (hot reload): leaving the tree then is not a quit
 
 
 func _ready() -> void:
@@ -95,6 +102,7 @@ func xr_failed_at_launch() -> bool:
 
 
 func _handoff() -> Dictionary:
+	_handed_off = true
 	return {"started_at": started_at, "lost_at": lost_at, "lost_reason": lost_reason, "servers": servers,
 		"armed_for": armed_for, "launch_flat": launch_flat, "vsync_saved": _vsync_saved, "max_fps_saved": _max_fps_saved}
 
@@ -311,7 +319,7 @@ func _restart_into_vr() -> void:
 	if _game_id() != "":
 		env["DUO_RESUME_GAME"] = _game_id()
 	_write_restart({"args": [], "env": env, "unset": ["DUO_VR_LOST"], "now": true, "reason": "headset is back"})
-	get_tree().quit()
+	quit_on_purpose(get_tree())
 
 
 func _headset_is_back() -> bool:
@@ -418,6 +426,37 @@ func ui_text() -> String:
 
 
 # --- Restart file (tools/gdev RESTART) -----------------------------------------------------------------------------
+
+## Every quit somebody chose (the arcade's Quit, the pause menu's Quit, a dev command) goes through here, so the
+## arcade only comes back after quits nobody asked for (tests/vr_watch_test.gd fails a bare quit() in arcade/ core/).
+static func quit_on_purpose(tree: SceneTree, code: int = 0) -> void:
+	Engine.set_meta(QUIT_META, true)
+	tree.quit(code)
+
+
+func _exit_tree() -> void:
+	if _gone or _handed_off or is_queued_for_deletion() or Engine.has_meta(QUIT_META) or not supervised():
+		return
+	var spec := unasked_quit_spec()
+	if spec.is_empty():
+		return
+	print("VrWatch: the arcade is closing and nobody asked (%s): restarting it through gdev run" % spec.reason)
+	_write_restart(spec)
+
+
+## The restart for a quit nobody asked for ({} = none: plain flat play, nothing to come back for).
+func unasked_quit_spec() -> Dictionary:
+	if live:
+		return _flat_spec("closed by itself while VR was live (OpenXR / SteamVR went away)", true)
+	if launch_flat:
+		var s := launch_flat_spec(_game_id())
+		s.now = true
+		s.reason = "closed by itself while flat waiting for VR"
+		return s
+	if lost_at > 0.0:
+		return _flat_spec("closed by itself while flat after VR stopped", true)
+	return {}
+
 
 static func supervised() -> bool:
 	return OS.get_environment("GDEV_SUPERVISED") == "1" and OS.get_environment("GDEV_RESTART_FILE") != ""

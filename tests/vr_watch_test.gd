@@ -78,6 +78,18 @@ func _specs() -> void:
 	_check(not bool(w.call("_flat_spec", "x", false).get("now", true)), "the armed spec is not 'now'")
 	_check(not VrWatch.supervised() or OS.has_environment("GDEV_RESTART_FILE"), "supervised() needs the restart file")
 	_check(not w.call("session_live"), "no headset in a test: session_live() must be false")
+	# A clean exit nobody asked for (2026-11-19 19:44: headset standby, SteamVR down, Godot quit by itself, exit 0).
+	_check((w.call("unasked_quit_spec") as Dictionary).is_empty(), "plain flat play: a quit is just a quit (no restart)")
+	w.set("live", true)
+	var uq: Dictionary = w.call("unasked_quit_spec")
+	_check(bool(uq.get("now", false)) and Array(uq.get("args", [])).has("--xr-mode") and dict(uq.get("env", {})).has("DUO_VR_LOST"),
+		"closing by itself while VR is live must restart flat now (--xr-mode off, DUO_VR_LOST): %s" % [uq])
+	w.set("live", false)
+	w.set("launch_flat", true)
+	uq = w.call("unasked_quit_spec")
+	_check(bool(uq.get("now", false)) and not Array(uq.get("args", [])).has("--xr-mode"),
+		"closing by itself while flat waiting for VR must relaunch now, VR allowed: %s" % [uq])
+	w.set("launch_flat", false)
 	w.free()
 	# Launched flat because SteamVR wasn't running.
 	var ls: Dictionary = VrWatch.launch_flat_spec("kart_race")
@@ -129,7 +141,7 @@ func _guards() -> void:
 	_check(RegEx.create_from_string("(?m)^exec gdev run ").search(launch) != null,
 		"launch.sh must start the game with `exec gdev run` (the restart supervisor): a VR session not under it dies with SteamVR")
 	var gdev := FileAccess.get_file_as_string("res://tools/gdev")
-	for need in ["CRASH_SIGNALS", "GDEV_RESTART_FILE", "GDEV_SUPERVISED", "restart.json", "\"now\""]:
+	for need in ["CRASH_SIGNALS", "GDEV_RESTART_FILE", "GDEV_SUPERVISED", "restart.json", "\"now\"", "stop_marker(proj).write_text"]:
 		_check(gdev.contains(need), "tools/gdev lost its RESTART support (%s missing)" % need)
 	# One place sets the window's V-Sync / max_fps for VR (core/vr_watch.gd): a game doing it too fights it.
 	var vs := RegEx.create_from_string("window_set_vsync_mode|Engine\\.max_fps\\s*=")
@@ -139,6 +151,20 @@ func _guards() -> void:
 	for path in all:
 		if vs.search(FileAccess.get_file_as_string(path)) != null:
 			fails.append("%s sets V-Sync / max_fps: leave it to core/vr_watch.gd (VR pacing)" % path)
+	# Quits somebody chose go through VrWatch.quit_on_purpose(): any other quit counts as "nobody asked" and comes
+	# back (2026-11-19 19:44: SteamVR went down, Godot quit cleanly, the arcade was gone).
+	var bare := RegEx.create_from_string("(?m)^[^#\\n]*\\bquit\\(")
+	var qfiles: Array[String] = []
+	_collect("res://games", qfiles)
+	_collect("res://core", qfiles)
+	_collect("res://arcade", qfiles)
+	for path in qfiles:
+		if path == "res://core/vr_watch.gd":
+			continue
+		for m in bare.search_all(FileAccess.get_file_as_string(path)):
+			var line := m.get_string()
+			if not line.contains("quit_on_purpose") and not line.contains("func "):
+				fails.append("%s quits with a bare quit(): use VrWatch.quit_on_purpose(get_tree()) (else the arcade restarts itself): %s" % [path, line.strip_edges()])
 	# One place decides what happens when OpenXR goes away: no game / core script hooks the loss signals itself.
 	var re := RegEx.create_from_string("session_loss_pending|instance_exiting")
 	var files: Array[String] = []

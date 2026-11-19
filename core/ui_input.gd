@@ -40,6 +40,7 @@ var rig: Node = null      ## core/vr_rig.gd VrRig: guarded trigger / A and the r
 var device := PAD_NONE    ## joypad id, PAD_ANY or PAD_NONE
 var keys := KEYS_ALL      ## key set, or KEYS_NONE
 var hand: Node3D = null   ## optional VR hand (XRController3D, or a fake Node3D with metas): trigger / A
+var trigger_fn: Callable  ## optional: the hand's trigger 0..1 from elsewhere (a paused rig's raw value: core/net.gd's VR pause panel)
                           ## = confirm, B = cancel, stick up/down = up/down
 var repeat_delay := 0.38  ## seconds before a held direction repeats
 var repeat_rate := 0.1    ## seconds between repeats
@@ -194,6 +195,8 @@ func _pad_state(d: int, s: Dictionary) -> void:
 ## A float action of the VR hand ("trigger"); fake hands use node metadata of the same name; with a
 ## rig, the trigger counts only when the rig's guard allows it.
 func hand_float(n: String) -> float:
+	if n == "trigger" and trigger_fn.is_valid() and rig == null:
+		return float(trigger_fn.call())
 	if rig != null and is_instance_valid(rig):
 		if n == "trigger" and bool(rig.call("trigger_down")):
 			return maxf(0.61, float(rig.call("trigger_value")))

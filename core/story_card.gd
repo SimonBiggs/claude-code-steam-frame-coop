@@ -275,8 +275,12 @@ class VrGate extends Node:
 
 
 ## A picture Control `px` pixels square (see SHARED_PICTURES and games/*/story_pictures.gd; other names use UiKit icons).
-static func picture(kind: String, px: float = 96.0, color: Color = Color(1.0, 0.75, 0.3)) -> Control:
-	return StoryCardPics.make(kind, px, color)
+## animate = false: draws once and stands still (boards with dozens of pictures: the arcade's What's New and Trophy
+## Hall drew ~190 moving pictures a frame, 60-75 ms, 2026-11-19). Turn one on later with set_process(true) once it is
+## in the tree. (A set_process(false) BEFORE add_child does nothing: Godot switches _process on at NOTIFICATION_READY;
+## tests/process_before_tree_test.gd fails that.)
+static func picture(kind: String, px: float = 96.0, color: Color = Color(1.0, 0.75, 0.3), animate: bool = true) -> Control:
+	return StoryCardPics.make(kind, px, color, animate)
 
 
 ## The same picture in the 3D world: a billboard Sprite3D one unit wide (scale it), drawn by a small viewport of its
@@ -436,7 +440,7 @@ class Card extends Control:
 
 ## Builds pictures (a tiny indirection so Card, an inner class, can reach the outer static func).
 class StoryCardPics:
-	static func make(kind: String, px: float, color: Color) -> Control:
+	static func make(kind: String, px: float, color: Color, animate: bool = true) -> Control:
 		if not (SHARED_PICTURES.has(kind) or Registry.find(kind) != null):
 			var ic := UiKit.icon(kind, color, px)
 			ic.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
@@ -445,6 +449,7 @@ class StoryCardPics:
 		var p := Picture.new()
 		p.kind = kind
 		p.color = color
+		p.animate = animate
 		p.custom_minimum_size = Vector2(px, px)
 		p.size_flags_horizontal = Control.SIZE_SHRINK_CENTER
 		p.size_flags_vertical = Control.SIZE_SHRINK_CENTER
@@ -483,9 +488,11 @@ class Picture extends Control:
 	var kind := "bird"
 	var color := Color(1.0, 0.75, 0.3)
 	var t := 0.0
+	var animate := true  # false: drawn once (see StoryCard.picture)
 
 	func _ready() -> void:
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
+		set_process(animate)
 
 	func _process(delta: float) -> void:
 		t += delta

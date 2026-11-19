@@ -501,8 +501,7 @@ static func _day(date: String) -> int:
 # --- TV / Deck -----------------------------------------------------------------------------------
 
 static func still(kind: String, px: float, color: Color) -> Control:
-	var p := StoryCard.picture(kind, px, color)
-	p.set_process(false)
+	var p := StoryCard.picture(kind, px, color, false)
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return p
 

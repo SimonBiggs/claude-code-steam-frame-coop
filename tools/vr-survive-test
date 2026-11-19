@@ -8,7 +8,9 @@
 #    shows, the arcade is back on the same game
 #  3 the fake vrserver runs again + the log says the headset connected -> restart INTO VR (DUO_VR_REJOIN), live again
 #  4 SIGABRT the game while in VR (what vrclient.so did on 2026-11-13) -> gdev restarts it flat
+#  4b the game quits CLEANLY by itself (2026-11-19 19:44: SteamVR went down, Godot exited 0) -> gdev restarts it
 #  5 SIGTERM gdev (Steam stopping the game) -> the game stops too, no restart
+#  6 a fresh gdev run, VR live, then `gdev stop` -> stopped, no restart
 # Prints VR SURVIVE: PASS / FAIL. Uses the project's .dev/ (a worktree's, never the live dir).
 set -u
 PROJ=$(realpath "${1:-$PWD}")
@@ -80,6 +82,13 @@ kill -ABRT "$P3"
 if wait_for 30 "$T/gdev.out" "crashed (signal SIGABRT); restarting"; then ok "gdev restarted after SIGABRT"; else bad "no restart after SIGABRT"; fi
 wait_for 60 "$LOG" "VrWatch: flat after VR stopped" && ok "flat after the abort" || bad "not flat after the abort"
 
+echo "4b the game quits cleanly by itself (nobody asked) -> restarted"
+P5=$(game_pid)
+printf 'extends RefCounted\nfunc run(tree: SceneTree) -> Variant:\n\ttree.quit()\n\treturn "quitting"\n' > "$T/quit.gd"
+"$PROJ/tools/gdev" -C "$PROJ" send run "$T/quit.gd"
+if wait_for 30 "$T/gdev.out" "closed by itself"; then ok "$(grep 'closed by itself' "$T/gdev.out" | tail -1 | cut -c1-120)"; else bad "a clean quit nobody asked for didn't restart"; tail -5 "$LOG"; fi
+wait_for 60 "$LOG" "VrWatch: flat after VR stopped" && [ "$(game_pid)" != "$P5" ] && ok "back after the clean quit" || bad "not back after the clean quit"
+
 echo "5 SIGTERM gdev (Steam stops the game) -> game stops, no restart"
 P4=$(game_pid)
 kill -TERM "$GD"
@@ -88,6 +97,19 @@ kill -0 "$GD" 2>/dev/null && bad "gdev still running after SIGTERM" || ok "gdev 
 sleep 1
 kill -0 "$P4" 2>/dev/null && bad "game $P4 still running after gdev was stopped" || ok "game stopped with it"
 GD=""
-echo "--- gdev said:"; grep "^\[gdev\]" "$T/gdev.out"
+
+echo "6 gdev stop -> no restart"
+export BOT_VR=1
+"$T/fakevrsrv" 100000 & SRV2=$!
+"$PROJ/tools/gdev" run "$PROJ" > "$T/gdev2.out" 2>&1 & GD=$!
+if wait_for 60 "$LOG" "VrWatch: VR session live"; then
+  "$PROJ/tools/gdev" -C "$PROJ" stop
+  for _ in $(seq 20); do kill -0 "$GD" 2>/dev/null || break; sleep 0.5; done
+  kill -0 "$GD" 2>/dev/null && bad "gdev run still running after gdev stop (restarted?)" || ok "gdev stop ended it"
+  grep -q "restarting as it asked" "$T/gdev2.out" && bad "gdev stop restarted the game: $(grep 'restarting' "$T/gdev2.out")"
+else bad "second run has no VR session"; fi
+kill "$SRV2" 2>/dev/null
+GD=""
+echo "--- gdev said:"; grep -h "^\[gdev\]" "$T/gdev.out" "$T/gdev2.out"
 echo "VR SURVIVE: $([ $FAILS -eq 0 ] && echo PASS || echo FAIL) ($FAILS problems)"
 exit $FAILS
