@@ -29,7 +29,8 @@ func _initialize() -> void:
 	var fallbacks := 0
 	var feats := {}
 	var path_len := {}
-	for lap in 4:
+	var laps := 2 if OS.has_environment("GEN_QUICK") else 4  # (a landing: the story and its first bonus lap; nightly: 4)
+	for lap in laps:
 		for pl in Story.PLACES.size():
 			for step in Story.MAZES_PER_PLACE:
 				var i := (lap * Story.PLACES.size() + pl) * Story.MAZES_PER_PLACE + step
@@ -58,9 +59,11 @@ func _initialize() -> void:
 	for pl in Story.PLACES.size():
 		var tile: String = Story.PLACES[pl].tile
 		var got: Dictionary = feats.get("%d" % pl, {})
-		if tile != "" and int(got.get(tile, 0)) < 12:
+		var twin := {"H": "V", "-": "|"}  # moving walls slide either way, planks lie either way
+		var n_tile := int(got.get(tile, 0)) + int(got.get(twin.get(tile, "?"), 0))
+		if tile != "" and n_tile < 12:
 			_fail("place %s rarely has its tile '%s' (%s)" % [Story.PLACES[pl].name, tile, str(got)])
-		if int(got.get("*", 0)) < 12 * Story.MAZES_PER_PLACE * 4 * 9 / 10:
+		if int(got.get("*", 0)) < 12 * Story.MAZES_PER_PLACE * laps * 9 / 10:
 			_fail("place %s rarely hides a shiny (%s)" % [Story.PLACES[pl].name, str(got)])
 	_expect(fallbacks == 0, "no plain fallback mazes (%d)" % fallbacks)
 	# The daily maze: fair for a year of days, the same all day, different on different days.
@@ -71,24 +74,37 @@ func _initialize() -> void:
 	# plain fallback: MazeGen.generate() only returns a maze that passed check(), so it isn't run twice), with fair
 	# world events (Worlds.event_problems), the same all day.
 	var days := {}
+	var race_styles := {}
 	var rs := Seeded.validate_days(func(date: String) -> Dictionary:
 			var wd := str(Worlds.world_of(date).id)
 			var out := {}
 			for mode in [PickOrbs.MODE_IDS[absi(hash(date)) % PickOrbs.MODE_IDS.size()]]:
-				var lv := Story.daily(date, mode, wd)
-				out[mode] = {"lv": lv, "ev": Worlds.events(lv, mode)}
+				for leg in Story.RACE_LEGS:  # TODAY'S RACE: every leg, as main.gd _gen_job makes it
+					var lv := Story.daily(date, mode, wd, leg)
+					out["%s%d" % [mode, leg]] = {"lv": lv, "ev": Worlds.events(lv, mode), "mode": mode}
 			return out,
 		func(out: Dictionary) -> Array:
 			var why: Array = []
-			for mode in out:
-				var lv: Dictionary = out[mode].lv
+			var styles := {}
+			for key in out:
+				var lv: Dictionary = out[key].lv
+				var mode: String = out[key].mode
 				if lv.has("fallback"):
-					why.append("%s: fell back" % mode)
-				for w in Worlds.event_problems(lv, out[mode].ev, mode):
-					why.append("%s: events: %s" % [mode, w])
-			for mode in out:
-				days["\n".join(PackedStringArray(out[mode].lv.map))] = true
-			return why, 400, "TODAY'S MAZE", ["2026-11-11", "2026-11-12"])
+					why.append("%s: fell back" % key)
+				why.append_array(MazeGen.check(lv).map(func(w: String) -> String: return "%s: %s" % [key, w]))
+				for w in Worlds.event_problems(lv, out[key].ev, mode):
+					why.append("%s: events: %s" % [key, w])
+				styles[str(lv.get("style", ""))] = true
+				race_styles[str(lv.get("style", ""))] = true
+				if int(lv.get("steps", 0)) < MazeGen.MIN_GOAL_STEPS:
+					why.append("%s: no race steps" % key)
+			if styles.size() < Story.RACE_LEGS:
+				why.append("the race's mazes are not all different board types (%s)" % str(styles.keys()))
+			for key in out:
+				if str(key).ends_with("0"):
+					days["\n".join(PackedStringArray(out[key].lv.map))] = true
+			return why, 400, "TODAY'S RACE", ["2026-11-11", "2026-11-12"])
+	_expect(race_styles.size() == MazeGen.STYLES.size(), "the race uses every board type (%s)" % str(race_styles.keys()))
 	total += int(rs.checked)
 	fails += (rs.failures as Array).size()
 	_expect(days.size() > int(rs.checked) * 4 / 5, "daily mazes differ day to day (%d unique of %d)" % [days.size(), int(rs.checked)])
@@ -129,11 +145,41 @@ func _show(lv: Dictionary) -> void:
 
 
 func _story_checks() -> void:
+	var lap := Story.PLACES.size() * Story.MAZES_PER_PLACE
 	_expect(Story.where(0) == [0, 0, 0] and Story.where(5) == [1, 2, 0], "where() walks places 3 mazes each")
-	_expect(Story.where(21) == [0, 0, 1], "after 7 places the bonus lap starts")
-	_expect(Story.places_lit(0) == 0 and Story.places_lit(3) == 1 and Story.places_lit(99) == 7, "places light up per 3 mazes")
-	_expect(Story.spec(0).new == "O" and Story.spec(1).new == "" and Story.spec(21).new == "", "a place's new tile sparkles once")
-	_expect(int(Story.spec(21).holes) > int(Story.spec(0).holes), "bonus laps have more holes")
+	_expect(Story.where(lap) == [0, 0, 1], "after every place the bonus lap starts")
+	_expect(Story.places_lit(0) == 0 and Story.places_lit(3) == 1 and Story.places_lit(999) == Story.PLACES.size(), "places light up per 3 mazes")
+	_expect(Story.spec(0).new == "O" and Story.spec(1).new == "" and Story.spec(lap).new == "", "a place's new tile sparkles once")
+	_expect(int(Story.spec(lap).holes) > int(Story.spec(0).holes), "bonus laps have more holes")
+	# Third pass: every board type in the story, the race's cups and clock, old saves moved onto the twelve places.
+	var styles := {}
+	for i in lap:
+		styles[str(Story.spec(i).style)] = true
+	_expect(styles.size() == MazeGen.STYLES.size(), "every board type is in the story (%s)" % str(styles.keys()))
+	_expect(str(Story.spec(2).style) != "rooms", "the very first place already has a different board type")
+	_expect(Story.medal(10.0, 30, 1) == "gold" and Story.medal(30.0, 30, 1) == "silver" and Story.medal(99.0, 30, 1) == "bronze", "race cups")
+	_expect(Story.medal(25.0, 30, 4) == "gold", "more marbles get a little more time for gold")
+	_expect(Story.clock(65.4) == "1:05" and Story.clock(9.9) == "0:09", "the race clock")
+	_expect(Story.migrate_story_i(1) == 1 and Story.migrate_story_i(3) == 3 and Story.migrate_story_i(6) == 9, "old saves keep their place")
+	_expect(Story.migrate_story_i(20) == Story.OLD_PLACES[6] * 3 + 2 and Story.migrate_story_i(21) == lap, "old saves keep their lap")
+	for j in Story.OLD_PLACES.size():
+		_expect(Story.PLACES[Story.OLD_PLACES[j]].name == ["FLOWER PARK", "SEASIDE", "CANDY SHOP", "ICE CAVE", "CASTLE", "STAR PARK", "RAINBOW HILL"][j],
+			"old place %d moved to %d" % [j, Story.OLD_PLACES[j]])
+	_expect(MazeGen.MARBLE_STEER == preload("res://games/marble_maze/marble.gd").STEER, "the magnet check uses the marble's real push")
+	# Hand checks for the new tiles: a magnet by a hole, a warp exit by the air, a moving wall along a corridor, a plank
+	# entered from the side, air by the start: each caught.
+	_expect(not MazeGen.check({"map": ["############", "#S.........#", "#..........#", "#...NO.....#", "#..........#",
+		"#..........#", "#..........#", "#..........#", "#.........G#", "############"]}).is_empty(), "a magnet by a hole is caught")
+	_expect(not MazeGen.check({"map": ["############", "#S.........#", "#.W........#", "#..........#", "#..........#",
+		"#......w_..#", "#..........#", "#..........#", "#.........G#", "############"]}).is_empty(), "a warp exit by the air is caught")
+	_expect(not MazeGen.check({"map": ["############", "#S.........#", "#.#########", "#.#H.......#", "#.#.###....#",
+		"#...#......#", "#.#........#", "#..........#", "#.........G#", "############"]}).is_empty(), "a moving wall sliding along a corridor is caught")
+	_expect(MazeGen.check({"map": ["############", "#S..#......#", "#...#......#", "#..._......#", "#...-......#",
+		"#..._......#", "#...#......#", "#...#......#", "#...#.....G#", "############"]}).is_empty() == true, "a plank across a wall column is crossed left/right")
+	_expect(MazeGen.check({"map": ["############", "#S..#......#", "#...#......#", "#..._......#", "#...|......#",
+		"#..._......#", "#...#......#", "#...#......#", "#...#.....G#", "############"]}).is_empty() == false, "a plank lying the wrong way leads nowhere (caught)")
+	_expect(MazeGen.check({"map": ["############", "#S..#......#", "#...#......#", "#..._......#", "#..._......#",
+		"#...-......#", "#..._......#", "#...#......#", "#...#.....G#", "############"]}).is_empty(), "a plank across the gap passes")
 	_expect(Story.shiny_of(-1)[0] == "GOLDEN" and Story.shiny_of(17)[0] == Story.SHINIES[1][0], "shinies cycle, daily is golden")
 	_expect(Story.shiny_total({"SUNNY": 2, "OCEAN": 1}) == 3, "shiny total")
 	var d := Story.save_defaults()

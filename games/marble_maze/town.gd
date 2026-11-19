@@ -10,6 +10,7 @@ extends Node3D
 const Story := preload("res://games/marble_maze/story.gd")
 const Worlds := preload("res://games/marble_maze/worlds.gd")
 const UiKit := preload("res://core/ui_kit.gd")
+const VrViewCheck := preload("res://core/vr_view_check.gd")
 
 const RADIUS := 1.85
 const JAR_POS := Vector3(-1.2, 0.0, -0.35)
@@ -27,6 +28,16 @@ const RUN_STEP := 0.16
 const RUN_RAMPS := 4
 const RACK_MAX := 40
 const RUN_SPEED := 0.12
+## Third pass: the BEST TIMES board (TODAY'S RACE, race.gd: today's best times with their cups, the best ever under a
+## star) on two posts at the back left, with BOBO'S TROPHY SHELF under it: one cup per day the family raced, gold /
+## silver / bronze (it grows). Host data via set_times (the "town" event's 5th part).
+const TIMES_POS := Vector3(-0.62, 0.0, -1.0)
+const TIMES_W := 0.56
+const TIMES_H := 0.5
+const TIMES_Y := 1.2
+const SHELF_Y := 0.62
+const CUPS_SHOWN := 30
+const TIMES_ROWS := 5
 
 var main
 var places: Array = []  # [lit mesh, asleep mesh, lamp, base position]
@@ -41,6 +52,12 @@ var run_mm: MultiMesh
 var run_path: Array[Vector3] = []
 var run_len := 0.0
 var rack_list: Array = []
+var times_root: Node3D
+var time_rows: Array = []  # [Label3D, cup MeshInstance3D]
+var best_label: Label3D
+var cups_mm: MultiMesh
+var cup_list: Array = []
+var shelf_cheer := 0.0
 
 
 func _ready() -> void:
@@ -48,13 +65,16 @@ func _ready() -> void:
 		_build_place(i)
 	_build_jar()
 	_build_run()
+	_build_times()
 	set_lit(0, true)
 
 
+## Where place i stands (story.gd PLACES "at": the old seven on the inner arc, the new five behind the gaps).
 func place_pos(i: int) -> Vector3:
-	var n := Story.PLACES.size()
-	var a := deg_to_rad(lerpf(-68.0, 68.0, float(i) / float(n - 1)))
-	return Vector3(sin(a) * RADIUS, 0.0, -cos(a) * RADIUS + 0.1)
+	var at: Array = Story.PLACES[i].get("at", [0.0, RADIUS])
+	var a := deg_to_rad(float(at[0]))
+	var rr := float(at[1])
+	return Vector3(sin(a) * rr, 0.0, -cos(a) * rr + 0.1)
 
 
 ## How many places are lit (0..7); a newly lit one cheers unless `quiet` (loading a save).
@@ -143,6 +163,12 @@ func _process(delta: float) -> void:
 		var lamp: MeshInstance3D = places[i][2]
 		if lamp.visible:
 			lamp.scale = Vector3.ONE * (1.0 + sin(t * 3.0 + i) * 0.15)
+	if cups_mm != null and shelf_cheer > 0.0:
+		shelf_cheer = maxf(0.0, shelf_cheer - delta)
+		var nc := cups_mm.visible_instance_count
+		if nc > 0:
+			var bounce := absf(sin(shelf_cheer * 10.0)) * 0.04 * shelf_cheer
+			cups_mm.set_instance_transform(nc - 1, Transform3D(Basis(), _cup_spot(nc - 1) + Vector3(0, bounce, 0)))
 	if cheer_i >= 0 and cheer_i < places.size():
 		cheer_t += delta
 		var s := 1.0 + sin(cheer_t * 12.0) * 0.12 * maxf(0.0, 1.0 - cheer_t / 1.5)
@@ -182,8 +208,11 @@ func _build_place(i: int) -> void:
 
 
 func _lamp_spot(i: int) -> Vector3:
-	return [Vector3(0, 0.42, 0), Vector3(0, 0.56, 0), Vector3(0.12, 0.36, 0), Vector3(0, 0.3, 0),
-		Vector3(0, 0.62, 0), Vector3(0, 0.5, 0), Vector3(0, 0.42, 0)][i]
+	var spots := {"FLOWER PARK": Vector3(0, 0.42, 0), "SEASIDE": Vector3(0, 0.56, 0), "CANDY SHOP": Vector3(0.12, 0.36, 0),
+		"ICE CAVE": Vector3(0, 0.3, 0), "CASTLE": Vector3(0, 0.62, 0), "STAR PARK": Vector3(0, 0.5, 0), "RAINBOW HILL": Vector3(0, 0.42, 0),
+		"MAGNET MINE": Vector3(0, 0.36, 0), "CLOCK TOWER": Vector3(0, 0.7, 0), "WARP WOODS": Vector3(0, 0.4, 0),
+		"SKY ISLANDS": Vector3(0, 0.6, 0), "PINBALL PIER": Vector3(0, 0.4, 0)}
+	return spots.get(str(Story.PLACES[i].name), Vector3(0, 0.4, 0))
 
 
 ## Each place in a handful of shapes: [mesh, transform, colour].
@@ -192,8 +221,8 @@ func _parts(i: int) -> Array:
 	var m = main
 	# A round grassy base for every place.
 	p.append([m.cyl_mesh(0.3, 0.32, 0.03, 20), Transform3D(Basis(), Vector3(0, 0.015, 0)), Color(0.5, 0.78, 0.4)])
-	match i:
-		0:  # FLOWER PARK: a tree and flowers
+	match str(Story.PLACES[i].name):
+		"FLOWER PARK":  # a tree and flowers
 			p.append([m.cyl_mesh(0.025, 0.035, 0.25, 8), Transform3D(Basis(), Vector3(0, 0.15, 0)), Color(0.55, 0.36, 0.2)])
 			p.append([m.sphere_mesh(0.13), Transform3D(Basis(), Vector3(0, 0.33, 0)), Color(0.35, 0.75, 0.3)])
 			for k in 5:
@@ -201,13 +230,13 @@ func _parts(i: int) -> Array:
 				var at := Vector3(cos(a) * 0.2, 0.0, sin(a) * 0.2)
 				p.append([m.cyl_mesh(0.006, 0.006, 0.09, 6), Transform3D(Basis(), at + Vector3(0, 0.07, 0)), Color(0.3, 0.6, 0.25)])
 				p.append([m.sphere_mesh(0.03), Transform3D(Basis(), at + Vector3(0, 0.12, 0)), [Color(1, 0.4, 0.5), Color(1, 0.85, 0.2), Color(0.7, 0.5, 1.0)][k % 3]])
-		1:  # SEASIDE: water and a striped lighthouse
+		"SEASIDE":  # water and a striped lighthouse
 			p.append([m.cyl_mesh(0.28, 0.28, 0.035, 20), Transform3D(Basis(), Vector3(0.05, 0.02, 0.05)), Color(0.35, 0.7, 1.0)])
 			for k in 4:
 				var r0 := 0.07 - k * 0.008
 				p.append([m.cyl_mesh(r0 - 0.008, r0, 0.11, 12), Transform3D(Basis(), Vector3(0, 0.09 + k * 0.11, 0)), Color(1, 0.3, 0.3) if k % 2 == 0 else Color(1, 1, 1)])
 			p.append([m.cyl_mesh(0.0, 0.06, 0.08, 12), Transform3D(Basis(), Vector3(0, 0.6, 0)), Color(1, 0.3, 0.3)])
-		2:  # CANDY SHOP: a pink house and a giant lollipop
+		"CANDY SHOP":  # a pink house and a giant lollipop
 			p.append([m.box_mesh(Vector3(0.26, 0.2, 0.2)), Transform3D(Basis(), Vector3(-0.04, 0.13, 0)), Color(1.0, 0.7, 0.85)])
 			var roof := PrismMesh.new()
 			roof.size = Vector3(0.3, 0.12, 0.22)
@@ -215,13 +244,13 @@ func _parts(i: int) -> Array:
 			p.append([m.box_mesh(Vector3(0.06, 0.09, 0.01)), Transform3D(Basis(), Vector3(-0.04, 0.075, 0.1)), Color(0.6, 0.35, 0.25)])
 			p.append([m.cyl_mesh(0.008, 0.008, 0.3, 6), Transform3D(Basis(), Vector3(0.18, 0.18, 0.05)), Color(1, 1, 1)])
 			p.append([m.cyl_mesh(0.08, 0.08, 0.02, 16), Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0.18, 0.36, 0.05)), Color(1.0, 0.45, 0.75)])
-		3:  # ICE CAVE: a snowy dome and icicles
+		"ICE CAVE":  # a snowy dome and icicles
 			p.append([m.sphere_mesh(0.22), Transform3D(Basis.from_scale(Vector3(1.0, 0.75, 1.0)), Vector3(0, 0.03, 0)), Color(0.88, 0.95, 1.0)])
 			p.append([m.sphere_mesh(0.08), Transform3D(Basis.from_scale(Vector3(1.0, 1.2, 0.5)), Vector3(0, 0.06, 0.18)), Color(0.35, 0.5, 0.75)])
 			for k in 4:
 				var a := -0.9 + k * 0.6
 				p.append([m.cyl_mesh(0.0, 0.025, 0.12, 6), Transform3D(Basis(Vector3.RIGHT, PI), Vector3(sin(a) * 0.24, 0.15, cos(a) * 0.12 - 0.05)), Color(0.7, 0.88, 1.0)])
-		4:  # CASTLE: a keep, two towers, a flag
+		"CASTLE":  # a keep, two towers, a flag
 			p.append([m.box_mesh(Vector3(0.3, 0.22, 0.18)), Transform3D(Basis(), Vector3(0, 0.14, 0)), Color(0.78, 0.78, 0.82)])
 			for sx in [-0.17, 0.17]:
 				p.append([m.cyl_mesh(0.06, 0.06, 0.34, 12), Transform3D(Basis(), Vector3(sx, 0.2, 0)), Color(0.72, 0.72, 0.78)])
@@ -229,7 +258,7 @@ func _parts(i: int) -> Array:
 			p.append([m.box_mesh(Vector3(0.08, 0.12, 0.012)), Transform3D(Basis(), Vector3(0, 0.08, 0.092)), Color(0.5, 0.35, 0.2)])
 			p.append([m.cyl_mesh(0.004, 0.004, 0.2, 6), Transform3D(Basis(), Vector3(0, 0.35, 0)), Color(0.3, 0.3, 0.3)])
 			p.append([m.box_mesh(Vector3(0.09, 0.05, 0.005)), Transform3D(Basis(), Vector3(0.045, 0.42, 0)), Color(1.0, 0.35, 0.35)])
-		5:  # STAR PARK: a little rocket and a star
+		"STAR PARK":  # a little rocket and a star
 			p.append([m.cyl_mesh(0.05, 0.05, 0.3, 12), Transform3D(Basis(), Vector3(-0.07, 0.18, 0)), Color(0.95, 0.95, 1.0)])
 			p.append([m.cyl_mesh(0.0, 0.05, 0.1, 12), Transform3D(Basis(), Vector3(-0.07, 0.38, 0)), Color(1.0, 0.35, 0.35)])
 			for k in 3:
@@ -237,7 +266,50 @@ func _parts(i: int) -> Array:
 				p.append([m.box_mesh(Vector3(0.012, 0.08, 0.06)), Transform3D(Basis(Vector3.UP, a), Vector3(-0.07, 0.07, 0) + Vector3(cos(a), 0, sin(a)) * 0.05), Color(1.0, 0.35, 0.35)])
 			p.append([m.star_mesh(), Transform3D(Basis.from_scale(Vector3.ONE * 0.12), Vector3(0.14, 0.3, 0)), Color(1.0, 0.85, 0.3)])
 			p.append([m.cyl_mesh(0.006, 0.006, 0.26, 6), Transform3D(Basis(), Vector3(0.14, 0.15, 0)), Color(0.5, 0.5, 0.6)])
-		6:  # RAINBOW HILL: a green hill under a rainbow
+		"MAGNET MINE":  # a mine entrance, rails and a big red horseshoe magnet
+			p.append([m.box_mesh(Vector3(0.24, 0.18, 0.12)), Transform3D(Basis(), Vector3(0, 0.12, -0.06)), Color(0.5, 0.4, 0.35)])
+			p.append([m.box_mesh(Vector3(0.12, 0.12, 0.02)), Transform3D(Basis(), Vector3(0, 0.09, 0.005)), Color(0.12, 0.1, 0.1)])
+			for sx in [-0.03, 0.03]:
+				p.append([m.box_mesh(Vector3(0.008, 0.008, 0.26)), Transform3D(Basis(), Vector3(sx, 0.035, 0.12)), Color(0.55, 0.55, 0.6)])
+			p.append([m.box_mesh(Vector3(0.08, 0.05, 0.06)), Transform3D(Basis(), Vector3(0, 0.07, 0.17)), Color(0.6, 0.45, 0.3)])
+			for sx in [-0.07, 0.07]:
+				p.append([m.box_mesh(Vector3(0.04, 0.14, 0.04)), Transform3D(Basis(), Vector3(sx, 0.3, -0.06)), Color(0.9, 0.18, 0.15)])
+				p.append([m.box_mesh(Vector3(0.042, 0.04, 0.042)), Transform3D(Basis(), Vector3(sx, 0.39, -0.06)), Color(0.92, 0.92, 0.97)])
+			p.append([m.box_mesh(Vector3(0.18, 0.04, 0.04)), Transform3D(Basis(), Vector3(0, 0.23, -0.06)), Color(0.9, 0.18, 0.15)])
+		"CLOCK TOWER":  # a tall tower with a clock face and a pointy roof
+			p.append([m.box_mesh(Vector3(0.16, 0.5, 0.16)), Transform3D(Basis(), Vector3(0, 0.26, 0)), Color(0.95, 0.75, 0.45)])
+			p.append([m.cyl_mesh(0.065, 0.065, 0.012, 20), Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 0.4, 0.082)), Color(1, 1, 0.95)])
+			p.append([m.box_mesh(Vector3(0.008, 0.05, 0.006)), Transform3D(Basis(), Vector3(0, 0.42, 0.09)), Color(0.15, 0.15, 0.2)])
+			p.append([m.box_mesh(Vector3(0.035, 0.008, 0.006)), Transform3D(Basis(), Vector3(0.015, 0.4, 0.09)), Color(0.15, 0.15, 0.2)])
+			p.append([m.cyl_mesh(0.0, 0.13, 0.16, 4), Transform3D(Basis(Vector3.UP, PI * 0.25), Vector3(0, 0.59, 0)), Color(1.0, 0.55, 0.15)])
+		"WARP WOODS":  # two round trees and a swirly purple warp ring between them
+			for sx in [-0.15, 0.15]:
+				p.append([m.cyl_mesh(0.02, 0.03, 0.18, 8), Transform3D(Basis(), Vector3(sx, 0.11, -0.04)), Color(0.5, 0.33, 0.2)])
+				p.append([m.sphere_mesh(0.1), Transform3D(Basis(), Vector3(sx, 0.27, -0.04)), Color(0.25, 0.6, 0.3)])
+			var wr := TorusMesh.new()
+			wr.inner_radius = 0.07
+			wr.outer_radius = 0.1
+			wr.rings = 24
+			wr.ring_segments = 6
+			p.append([wr, Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 0.15, 0.06)), Color(0.75, 0.4, 1.0)])
+		"SKY ISLANDS":  # a little floating island with a cloud and a plank
+			p.append([m.cyl_mesh(0.03, 0.03, 0.3, 8), Transform3D(Basis(), Vector3(0, 0.18, 0)), Color(0.85, 0.9, 1.0)])
+			p.append([m.cyl_mesh(0.14, 0.04, 0.12, 12), Transform3D(Basis(), Vector3(0, 0.36, 0)), Color(0.55, 0.42, 0.3)])
+			p.append([m.cyl_mesh(0.14, 0.14, 0.02, 14), Transform3D(Basis(), Vector3(0, 0.43, 0)), Color(0.45, 0.8, 0.4)])
+			p.append([m.box_mesh(Vector3(0.2, 0.01, 0.04)), Transform3D(Basis(), Vector3(0.18, 0.43, 0)), Color(0.75, 0.55, 0.32)])
+			for k in 3:
+				p.append([m.sphere_mesh(0.05), Transform3D(Basis(), Vector3(-0.12 + k * 0.05, 0.56 + (k % 2) * 0.02, 0.02)), Color(1, 1, 1)])
+		"PINBALL PIER":  # a pier on posts with bumpers and a striped flipper
+			p.append([m.box_mesh(Vector3(0.36, 0.025, 0.2)), Transform3D(Basis(), Vector3(0, 0.12, 0)), Color(0.75, 0.55, 0.32)])
+			for sx in [-0.15, 0.15]:
+				for sz in [-0.08, 0.08]:
+					p.append([m.cyl_mesh(0.012, 0.012, 0.12, 6), Transform3D(Basis(), Vector3(sx, 0.06, sz)), Color(0.55, 0.38, 0.22)])
+			for k in 3:
+				p.append([m.cyl_mesh(0.035, 0.04, 0.05, 12), Transform3D(Basis(), Vector3(-0.1 + k * 0.1, 0.16, -0.03 + (k % 2) * 0.06)), Color(1.0, 0.3, 0.6)])
+				p.append([m.sphere_mesh(0.022), Transform3D(Basis(), Vector3(-0.1 + k * 0.1, 0.2, -0.03 + (k % 2) * 0.06)), Color(1.0, 0.95, 0.4)])
+			p.append([m.cyl_mesh(0.01, 0.01, 0.4, 6), Transform3D(Basis(), Vector3(0.16, 0.32, -0.08)), Color(1, 1, 1)])
+			p.append([m.sphere_mesh(0.03), Transform3D(Basis(), Vector3(0.16, 0.53, -0.08)), Color(1.0, 0.3, 0.6)])
+		"RAINBOW HILL":  # a green hill under a rainbow
 			p.append([m.sphere_mesh(0.22), Transform3D(Basis.from_scale(Vector3(1.2, 0.5, 1.0)), Vector3(0, 0.02, 0)), Color(0.45, 0.8, 0.4)])
 			var bands: Array[Color] = [Color(1, 0.3, 0.3), Color(1, 0.6, 0.2), Color(1, 0.9, 0.3), Color(0.4, 0.85, 0.4), Color(0.35, 0.6, 1.0), Color(0.6, 0.4, 1.0)]
 			for k in bands.size():
@@ -248,6 +320,136 @@ func _parts(i: int) -> Array:
 				tm.ring_segments = 6
 				p.append([tm, Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, 0.0, -0.05)), bands[k]])
 	return p
+
+
+## The BEST TIMES board and the trophy shelf (one merged mesh for the wood, Label3Ds for the times, cups one MultiMesh).
+func _build_times() -> void:
+	times_root = Node3D.new()
+	times_root.name = "BestTimes"
+	times_root.position = TIMES_POS
+	times_root.rotation.y = atan2(-TIMES_POS.x, 0.66 - TIMES_POS.z)  # faces the giant's spot
+	add_child(times_root)
+	var wood := Color(0.62, 0.42, 0.26)
+	var parts: Array = []
+	for sx in [-TIMES_W * 0.5 + 0.02, TIMES_W * 0.5 - 0.02]:
+		parts.append([main.box_mesh(Vector3(0.03, TIMES_Y + TIMES_H * 0.5, 0.03)), Transform3D(Basis(), Vector3(sx, (TIMES_Y + TIMES_H * 0.5) * 0.5, -0.02)), wood])
+	parts.append([main.box_mesh(Vector3(TIMES_W, TIMES_H, 0.02)), Transform3D(Basis(), Vector3(0, TIMES_Y, 0)), Color(0.18, 0.22, 0.32)])
+	parts.append([main.box_mesh(Vector3(TIMES_W + 0.04, 0.03, 0.03)), Transform3D(Basis(), Vector3(0, TIMES_Y + TIMES_H * 0.5 + 0.01, 0)), wood])
+	parts.append([main.box_mesh(Vector3(TIMES_W + 0.04, 0.03, 0.03)), Transform3D(Basis(), Vector3(0, TIMES_Y - TIMES_H * 0.5 - 0.01, 0)), wood])
+	for k in 2:  # the trophy shelf: two planks
+		parts.append([main.box_mesh(Vector3(TIMES_W, 0.018, 0.12)), Transform3D(Basis(), Vector3(0, SHELF_Y - k * 0.2, 0.04)), wood])
+	# a stopwatch on top: the race board's picture
+	parts.append([main.cyl_mesh(0.06, 0.06, 0.02, 20), Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, TIMES_Y + TIMES_H * 0.5 + 0.09, 0)), Color(1.0, 0.8, 0.25)])
+	parts.append([main.cyl_mesh(0.048, 0.048, 0.022, 20), Transform3D(Basis(Vector3.RIGHT, PI * 0.5), Vector3(0, TIMES_Y + TIMES_H * 0.5 + 0.09, 0.002)), Color(1, 1, 0.95)])
+	parts.append([main.box_mesh(Vector3(0.006, 0.04, 0.01)), Transform3D(Basis(Vector3(0, 0, 1), -0.6), Vector3(0.01, TIMES_Y + TIMES_H * 0.5 + 0.1, 0.014)), Color(0.15, 0.15, 0.2)])
+	parts.append([main.box_mesh(Vector3(0.02, 0.025, 0.02)), Transform3D(Basis(), Vector3(0, TIMES_Y + TIMES_H * 0.5 + 0.16, 0)), Color(1.0, 0.8, 0.25)])
+	var stand := MeshInstance3D.new()
+	stand.mesh = main.merged_mesh("town_times", parts)
+	stand.material_override = main.vertex_mat()
+	times_root.add_child(stand)
+	for i in TIMES_ROWS:
+		var y := TIMES_Y + TIMES_H * 0.5 - 0.07 - i * 0.075
+		var l := _times_label(40)
+		l.position = Vector3(0.04, y, 0.012)
+		times_root.add_child(l)
+		var cup := MeshInstance3D.new()
+		cup.mesh = _cup_mesh()
+		cup.position = Vector3(-0.14, y - 0.022, 0.03)
+		cup.material_override = main.make_material(Color(1, 1, 1), 0.2)
+		times_root.add_child(cup)
+		time_rows.append([l, cup])
+	best_label = _times_label(34)
+	best_label.position = Vector3(0.04, TIMES_Y - TIMES_H * 0.5 + 0.045, 0.012)
+	best_label.modulate = Color(1.0, 0.85, 0.3)
+	times_root.add_child(best_label)
+	var star := MeshInstance3D.new()
+	star.mesh = main.star_mesh()
+	star.scale = Vector3.ONE * 0.05
+	star.position = Vector3(-0.14, TIMES_Y - TIMES_H * 0.5 + 0.045, 0.02)
+	star.rotation.x = PI * 0.5
+	star.material_override = main.make_material(Color(1.0, 0.85, 0.3), 0.6)
+	times_root.add_child(star)
+	cups_mm = MultiMesh.new()
+	cups_mm.transform_format = MultiMesh.TRANSFORM_3D
+	cups_mm.use_colors = true
+	cups_mm.mesh = _cup_mesh()
+	cups_mm.instance_count = CUPS_SHOWN
+	cups_mm.visible_instance_count = 0
+	var mmi := MultiMeshInstance3D.new()
+	mmi.multimesh = cups_mm
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.vertex_color_is_srgb = true
+	mat.metallic = 0.6
+	mat.roughness = 0.25
+	mmi.material_override = mat
+	mmi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	times_root.add_child(mmi)
+	set_times({}, true)
+
+
+func _times_label(size: int) -> Label3D:
+	var l := Label3D.new()
+	l.font_size = size
+	l.outline_size = 8
+	l.pixel_size = 0.0022
+	l.modulate = Color(1, 1, 1)
+	l.outline_modulate = Color(0.05, 0.05, 0.1)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_LEFT
+	l.set_meta(VrViewCheck.COVER_OK_META, true)  # a story card may pass in front of the board for a moment
+	return l
+
+
+func _cup_mesh() -> Mesh:
+	var cm := CylinderMesh.new()
+	cm.top_radius = 0.022
+	cm.bottom_radius = 0.01
+	cm.height = 0.045
+	cm.radial_segments = 10
+	cm.rings = 1
+	return cm
+
+
+func _cup_spot(i: int) -> Vector3:
+	var row := i / 15
+	var k := i % 15
+	return Vector3(-TIMES_W * 0.5 + 0.03 + k * (TIMES_W - 0.06) / 14.0, SHELF_Y - row * 0.2 + 0.032, 0.04)
+
+
+## The race board's data (race.gd board_data): {today: [[secs, marbles, medal], ...], best: secs (-1 none), cups: [medal]}.
+func set_times(data: Dictionary, quiet: bool = false) -> void:
+	if times_root == null:
+		return
+	var rows: Array = data.get("today", [])
+	for i in time_rows.size():
+		var l: Label3D = time_rows[i][0]
+		var cup: MeshInstance3D = time_rows[i][1]
+		var on := i < rows.size()
+		l.text = Story.clock(float(rows[i][0])) if on else ("-:--" if i == 0 else "")
+		l.modulate = Color(1, 1, 1) if on else Color(0.6, 0.65, 0.75)
+		cup.visible = on and (rows[i] as Array).size() > 2
+		if cup.visible:
+			cup.material_override = main.make_material(Story.MEDALS.get(str(rows[i][2]), Color(1, 1, 1)), 0.2)
+	var best := float(data.get("best", -1.0))
+	best_label.text = Story.clock(best) if best >= 0.0 else ""
+	var list: Array = data.get("cups", [])
+	var grew := list.size() > cup_list.size() and not quiet
+	cup_list = list.duplicate()
+	var shown := list.slice(maxi(0, list.size() - CUPS_SHOWN))
+	for i in shown.size():
+		cups_mm.set_instance_color(i, Story.MEDALS.get(str(shown[i]), Color(1, 1, 1)))
+		cups_mm.set_instance_transform(i, Transform3D(Basis(), _cup_spot(i)))
+	cups_mm.visible_instance_count = shown.size()
+	if grew:
+		cheer_shelf()
+
+
+## A new cup bounces on the shelf with a sparkle.
+func cheer_shelf() -> void:
+	shelf_cheer = 1.5
+	var n := cups_mm.visible_instance_count if cups_mm != null else 0
+	if n > 0 and main != null:
+		main.burst(times_root.to_global(_cup_spot(n - 1) + Vector3(0, 0.05, 0)), cups_mm.get_instance_color(n - 1), 16, false)
 
 
 ## Bobo's marble run: a post, RUN_RAMPS ramps zig-zagging down and a lift back up (one merged mesh), the marbles one

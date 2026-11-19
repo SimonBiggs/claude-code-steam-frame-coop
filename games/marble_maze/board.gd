@@ -25,6 +25,12 @@ const BOOST := 2.2
 const PAD_R := 0.45  # in cells
 const TP_R := 0.32  # in cells
 const GROUP_COLORS: Array[Color] = [Color(0.3, 0.6, 1.0), Color(0.75, 0.4, 1.0)]
+## Third pass gadgets (mazegen.gd): MAGNET tiles 'N', WARP HOLES 'W' (one way to their exit 'w').
+const MazeGen := preload("res://games/marble_maze/mazegen.gd")
+const MAGNET_FLOOR := Color(0.72, 0.74, 0.8)
+const MAGNET_RED := Color(0.9, 0.18, 0.15)
+const WARP_COLOR := Color(0.75, 0.35, 1.0)
+const TRACK_COLOR := Color(1.0, 0.8, 0.15)
 
 var main
 var rows: Array[String] = []
@@ -48,6 +54,10 @@ var gate_open: Array[bool] = [false, false]
 var gate_h: Array[float] = [1.0, 1.0]  # 1 = up (closed), 0 = sunk into the floor
 var teleports: Array[Vector2] = []
 var tp_dest := {}  # Vector2i cell -> Vector2 partner centre
+var magnets: Array[Vector2] = []
+var warp_in := Vector2.INF  # a warp hole's centre (one way to warp_out)
+var warp_out := Vector2.INF
+var gadget_nodes: Array[Node3D] = []  # magnet rings, the warp swirl and exit ring (spun in _process)
 var goal_dist := {}  # Vector2i -> cells to the goal (for "furthest checkpoint")
 var t := 0.0  # level clock (drives the sliding blocks; mirrored on the TV machine)
 var tilt := Vector2.ZERO  # -1..1 each: where the marbles are pushed (x right, y towards the VR player)
@@ -111,6 +121,9 @@ func load_level(n: int, def: Dictionary = {}) -> void:
 	gate_h = [1.0, 1.0]
 	teleports.clear()
 	tp_dest.clear()
+	magnets.clear()
+	warp_in = Vector2.INF
+	warp_out = Vector2.INF
 	goal = Vector2(99.0, 99.0)  # the pick board has none (main.gd PICK_MAP)
 	event_gate = Vector2i(-99, -99)
 	quake = Vector2.ZERO
@@ -141,9 +154,17 @@ func load_level(n: int, def: Dictionary = {}) -> void:
 					gate_cells.append([Vector2i(c, r), 0 if k == "D" else 1])
 				"T":
 					teleports.append(p)
+				"N":
+					magnets.append(p)
+				"W":
+					warp_in = p
+				"w":
+					warp_out = p
 	for i in range(0, teleports.size() - 1, 2):
 		tp_dest[cell_of(teleports[i])] = teleports[i + 1]
 		tp_dest[cell_of(teleports[i + 1])] = teleports[i]
+	if warp_in != Vector2.INF and warp_out != Vector2.INF:
+		tp_dest[cell_of(warp_in)] = warp_out  # one way: the exit leads nowhere
 	if starts.is_empty():
 		starts.append(center(1, 1))
 	_goal_bfs()
@@ -301,6 +322,9 @@ func supported(p: Vector2) -> bool:
 func hole_pull(p: Vector2) -> Vector2:
 	var cc := cell_of(p)
 	var k := ch(cc.x, cc.y)
+	if k == "W":
+		var dw := center(cc.x, cc.y) - p
+		return dw.normalized() * 0.6 if dw.length() > 0.001 and dw.length() < 0.55 * CELL else Vector2.ZERO
 	if k != "O" and k != "G" and k != "P" and k != "Q":
 		return Vector2.ZERO
 	var d := center(cc.x, cc.y) - p
@@ -315,6 +339,26 @@ func hole_pull(p: Vector2) -> Vector2:
 	return d / l * (0.5 if k == "O" else 0.9)
 
 
+## MAGNET tiles: a pull towards each magnet's middle for marbles within MazeGen.MAGNET_REACH cells (strongest close
+## by, never stronger than MazeGen.MAGNET_PULL: a marble can always roll away, mazegen check() proves it).
+func magnet_pull(p: Vector2) -> Vector2:
+	var a := Vector2.ZERO
+	var reach := MazeGen.MAGNET_REACH * CELL
+	for m in magnets:
+		var d := m - p
+		var l := d.length()
+		if l < reach and l > 0.004:
+			a += d / l * MazeGen.MAGNET_PULL * minf(1.0, (1.0 - l / reach) * 1.6)
+	return a.limit_length(MazeGen.MAGNET_PULL)
+
+
+func is_magnet_near(p: Vector2) -> bool:
+	for m in magnets:
+		if m.distance_to(p) < MazeGen.MAGNET_REACH * CELL:
+			return true
+	return false
+
+
 ## Floor friction here: ice is slippery, mud is gloopy, pads are a little sticky.
 func damp_at(p: Vector2) -> float:
 	var cc := cell_of(p)
@@ -327,6 +371,8 @@ func damp_at(p: Vector2) -> float:
 			return DAMP if gate_open[0] else PAD_DAMP
 		"Q":
 			return DAMP if gate_open[1] else PAD_DAMP
+		"N":
+			return PAD_DAMP  # a magnet holds on a little
 	return DAMP
 
 
@@ -409,8 +455,8 @@ func _goal_bfs() -> void:
 		var nbs: Array[Vector2i] = [c + Vector2i(1, 0), c + Vector2i(-1, 0), c + Vector2i(0, 1), c + Vector2i(0, -1)]
 		for nb in nbs:
 			var k := ch(nb.x, nb.y)
-			if k == "#" or k == "O" or k == "_" or k == "B":
-				continue
+			if k == "#" or k == "O" or k == "_" or k == "B" or k == "W":
+				continue  # (a warp hole is one way: never part of a way back from the goal)
 			if tp_dest.has(nb):
 				# Rolling onto a teleporter puts you on its twin: the twin's entry is 2 steps from here.
 				var twin := cell_of(tp_dest[nb])
@@ -506,6 +552,21 @@ func _process(delta: float) -> void:
 		block_nodes[i].position = Vector3(bp.x, WALL_H * 0.5, bp.y)
 	for b in bumper_nodes:
 		b.scale = b.scale.lerp(Vector3.ONE, 1.0 - exp(-10.0 * delta))
+	for i in gadget_nodes.size():
+		var gn := gadget_nodes[i]
+		if not is_instance_valid(gn):
+			continue
+		match str(gn.get_meta("gadget", "")):
+			"magnet":  # rings drawn in towards the middle, over and over
+				var f := fmod(t * 0.9 + float(i) * 0.37, 1.0)
+				gn.scale = Vector3.ONE * lerpf(1.6, 0.35, f)
+				gn.visible = f < 0.92
+			"warp":
+				gn.rotation.y -= delta * 4.0
+			"exit":
+				gn.rotation.y += delta * 1.5
+				var s2 := 1.0 + sin(t * 3.0) * 0.1
+				gn.scale = Vector3(s2, 1.0, s2)
 	if goal_ring:
 		goal_ring.rotation.y += delta * 1.5
 		var s := 1.0 + sin(t * 4.0) * 0.08
@@ -594,6 +655,7 @@ func _build_level(_idx: int) -> void:
 	gem_nodes.clear()
 	bumper_nodes.clear()
 	block_nodes.clear()
+	gadget_nodes.clear()
 	pad_mm = null
 	gate_mm = null
 	tp_mm = null
@@ -634,14 +696,14 @@ func _build_level(_idx: int) -> void:
 					_box(st, Vector3(o.x, -0.006, o.y), Vector3(CELL, 0.012, CELL * 0.64), Color(0.72, 0.5, 0.3))
 				"|":
 					_box(st, Vector3(o.x, -0.006, o.y), Vector3(CELL * 0.64, 0.012, CELL), Color(0.72, 0.5, 0.3))
-				"O", "G":
+				"O", "G", "W":
 					var rim := (CELL - hole_w) * 0.5
-					var tile_col := floor_col if k == "O" else Color(0.55, 1.0, 0.6)
+					var tile_col := floor_col if k != "G" else Color(0.55, 1.0, 0.6)
 					for s in [-1.0, 1.0]:
 						var off: float = s * (hole_w * 0.5 + rim * 0.5)
 						_box(st, Vector3(o.x + off, -TILE_T * 0.5, o.y), Vector3(rim, TILE_T, CELL), tile_col)
 						_box(st, Vector3(o.x, -TILE_T * 0.5, o.y + off), Vector3(hole_w, TILE_T, rim), tile_col)
-					var pit_col := Color(0.05, 0.04, 0.08) if k == "O" else Color(0.2, 0.9, 0.35)
+					var pit_col := Color(0.05, 0.04, 0.08) if k == "O" else (Color(0.25, 0.08, 0.4) if k == "W" else Color(0.2, 0.9, 0.35))
 					_box(st, Vector3(o.x, -TILE_T - 0.03, o.y), Vector3(hole_w, 0.01, hole_w), pit_col)
 				"D", "E":
 					_box(st, Vector3(o.x, -TILE_T * 0.5, o.y), Vector3(CELL, TILE_T, CELL), floor_col.lerp(GROUP_COLORS[0 if k == "D" else 1], 0.3))
@@ -658,7 +720,11 @@ func _build_level(_idx: int) -> void:
 							fc = GROUP_COLORS[0 if k == "P" else 1].darkened(0.35)
 						"T":
 							fc = Color(0.25, 0.15, 0.4)
+						"N":
+							fc = MAGNET_FLOOR
 					_box(st, Vector3(o.x, -TILE_T * 0.5, o.y), Vector3(CELL, TILE_T, CELL), fc)
+					if k == "H" or k == "V":
+						_track(st, k, c, r, o)
 					match k:
 						"C":
 							_box(st, Vector3(o.x, 0.001, o.y), Vector3(CELL * 0.7, 0.002, CELL * 0.7), Color(0.4, 0.85, 1.0))
@@ -672,6 +738,11 @@ func _build_level(_idx: int) -> void:
 							_box(st, Vector3(o.x + 0.022, 0.001, o.y - 0.02), Vector3(0.02, 0.002, 0.018), Color(0.36, 0.25, 0.15))
 						">", "<", "^", "v":
 							_chevron(st, k, o)
+						"N":  # a red horseshoe magnet with silver tips, painted on the tile
+							for sx in [-1.0, 1.0]:
+								_box(st, Vector3(o.x + sx * 0.022, 0.002, o.y + 0.004), Vector3(0.012, 0.004, 0.04), MAGNET_RED)
+								_box(st, Vector3(o.x + sx * 0.022, 0.002, o.y - 0.022), Vector3(0.012, 0.004, 0.012), Color(0.95, 0.95, 1.0))
+							_box(st, Vector3(o.x, 0.002, o.y + 0.026), Vector3(0.056, 0.004, 0.012), MAGNET_RED)
 	var mi := MeshInstance3D.new()
 	mi.mesh = st.commit()
 	var mat := StandardMaterial3D.new()
@@ -721,6 +792,7 @@ func _build_level(_idx: int) -> void:
 		level_root.add_child(kn)
 		block_nodes.append(kn)
 	_build_team_bits()
+	_build_gadgets()
 	if not has_goal():
 		goal_ring = null
 		return
@@ -810,6 +882,69 @@ func _build_team_bits() -> void:
 		c.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		level_root.add_child(c)
 	_update_team_bits(0.0)
+
+
+## MOVING WALL told on the floor: yellow stripes along the cells its block slides over (warn colour: something
+## moves here), so a marble sees where it goes before it gets there.
+func _track(st: SurfaceTool, k: String, c: int, r: int, o: Vector2) -> void:
+	var axis := Vector2(1, 0) if k == "H" else Vector2(0, 1)
+	for s in [-1, 0, 1]:
+		var cc := Vector2i(c, r) + Vector2i(int(axis.x) * s, int(axis.y) * s)
+		var kk := ch(cc.x, cc.y)
+		if kk == "#":
+			continue
+		var oc := center(cc.x, cc.y)
+		for q in [-1.0, 1.0]:
+			var off: Vector2 = Vector2(axis.y, axis.x) * float(q) * 0.03
+			var size := Vector3(CELL * 0.9, 0.003, 0.008) if k == "H" else Vector3(0.008, 0.003, CELL * 0.9)
+			_box(st, Vector3(oc.x + off.x, 0.0015, oc.y + off.y), size, TRACK_COLOR)
+
+
+## Magnet rings, the warp hole's swirl and its exit ring (only built when the maze has them; animated in _process).
+func _build_gadgets() -> void:
+	for m in magnets:
+		for k in 2:
+			var ring := MeshInstance3D.new()
+			var tm := TorusMesh.new()
+			tm.inner_radius = 0.026
+			tm.outer_radius = 0.03
+			tm.rings = 16
+			tm.ring_segments = 3
+			ring.mesh = tm
+			ring.material_override = main.make_material(MAGNET_RED.lightened(0.3), 1.2)
+			ring.position = Vector3(m.x, 0.004, m.y)
+			ring.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+			ring.set_meta("gadget", "magnet")
+			level_root.add_child(ring)
+			gadget_nodes.append(ring)
+	if warp_in != Vector2.INF:
+		var sw := MeshInstance3D.new()
+		var sm := TorusMesh.new()
+		sm.inner_radius = 0.018
+		sm.outer_radius = 0.036
+		sm.rings = 6
+		sm.ring_segments = 3
+		sw.mesh = sm
+		sw.material_override = main.make_material(WARP_COLOR, 1.6)
+		sw.position = Vector3(warp_in.x, -0.012, warp_in.y)
+		sw.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		sw.set_meta("gadget", "warp")
+		level_root.add_child(sw)
+		gadget_nodes.append(sw)
+	if warp_out != Vector2.INF:
+		var ex := MeshInstance3D.new()
+		var em := TorusMesh.new()
+		em.inner_radius = 0.03
+		em.outer_radius = 0.038
+		em.rings = 16
+		em.ring_segments = 3
+		ex.mesh = em
+		ex.material_override = main.make_material(WARP_COLOR.lightened(0.35), 1.0)
+		ex.position = Vector3(warp_out.x, 0.003, warp_out.y)
+		ex.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		ex.set_meta("gadget", "exit")
+		level_root.add_child(ex)
+		gadget_nodes.append(ex)
 
 
 ## A zoom-arrow chevron painted on the tile.

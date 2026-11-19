@@ -253,6 +253,8 @@ func sim(delta: float) -> void:
 	a += board.quake * float(Worlds.QUAKE_K.get(gift, 1.0))
 	if gift == "magnet":
 		a += _magnet(here)
+	a += board.magnet_pull(here)  # third pass: MAGNET tiles tug marbles rolling past
+	a += main.hand_pull(self, here)  # third pass: the VR giant's helping hand
 	a += main.guide_pull(self, here)
 	v += a * delta
 	var damp: float = board.damp_at(here)
