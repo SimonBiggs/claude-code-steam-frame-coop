@@ -96,6 +96,20 @@ static func scan(path: String, text: String) -> Array:
 	return out
 
 
+## A picks.gd func named like press that takes / chooses an orb must go through press_ok (a burst of presses from the
+## round before took Rhythm Band's HARD, 2026-11-15).
+static func press_problems(path: String, text: String) -> Array:
+	var out: Array = []
+	var rx := RegEx.create_from_string("(?m)^func ([A-Za-z0-9_]*press[A-Za-z0-9_]*)\\(")
+	for m in rx.search_all(text):
+		var start := m.get_end()
+		var nxt := text.find("\nfunc ", start)
+		var body := text.substr(start, (nxt if nxt >= 0 else text.length()) - start)
+		if (body.contains("take(") or body.contains("choose(")) and not body.contains("press_ok("):
+			out.append("%s: %s() picks on a button press without press_ok(slot) (core/pick_flow.gd: a burst of presses must not pick)" % [path, m.get_string(1)])
+	return out
+
+
 ## True if a func body adds one to a tally within 3 lines of a vote / ballot name (a game's own vote count).
 static func _counts_votes(body: String) -> bool:
 	var rx_name := RegEx.create_from_string(VOTE_NAME)
@@ -147,8 +161,12 @@ func _initialize() -> void:
 	var n := 0
 	for path in game_files():
 		n += 1
-		for e in scan(path, FileAccess.get_file_as_string(path)):
+		var src := FileAccess.get_file_as_string(path)
+		for e in scan(path, src):
 			_expect(false, e)
+		if path.ends_with("/picks.gd"):
+			for e in press_problems(path, src):
+				_expect(false, e)
 		# Every game script compiles (a gen test that never loads a broken altar.gd still said PASS, 2026-11-11).
 		var scr := load(path) as Script
 		_expect(scr != null and scr.can_instantiate(), "%s does not compile" % path)
@@ -174,6 +192,16 @@ func _initialize() -> void:
 	_expect(pf.winner_of("mode", ["gentle", "hard", "brave"], {0: 1, 1: 2}, 1) == 2, "vote: gentler rule: hard vs brave -> brave")
 	_expect(pf.winner_of("mode", ["gentle", "brave", "hard"], {0: 0, 1: 2, 2: 1, 3: 1, 4: 0}, 1) == 0, "vote: gentler rule: gentle vs brave -> gentle")
 	_expect(pf.winner_of("gift", abc, {0: 0, 1: 2}, 1) == 0, "vote: gentler rule on a gift stage -> nearest the middle")
+	# Button presses: a burst never picks (press_ok).
+	pf.start("mode", abc, func(_s, _o, _sl) -> void: pass)
+	pf.t = 1.0
+	_expect(pf.press_ok(0), "press_ok: one press after open picks")
+	_expect(not pf.press_ok(0), "press_ok: a second press at once is a mash")
+	_expect(pf.press_ok(1), "press_ok: another player's press is their own")
+	pf.note_press(2)
+	_expect(not pf.press_ok(2), "press_ok: still drumming from the round before (note_press) is a mash")
+	_expect(press_problems("bad", "func press(i, k):\n\tif can_take():\n\t\ttake(k, i)\n").size() == 1, "the scan finds a button pick without press_ok")
+	_expect(press_problems("good", "func press(i, k):\n\tif press_ok(i):\n\t\ttake(k, i)\n").is_empty(), "press_ok passes the scan")
 	pf.free()
 	# 4. The shared gift pick: three different, the newest always there, not the last one again, the same for a seed.
 	var un := ["a", "b", "c", "d", "e"]

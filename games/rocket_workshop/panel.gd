@@ -75,6 +75,8 @@ var switch_lamps: Array = []
 var lever_pivot: Node3D
 var lever_pull := 0.0
 var lever_fired := false
+var lever_auto := false  # a pointer (mouse / pad) pressed the lever: it pulls itself all the way (balance 3: a TV pilot
+# quit twice at the lever, 2026-11-15: pressing A on it did nothing, it needed a drag down)
 var shown_rocket := -1
 var wing_l: Node3D
 var wing_r: Node3D
@@ -595,6 +597,7 @@ func update_panel(delta: float) -> void:
 func _refresh() -> void:
 	plug_drag.clear()
 	lever_pull = 0.0
+	lever_auto = false
 	reset_crank()
 	var m: Dictionary = main.module("symbols")
 	for i in 4:
@@ -657,6 +660,11 @@ func _handle_hands(hands: Array) -> void:
 			continue
 		if grip and not was:
 			var key := _grab_target(wp, invs, pointer)
+			if key == "lever" and pointer:  # no drag needed: it pulls itself (lever_auto)
+				lever_auto = true
+				idle_t = 0.0
+				main.local_sound("click", -6.0, 1.2)
+				continue
 			if key != "":
 				grabs[id] = key
 				idle_t = 0.0
@@ -941,7 +949,16 @@ func _update_visuals(delta: float) -> void:
 		lm.emission = lm.albedo_color
 		lm.emission_energy_multiplier = 2.0 if on else 0.0
 	# Lever springs back when let go.
-	if not grabs.values().has("lever"):
+	if lever_auto:
+		lever_pull = move_toward(lever_pull, 1.0, delta * 3.0)
+		if lever_pull > 0.85 and not lever_fired:
+			lever_fired = true
+			main.players[0].haptic("r", 1.0)
+			main.on_panel("lever", [])
+		if lever_pull >= 1.0:
+			lever_auto = false
+			lever_fired = false
+	elif not grabs.values().has("lever"):
 		lever_pull = move_toward(lever_pull, 0.0, delta * 2.5)
 	lever_pivot.rotation.x = lerpf(-LEVER_MAX, LEVER_MAX, lever_pull)
 	# Wings: the hologram alien bobs and spins, the crank shows its turns.

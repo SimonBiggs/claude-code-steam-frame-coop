@@ -1122,6 +1122,11 @@ func window(level: int, drummer: bool = false) -> Vector2:
 	return WINDOWS[clampi(level, 0, 2)] * Deep.win_share(mode, gift, drummer) * rate_now()
 
 
+## GENTLE with a flat drummer (pad / keys, not VR): a press of any drum button hits the drum that is due.
+func gentle_any_pad() -> bool:
+	return mode == "gentle" and not players.is_empty() and not players[0].vr and not players[0].fake_vr
+
+
 func drum_travel_beats() -> float:
 	return 4.0 if drum_level == 0 else 3.0
 
@@ -1307,6 +1312,8 @@ func drum_hit(pad: int, speed: float) -> void:
 	var vol := lerpf(-8.0, 0.0, clampf((speed - 0.4) / 2.0, 0.0, 1.0))
 	inst.drum(pad, vol)
 	players[0].flash_pad(pad)
+	if state != "pick" and picks != null:
+		picks.note_press(0)  # still drumming (practice): the next pick needs a fresh press (press_ok)
 	if state == "pick":
 		if not players[0].vr and not players[0].fake_vr:
 			picks.press(0, pad)  # the flat drummer's X / A / B (a VR drummer reaches into the orbs instead)
@@ -1338,7 +1345,24 @@ func drum_hit(pad: int, speed: float) -> void:
 					bdt = dt
 					id = i
 			i += 1
-		if id >= 0:
+		if id < 0 and gentle_any_pad():
+			# GENTLE, flat drummer: any button on time hits the drum that was due (X A B Y over four drums in a row is
+			# a lot to read for a small child: 8 hits / 11 misses on the TV, 2026-11-15). Counts as GOOD, never PERFECT.
+			i = maxi(0, d_next - 4)
+			while i < n:
+				var t2: float = song.d_t[i]
+				if t2 > song_t + win.y:
+					break
+				var dt2 := absf(t2 - song_t)
+				if d_judged[i] == 0 and dt2 <= win.y and dt2 < bdt:
+					bdt = dt2
+					id = i
+				i += 1
+			if id >= 0:
+				players[0].flash_pad(int(song.d_pad[id]))
+				_drum_result(id, 1)
+				q = 1
+		elif id >= 0:
 			q = 0 if bdt <= win.x else 1
 			_drum_result(id, q)
 		if pad == 3 and star_ready():

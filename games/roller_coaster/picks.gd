@@ -124,7 +124,7 @@ func local_press(slot: int) -> bool:
 
 ## Host: slot asked for orb i of pick for_serial.
 func press(slot: int, i: int, for_serial: int) -> void:
-	if for_serial == serial and can_take():
+	if for_serial == serial and press_ok(slot):
 		take(i, slot)
 
 

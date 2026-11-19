@@ -22,7 +22,8 @@ extends Node
 ##   wait_for()            seconds before nobody chose (default waits[stage])
 ##   follow(delta)         every frame before picking (a VR row following the head; call reset_dwell() if it moved)
 ##   extra_pick()          [orb, slot] or [] every frame (a stick press, a CPU's own choice ...: it checks `open` itself);
-##                         shots / clicks call take() directly after can_take()
+##                         shots / clicks call take() directly after can_take(); X / A / B BUTTON presses after
+##                         press_ok(slot) (no picking by a burst of presses; tests/shared_picks_test.gd)
 ##   passed()              true: nobody chose now (Dragon Rider flew past the row)
 ##   slot_color(slot), fx(i, slot, at, color)   every machine: the taker's colour, sound / burst / haptics
 ##   orbs_off()            the "orbs" payload when they go (each game keeps its own shape on the wire)
@@ -64,6 +65,8 @@ var dwell := {}  # taker id -> seconds in that orb
 # Options (a game sets them in _init):
 var after := 1.1  # seconds the taken orb shows its dot before the orbs go
 var open := 0.8  # seconds after the orbs pop up before they can be taken
+var press_gap := 0.5  # press_ok: a button press this soon after the same slot's last one is a mash, not a choice
+var _press_at := {}  # slot -> Time.get_ticks_msec() of its last button press (note_press / press_ok)
 var waits := {"mode": 14.0, "gift": 12.0}
 var wait_default := 12.0
 var wait_scale := 1.0  # bots: shorter waits
@@ -176,6 +179,22 @@ func left() -> float:
 ## A shot / press / click may take one now.
 func can_take() -> bool:
 	return stage != "" and chosen < 0 and t >= open
+
+
+## A BUTTON press (X / A / B over the orbs) may pick for `slot` now: can_take() and not part of a burst. A child still
+## hammering the buttons from the round before (Rhythm Band's practice drums, 2026-11-15: the flat drummer's next
+## B took HARD at once and quit after 8 hits / 11 misses) must stop a moment and press again. Games whose pick
+## buttons are also play buttons call note_press(slot) for every press outside the pick too.
+func press_ok(slot: int) -> bool:
+	var now := Time.get_ticks_msec()
+	var last: int = int(_press_at.get(slot, -100000))
+	_press_at[slot] = now
+	return can_take() and float(now - last) / 1000.0 >= press_gap
+
+
+## A press of a button that also picks (outside a pick, or one press_ok turned down): starts the mash gap.
+func note_press(slot: int) -> void:
+	_press_at[slot] = Time.get_ticks_msec()
 
 
 func default_pick() -> int:

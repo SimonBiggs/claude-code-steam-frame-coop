@@ -61,6 +61,7 @@ var counted := false
 var checks := {}  # simple mode: check name -> passed
 var practice_wait := -1.0
 var lever_wait := -1.0
+var lever_clicks := {}  # flat pilot: rocket -> lever clicks (one press must launch, no drag: balance 3)
 var wrong_at := {}
 var props_done := false
 var seen_rockets := {}
@@ -347,8 +348,21 @@ func _drag(key: String, path: Array) -> void:
 
 func _plan() -> void:
 	if main.phase == "ready":
-		print("Bot: pulling the launch lever")
-		_drag("lever", ["lever_pulled"])
+		if OS.has_environment("BOT_VR"):
+			print("Bot: pulling the launch lever")
+			_drag("lever", ["lever_pulled"])
+			return
+		# Flat pilot (mouse / pad pointer): ONE press on the lever pulls it all the way (a TV pilot quit twice at the
+		# lever when it needed a drag, 2026-11-15).
+		var n := int(lever_clicks.get(main.rocket_n, 0)) + 1
+		lever_clicks[main.rocket_n] = n
+		if n >= 3:
+			_check("pointer_lever_click_launches", false, "rocket %d still waiting after %d clicks" % [main.rocket_n, n - 1])
+		print("Bot: pressing the launch lever (pointer, no drag)")
+		steps.append({"pos": _at("lever", 0.12), "grip": false, "dur": 0.1})
+		steps.append({"pos": _at("lever"), "grip": false, "dur": 0.1})
+		steps.append({"pos": _at("lever"), "grip": true, "dur": 0.1})
+		steps.append({"pos": _at("lever", 0.12), "grip": false, "dur": 1.2})
 		return
 	if main.phase != "work":
 		return
@@ -752,6 +766,8 @@ func _simple_wait(delta: float) -> bool:
 			if lever_wait < 0.5:
 				_check("ghost_hand_pulls_lever", main.ghost_hand.visible)
 			return true
+	if main.phase == "launch" and lever_clicks.has(main.rocket_n):
+		_check("pointer_lever_click_launches", true)
 	if main.phase == "launch" and not props_done and main.launch_t > 0.5:
 		props_done = true
 		for n in main.props.TOUCH:
