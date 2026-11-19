@@ -100,7 +100,7 @@ func _process(delta: float) -> void:
 func vr_run() -> bool:
 	if OS.has_environment("TV_SHARE_FORCE_VR") or OS.has_environment("DUO_VR_LOST") or OS.has_environment("DUO_VR_REJOIN"):
 		return true
-	var w := get_node_or_null("/root/VrWatch")
+	var w := get_node_or_null("/root/VrWatch") if is_inside_tree() else null
 	if w != null and w.has_method("session_live"):
 		return bool(w.call("session_live"))
 	var xr := XRServer.find_interface("OpenXR")
@@ -179,8 +179,9 @@ func _set_mapped(on: bool) -> String:
 
 
 func _tell(line: String) -> void:
-	var cam := get_viewport().get_camera_3d()
-	var scene := get_tree().current_scene
+	var vp := get_viewport()
+	var cam := vp.get_camera_3d() if vp != null else null
+	var scene := get_tree().current_scene if is_inside_tree() else null
 	if cam is XRCamera3D and scene != null:
 		preload("res://core/story_card.gd").show_vr(scene, cam, {"who": "TV", "line": line, "duration": 5.0})
 	print("TvShare card: %s" % line)
