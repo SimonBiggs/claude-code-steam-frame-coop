@@ -16,6 +16,15 @@ extends Node
 ##    says "back to the arcade menu to rejoin VR" (never pulls the TV players out of a game).
 ##  - Not under gdev run (no supervisor: GDEV_SUPERVISED unset) it says so and tries going flat in-process instead
 ##    (uninitialize OpenXR, use_xr off, back to the arcade): no promise vrclient won't abort anyway.
+##  - Launched while SteamVR wasn't running (2026-11-19 19:17: "Failed to create XR instance", Godot ran flat): the
+##    failed xrCreateInstance leaves SteamVR's vrclient.so loaded in our process, and when SteamVR then started it
+##    abort()ed the arcade ("double free or corruption", 19:20:12) ~20 s later. So a run that WANTED VR but came up
+##    flat waits for the headset like the flat run after a loss (quietly: no "VR stopped" card, only the banner once
+##    the headset is back), restarts into VR from the arcade menu as soon as it is, and meanwhile arms a crash
+##    restart (a plain relaunch: VR if the runtime is up, else flat and waiting again).
+##  - While VR is live the main window's V-Sync is off (Godot's OpenXR docs: the runtime paces frames). With V-Sync
+##    on, the TV's 60 Hz capped the arcade at 60 fps while the Frame asked for 90 Hz (2026-11-19 "it's going like 50").
+##    Engine.max_fps caps it at VR_MAX_FPS so a paused session can't spin. Restored when VR ends.
 ## The launcher decides nothing (Simon's rule): every decision is here, hot-reloadable.
 ## Tests (fake VR, no SteamVR): VR_WATCH_FAKE=1 with BOT_VR=1 counts as a live session (unless --xr-mode off was
 ## passed); VR_WATCH_SERVER names the runtime process to watch (default vrserver), VR_WATCH_LINK_LOG the headset
@@ -32,6 +41,7 @@ const LINK_LOG := "~/.local/share/Steam/logs/driver_vrlink.txt"
 ## vrlink log lines: the headset (re)connected / the link or server went away.
 const LINK_UP := "ReceivedHMDStaticProps"
 const LINK_DOWN := ["startup with PID", "Connection inactive", "SVLServer::Shutdown"]
+const VR_MAX_FPS := 150  # above the Frame's 90 / 120 Hz; only stops a paused session spinning
 
 var started_at := 0.0  # unix time this process started watching
 var lost_at := 0.0  # > 0: this is the flat run after VR stopped (DUO_VR_LOST) or a rejoin that found no headset
@@ -50,6 +60,9 @@ var _card: Control
 var _banner: Control
 var _banner_label: Label
 var _rejoin_t := -1.0
+var launch_flat := false  # VR was wanted at launch but OpenXR didn't start (SteamVR not running): waiting quietly
+var _vsync_saved := -1  # the window's V-Sync mode before VR turned it off (-1: not changed)
+var _max_fps_saved := -1
 
 
 func _ready() -> void:
@@ -61,11 +74,29 @@ func _ready() -> void:
 		print("VrWatch: flat after VR stopped (DUO_VR_LOST); watching for the headset to come back")
 	elif OS.has_environment("DUO_VR_REJOIN"):
 		print("VrWatch: restarted to rejoin VR")
+	elif xr_failed_at_launch():
+		launch_flat = true
+		lost_at = started_at
+		lost_reason = "VR wasn't running at launch"
+		print("VrWatch: launched flat: OpenXR didn't start (SteamVR not running?); watching for the headset to " +
+			"join VR (and a crash restart is armed: SteamVR's vrclient is loaded in this process)")
+
+
+## OpenXR was asked for (project setting, no --xr-mode off) but didn't start: Godot fell back to flat.
+func xr_failed_at_launch() -> bool:
+	if OS.has_environment("VR_WATCH_FAKE"):
+		return OS.has_environment("VR_WATCH_FAKE_FAILED")
+	if _flat_by_launch() or DisplayServer.get_name() == "headless" or Machine.kind() == "deck":
+		return false  # (a Deck has no SteamVR: its OpenXR never starts and no headset will come)
+	if not bool(ProjectSettings.get_setting("xr/openxr/enabled", false)):
+		return false
+	var xr := XRServer.find_interface("OpenXR")
+	return xr != null and not xr.is_initialized()
 
 
 func _handoff() -> Dictionary:
 	return {"started_at": started_at, "lost_at": lost_at, "lost_reason": lost_reason, "servers": servers,
-		"armed_for": armed_for}
+		"armed_for": armed_for, "launch_flat": launch_flat, "vsync_saved": _vsync_saved, "max_fps_saved": _max_fps_saved}
 
 
 func _adopt(s: Dictionary) -> void:
@@ -74,6 +105,9 @@ func _adopt(s: Dictionary) -> void:
 	lost_reason = str(s.get("lost_reason", ""))
 	servers = s.get("servers", [])
 	armed_for = str(s.get("armed_for", ""))
+	launch_flat = bool(s.get("launch_flat", false))
+	_vsync_saved = int(s.get("vsync_saved", -1))
+	_max_fps_saved = int(s.get("max_fps_saved", -1))
 
 
 func _process(delta: float) -> void:
@@ -86,6 +120,7 @@ func _process(delta: float) -> void:
 		return
 	_t = POLL
 	var now_live := session_live()
+	_pace_for_vr(now_live)
 	if now_live:
 		_connect_signals()
 		if not live:
@@ -99,6 +134,7 @@ func _process(delta: float) -> void:
 		if now_live:
 			print("VrWatch: VR is back")
 			lost_at = 0.0
+			launch_flat = false
 			headset_back = false
 			OS.unset_environment("DUO_VR_LOST")
 			_clear_ui()
@@ -111,6 +147,23 @@ func _process(delta: float) -> void:
 		lost_at = started_at
 		lost_reason = "the headset wasn't ready to rejoin"
 		print("VrWatch: rejoining VR found no headset session; flat, watching again")
+
+
+## V-Sync off and an fps cap while VR is live (the runtime paces frames); the window's own settings back after.
+func _pace_for_vr(now_live: bool) -> void:
+	if now_live and _vsync_saved < 0:
+		_vsync_saved = DisplayServer.window_get_vsync_mode()
+		_max_fps_saved = Engine.max_fps
+		DisplayServer.window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)
+		Engine.max_fps = VR_MAX_FPS
+		print("VrWatch: VR live: window V-Sync off (was mode %d), max_fps %d: the headset paces frames" % [
+			_vsync_saved, VR_MAX_FPS])
+	elif not now_live and _vsync_saved >= 0:
+		DisplayServer.window_set_vsync_mode(_vsync_saved)
+		Engine.max_fps = _max_fps_saved
+		print("VrWatch: VR not live: window V-Sync mode %d, max_fps %d again" % [_vsync_saved, _max_fps_saved])
+		_vsync_saved = -1
+		_max_fps_saved = -1
 
 
 # --- Live VR -------------------------------------------------------------------------------------------------------
@@ -224,10 +277,14 @@ func _resume_in_arcade(game_id: String) -> void:
 
 func _flat_tick() -> void:
 	state = "rejoining" if _rejoin_t >= 0.0 else "lost"
-	_show_ui()
+	if launch_flat and armed_for != "flat:" + _game_id():
+		_arm_launch_flat()
 	if _rejoin_t >= 0.0:
 		return
 	headset_back = _headset_is_back()
+	if launch_flat and not headset_back:
+		return  # never started VR: nothing to say on the TV until a headset turns up
+	_show_ui()
 	if not headset_back:
 		_set_banner(STOPPED_TEXT)
 		return
@@ -304,6 +361,7 @@ func _show_ui() -> void:
 	_ui = UiKit.ui_root(self, 120)
 	_ui.name = "VrStopped"
 	_card = UiKit.panel("card")
+	_card.visible = not launch_flat  # "VR stopped" is wrong when VR never started: only the banner
 	var box := UiKit.vbox()
 	box.custom_minimum_size.x = 620.0
 	box.add_child(UiKit.title("VR stopped"))
@@ -369,6 +427,22 @@ func _arm() -> void:
 	armed_for = _game_id()
 	if supervised():
 		_write_restart(_flat_spec("the VR runtime crashed", false))
+
+
+## Flat because VR didn't start at launch: if SteamVR's vrclient (loaded by the failed start) aborts us, start again
+## as a plain launch (VR if the runtime is up by then), in the same game.
+func _arm_launch_flat() -> void:
+	armed_for = "flat:" + _game_id()
+	if supervised():
+		_write_restart(launch_flat_spec(_game_id()))
+
+
+static func launch_flat_spec(game_id: String) -> Dictionary:
+	var env := {}
+	if game_id != "":
+		env["DUO_RESUME_GAME"] = game_id
+	return {"args": [], "env": env, "unset": ["DUO_VR_LOST", "DUO_VR_REJOIN", "BOT_VR"], "now": false,
+		"reason": "crashed while flat waiting for VR (SteamVR's vrclient is loaded in the arcade)"}
 
 
 func _disarm() -> void:

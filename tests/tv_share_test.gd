@@ -6,6 +6,9 @@ extends SceneTree
 ##   - the fake process list (TV_SHARE_FAKE) parses;
 ##   - pads_off() follows the meta, and the shared input layers honour it (core/party.gd, core/ui_input.gd);
 ##   - guards: TvShare is a service; no other code unmaps / hides the arcade window (one place decides).
+##   - 2026-11-19: Steam's streaming_client (AppId 202355, the Frame cast) is not a TV game; outside gamescope the
+##     window is never unmapped (KWin/Xwayland then blocked presents: 5-8 fps in the headset); a slow hidden run puts
+##     the window back and stops hiding;
 ##   godot-test --headless --path . -s res://tests/tv_share_test.gd   -> TV SHARE: PASS / FAIL
 
 const TvShare := preload("res://core/tv_share.gd")
@@ -15,6 +18,7 @@ var fails: Array[String] = []
 
 func _initialize() -> void:
 	_finding()
+	_streaming_and_desktop()
 	_fake()
 	_pads()
 	_guards()
@@ -49,6 +53,33 @@ func _finding() -> void:
 	var ms := (Time.get_ticks_usec() - t0) / 1000.0
 	_check(real is Array, "reading /proc works")
 	print("tv share: /proc scan %.1f ms (in a worker thread in the game), %d reapers" % [ms, real.size()])
+
+
+func _streaming_and_desktop() -> void:
+	var cast := [{"pid": 289753, "cmd": "/home/deck/.local/share/Steam/steamrt64/reaper SteamLaunch AppId=202355 -- /home/deck/.local/share/Steam/steamrt64/streaming_client --universe 1 --server 192.168.0.229:27031"}]
+	_check(TvShare.other_games(cast, [1]).is_empty(), "streaming_client (AppId 202355) must not count as a game on the TV")
+	OS.set_environment("TV_SHARE_FAKE", "/nonexistent")
+	OS.set_environment("TV_SHARE_FAKE_DESKTOP", "1")
+	_check(not TvShare.under_gamescope(), "TV_SHARE_FAKE_DESKTOP must read as Desktop Mode")
+	var t: Node = TvShare.new()
+	root.add_child(t)
+	var why := String(t.call("_set_mapped", false))
+	_check(why.contains("gamescope"), "outside gamescope the window must never be unmapped (got '%s')" % why)
+	t.call("_decide", ["674940"])
+	t.call("_decide", ["674940"])
+	_check(not bool(t.get("hidden")), "a hide refused in Desktop Mode must leave the window shown")
+	OS.unset_environment("TV_SHARE_FAKE_DESKTOP")
+	# Slow while hidden: the window comes back and hiding stops for the run.
+	t.set("hidden", true)
+	t.set("problem", "")
+	for i in 30:
+		t.call("_watch_speed", 0.13)
+	_check(not bool(t.get("hidden")) and bool(t.get("slow_seen")), "5-8 fps while hidden must put the window back")
+	t.call("_decide", ["674940"])
+	_check(not bool(t.get("hidden")), "after a slow hide it must not hide again this run")
+	t.free()
+	Engine.set_meta(TvShare.META, false)
+	OS.unset_environment("TV_SHARE_FAKE")
 
 
 func _fake() -> void:

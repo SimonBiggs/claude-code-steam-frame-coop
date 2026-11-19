@@ -8,6 +8,10 @@ extends SceneTree
 ##   - guards (the pattern "a VR session not under the restart supervisor"): VrWatch is a service, launch.sh starts
 ##     the game with `gdev run`, tools/gdev restarts on crash signals / "now" from GDEV_RESTART_FILE; no other code
 ##     restarts or quits the game on OpenXR session loss (one place decides).
+##   - launched while SteamVR wasn't running (2026-11-19: vrclient, loaded by the failed start, aborted the flat arcade
+##     when SteamVR came up): the run waits for the headset quietly and its crash restart is a plain relaunch (VR if
+##     the runtime is up, no --xr-mode off) in the same game; VR live turns the window's V-Sync off (the TV's 60 Hz
+##     capped the 90 Hz headset) and puts it back after; one place does that (no game sets V-Sync itself);
 ##   godot-test --headless --path . -s res://tests/vr_watch_test.gd   -> VR WATCH: PASS / FAIL
 
 const VrWatch := preload("res://core/vr_watch.gd")
@@ -75,6 +79,36 @@ func _specs() -> void:
 	_check(not VrWatch.supervised() or OS.has_environment("GDEV_RESTART_FILE"), "supervised() needs the restart file")
 	_check(not w.call("session_live"), "no headset in a test: session_live() must be false")
 	w.free()
+	# Launched flat because SteamVR wasn't running.
+	var ls: Dictionary = VrWatch.launch_flat_spec("kart_race")
+	_check(not Array(ls.get("args", [])).has("--xr-mode"), "launch-flat crash restart must try VR again (no --xr-mode off): %s" % [ls])
+	_check(dict(ls.get("env", {})).get("DUO_RESUME_GAME", "") == "kart_race", "launch-flat crash restart keeps the game")
+	_check(not bool(ls.get("now", true)), "launch-flat restart is armed for a crash only (not 'now')")
+	for k in ["DUO_VR_LOST", "DUO_VR_REJOIN"]:
+		_check(Array(ls.get("unset", [])).has(k), "launch-flat restart must unset %s" % k)
+	OS.set_environment("VR_WATCH_FAKE", "1")
+	OS.set_environment("VR_WATCH_FAKE_FAILED", "1")
+	var lf: Node = VrWatch.new()
+	root.add_child(lf)
+	if not lf.is_node_ready():
+		lf.call("_ready")  # (-s scripts: the tree isn't running yet in _initialize)
+	_check(bool(lf.get("launch_flat")) and float(lf.get("lost_at")) > 0.0, "a run whose OpenXR failed at launch must wait for the headset (launch_flat)")
+	lf.set("_t", 0.0)
+	lf.call("_process", 0.016)
+	_check(String(lf.call("ui_text")) == "", "launch_flat with no headset: nothing on the TV (was '%s')" % lf.call("ui_text"))
+	_check(lf.get("state") == "lost", "launch_flat waits in state lost (was %s)" % lf.get("state"))
+	lf.free()
+	OS.unset_environment("VR_WATCH_FAKE_FAILED")
+	var nf: Node = VrWatch.new()
+	root.add_child(nf)
+	if not nf.is_node_ready():
+		nf.call("_ready")
+	_check(not bool(nf.get("launch_flat")), "a run without the failed-XR sign must not count as launch_flat")
+	nf.free()
+	OS.unset_environment("VR_WATCH_FAKE")
+	var src := FileAccess.get_file_as_string("res://core/vr_watch.gd")
+	_check(src.contains("window_set_vsync_mode(DisplayServer.VSYNC_DISABLED)") and src.contains("_pace_for_vr(now_live)"),
+		"core/vr_watch.gd must turn V-Sync off while VR is live (Frame 90 Hz vs TV 60 Hz)")
 
 
 func dict(v: Variant) -> Dictionary:
@@ -97,6 +131,14 @@ func _guards() -> void:
 	var gdev := FileAccess.get_file_as_string("res://tools/gdev")
 	for need in ["CRASH_SIGNALS", "GDEV_RESTART_FILE", "GDEV_SUPERVISED", "restart.json", "\"now\""]:
 		_check(gdev.contains(need), "tools/gdev lost its RESTART support (%s missing)" % need)
+	# One place sets the window's V-Sync / max_fps for VR (core/vr_watch.gd): a game doing it too fights it.
+	var vs := RegEx.create_from_string("window_set_vsync_mode|Engine\\.max_fps\\s*=")
+	var all: Array[String] = []
+	_collect("res://games", all)
+	_collect("res://arcade", all)
+	for path in all:
+		if vs.search(FileAccess.get_file_as_string(path)) != null:
+			fails.append("%s sets V-Sync / max_fps: leave it to core/vr_watch.gd (VR pacing)" % path)
 	# One place decides what happens when OpenXR goes away: no game / core script hooks the loss signals itself.
 	var re := RegEx.create_from_string("session_loss_pending|instance_exiting")
 	var files: Array[String] = []

@@ -16,13 +16,21 @@ extends Node
 ## VR card, and the TV shows the arcade as before.
 ## "Another Steam game": a `reaper SteamLaunch AppId=N` process that is not one of our own ancestors (our own launch)
 ## and not SteamVR. Read in a worker thread every POLL seconds.
+## Hiding is only for gamescope (Gaming Mode). 2026-11-19: in Desktop Mode (KWin + Xwayland) an unmapped window's
+## Vulkan presents block (~130 ms each), so the headset got 5-8 fps ("one frame per minute"); and AppId 202355 is Steam's
+## streaming_client (the Frame cast to the TV), not a game with players on the TV. So: no unmap outside gamescope (said
+## in the log), streaming_client ignored, and a guard: if the game drops under SLOW_FPS for SLOW_SECONDS while hidden,
+## the window comes back at once and stays (log + VR card).
 ## Tests: tests/tv_share_test.gd (parsing, decisions, guards). TV_SHARE_FAKE=<file>: read the process list from that
 ## file (lines "pid cmdline") instead of /proc; TV_SHARE_FORCE_VR=1 counts this run as a VR one (offscreen checks).
 
 const POLL := 3.0
 ## Steam apps that are not "a game on the TV": SteamVR (Steam's gameprocess_log, 2026-11-14: the arcade came in as
 ## "reaper SteamLaunch AppId=2443052841", Stick Fight as AppId=674940; SteamVR started inside the arcade's tree, no reaper).
-const IGNORE_APPS := ["250820"]
+## 202355: Steam's streaming_client (Remote Play / the Frame's view cast to the TV), 2026-11-19.
+const IGNORE_APPS := ["250820", "202355"]
+const SLOW_FPS := 30.0
+const SLOW_SECONDS := 3.0
 const CARD_LINE := "TV busy: playing in VR only"
 const META := "tv_share_hidden"
 
@@ -35,6 +43,8 @@ var _result: Array = []
 var _mutex := Mutex.new()
 var _ancestors: Array = []
 var _told := false
+var _slow_t := 0.0
+var slow_seen := false  # hiding made the game slow this run: never hide again (tests read it)
 
 
 func _ready() -> void:
@@ -43,13 +53,14 @@ func _ready() -> void:
 
 
 func _handoff() -> Dictionary:
-	return {"hidden": hidden, "others": others, "told": _told}
+	return {"hidden": hidden, "others": others, "told": _told, "slow_seen": slow_seen}
 
 
 func _adopt(s: Dictionary) -> void:
 	hidden = bool(s.get("hidden", false))
 	others = s.get("others", [])
 	_told = bool(s.get("told", false))
+	slow_seen = bool(s.get("slow_seen", false))
 
 
 func _exit_tree() -> void:
@@ -68,6 +79,8 @@ func _process(delta: float) -> void:
 		var found := _result.duplicate()
 		_mutex.unlock()
 		_decide(found)
+	if hidden:
+		_watch_speed(delta)
 	_t -= delta
 	if _t > 0.0:
 		return
@@ -87,7 +100,7 @@ func _process(delta: float) -> void:
 func vr_run() -> bool:
 	if OS.has_environment("TV_SHARE_FORCE_VR") or OS.has_environment("DUO_VR_LOST") or OS.has_environment("DUO_VR_REJOIN"):
 		return true
-	var w := get_node_or_null("/root/VrWatch")
+	var w := get_node_or_null("/root/VrWatch") if is_inside_tree() else null
 	if w != null and w.has_method("session_live"):
 		return bool(w.call("session_live"))
 	var xr := XRServer.find_interface("OpenXR")
@@ -96,9 +109,11 @@ func vr_run() -> bool:
 
 func _decide(found: Array) -> void:
 	others = found
-	var want_hidden := vr_run() and not found.is_empty()
-	if want_hidden == hidden:
-		return
+	var want_hidden := vr_run() and not found.is_empty() and not slow_seen
+	if not want_hidden:
+		problem = ""
+	if want_hidden == hidden or (want_hidden and problem != ""):
+		return  # (a hide that couldn't happen was said once; said again only after the other game ends)
 	if want_hidden:
 		print("TvShare: another game is on the TV (Steam app %s): VR only, giving the TV back" % ", ".join(found))
 		problem = _set_mapped(false)
@@ -118,8 +133,39 @@ func _decide(found: Array) -> void:
 		Engine.set_meta(META, false)
 
 
+## While hidden: frames slower than SLOW_FPS for SLOW_SECONDS (a compositor throttling the unmapped window) put the
+## window straight back and stop hiding for this run.
+func _watch_speed(delta: float) -> void:
+	if delta > 1.0 / SLOW_FPS:
+		_slow_t += delta
+	else:
+		_slow_t = maxf(0.0, _slow_t - delta)
+	if _slow_t < SLOW_SECONDS:
+		return
+	_slow_t = 0.0
+	slow_seen = true
+	print("TvShare: the game ran under %d fps with its window off the TV (the compositor throttles hidden windows): " % int(SLOW_FPS)
+		+ "putting it back on the TV and not hiding again this run")
+	var p := _set_mapped(true)
+	if p != "":
+		print("TvShare: CAN'T show the arcade on the TV again: %s" % p)
+	hidden = false
+	Engine.set_meta(META, false)
+	_tell("TV: sharing the TV (hiding made VR slow)")
+
+
+## gamescope (Gaming Mode) shows the next window when ours is unmapped and keeps our presents going; KWin/Xwayland
+## (Desktop Mode) blocks them (5-8 fps in the headset, 2026-11-19).
+static func under_gamescope() -> bool:
+	if OS.has_environment("TV_SHARE_FAKE"):
+		return not OS.has_environment("TV_SHARE_FAKE_DESKTOP")
+	return OS.has_environment("GAMESCOPE_WAYLAND_DISPLAY") or OS.get_environment("XDG_CURRENT_DESKTOP").to_lower().contains("gamescope")
+
+
 ## Unmap / map our main window. Returns "" or why it couldn't.
 func _set_mapped(on: bool) -> String:
+	if not on and not under_gamescope():
+		return "not in Gaming Mode (gamescope): hiding the window there makes VR crawl"
 	if DisplayServer.get_name() != "X11":
 		return "display server is %s, not X11" % DisplayServer.get_name()
 	var wid := DisplayServer.window_get_native_handle(DisplayServer.WINDOW_HANDLE)
@@ -133,8 +179,9 @@ func _set_mapped(on: bool) -> String:
 
 
 func _tell(line: String) -> void:
-	var cam := get_viewport().get_camera_3d()
-	var scene := get_tree().current_scene
+	var vp := get_viewport()
+	var cam := vp.get_camera_3d() if vp != null else null
+	var scene := get_tree().current_scene if is_inside_tree() else null
 	if cam is XRCamera3D and scene != null:
 		preload("res://core/story_card.gd").show_vr(scene, cam, {"who": "TV", "line": line, "duration": 5.0})
 	print("TvShare card: %s" % line)
