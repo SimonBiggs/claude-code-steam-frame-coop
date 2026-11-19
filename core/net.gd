@@ -264,7 +264,7 @@ func _exit_tree() -> void:
 var menu_was_down := false
 var vr_pause_menu: Node3D = null  # the VR PAUSED panel (core/vr_menu.gd) while paused on this VR machine
 const VrMenu := preload("res://core/vr_menu.gd")
-const VR_TOGGLE_GAP := 0.4
+const VR_TOGGLE_GAP := 0.25  # (a tap on RESUME 0.4 s after the pull that paused is real: engine_sys_test)
 var _vr_clock := 0.0  # seconds _check_vr_menu has run (paused too)
 var _vr_toggle_at := -100.0
 const VR_PAUSE_OUT := 0.55  # metres in front of the head (x world scale): the PAUSED panel sits by the hands
