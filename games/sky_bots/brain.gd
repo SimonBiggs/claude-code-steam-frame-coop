@@ -4,7 +4,10 @@ extends RefCounted
 ## Walks to each step, hops at a floor's edge or up a step, waits for a mover to come close and a lift to come down
 ## (then rides it up), waits while a zap pad ahead flashes or buzzes, punches grumbles in front of it, punches the
 ## cracked wall open and grabs the gold gear, and on Crab Cove keeps clear of Cranky Crab's stomp and punches it while
-## it's dizzy. out_* are this frame's wishes; the robot (or the bot's pad) does the moving.
+## it's dizzy; walks onto spring pads and steers onto the ledge, walks off the edge into a fan's updraft and floats
+## across, runs along belts, opens bot boxes (a jump and a GROUND POUND on top, a punch if that missed), and on
+## Clockwork Keep steps out of King Keywind's charge line. out_* are this frame's wishes; the robot (or the bot's pad)
+## does the moving.
 
 const G := preload("res://games/sky_bots/levelgen.gd")
 
@@ -13,12 +16,15 @@ var out_move := Vector3.ZERO
 var out_jump := false
 var out_hold := false
 var out_punch := false
+var out_pound := false
+var pounds := 0  ## (bots: pounds asked for)
 var stuck_t := 0.0
 var step_t := 0.0
 var warps := 0  ## times a CPU buddy was so stuck it hopped ahead (host; telemetry, bots)
 var _last := Vector3.INF
 var _punch_cd := 0.0
 var _wait_t := 0.0
+var _boxing := false  ## at a bot box (on its floor, or hopping to pound it)
 
 
 func reset() -> void:
@@ -58,6 +64,7 @@ func think(r: Node3D, level: Node, boss: Node, delta: float) -> void:
 	out_jump = false
 	out_hold = false
 	out_punch = false
+	out_pound = false
 	_punch_cd = maxf(0.0, _punch_cd - delta)
 	var lv: Dictionary = level.lv
 	var route: Array = lv.get("route", [])
@@ -79,6 +86,11 @@ func think(r: Node3D, level: Node, boss: Node, delta: float) -> void:
 	else:
 		stuck_t += delta
 	_punch_grumbles(r, level)
+	if act == "spring" and (r as CharacterBody3D).velocity.y > G.JUMP_V + 0.5:
+		_next(route)  # thrown by the spring: steer for the ledge (the next step)
+		return
+	if act == "box" and (on == want or (_boxing and not r.is_on_floor())) and _open_box(r, level, tp, delta, route):
+		return
 	if act == "boss" and on == want and boss != null and boss.alive():
 		_fight(r, level, boss, delta)
 		return
@@ -158,7 +170,39 @@ func think(r: Node3D, level: Node, boss: Node, delta: float) -> void:
 		stuck_t = 0.0 if stuck_t > 2.5 else stuck_t
 
 
+## A bot box: walk up to it, hop and pound it open (punch it if that missed). False when it's open (move on).
+func _open_box(r: Node3D, level: Node, tp: Vector3, delta: float, route: Array) -> bool:
+	var bx: int = level.box_near(tp + Vector3(0, 0, -0.9), 0.3)
+	if bx < 0 or step_t > 7.0:
+		_next(route)
+		return false
+	var bp: Vector3 = (level.lv.boxes[bx] as Dictionary).pos
+	var body := r as CharacterBody3D
+	_boxing = true
+	var flat := Vector3(bp.x - r.position.x, 0.0, bp.z - r.position.z)
+	if not body.is_on_floor():
+		out_move = _toward(flat, 0.0)
+		if body.velocity.y < 1.0 and flat.length() < 0.6:
+			out_pound = true
+			pounds += 1
+		return true
+	if flat.length() > 1.3:
+		out_move = _toward(Vector3(tp.x - r.position.x, 0.0, tp.z - r.position.z), 0.2)
+		return true
+	out_move = _toward(flat, 0.0)
+	if step_t > 4.0 and _punch_cd <= 0.0:
+		r.rotation.y = atan2(flat.x, flat.z)
+		out_punch = true
+		_punch_cd = 0.5
+	elif _wait_t <= 0.0:
+		out_jump = true
+		_wait_t = 1.2
+	_wait_t -= delta
+	return true
+
+
 func _next(route: Array) -> void:
+	_boxing = false
 	k = mini(k + 1, route.size() - 1)
 	step_t = 0.0
 
@@ -231,6 +275,18 @@ func _fight(r: Node3D, level: Node, boss: Node, _delta: float) -> void:
 			r.rotation.y = atan2(-rel.x, -rel.z)
 			out_punch = true
 			_punch_cd = 0.35
+	elif String(boss.kind) == "king" and (st == "tell" or st == "dash"):
+		# Out of the charge line: sideways, away from it (and never off the arena).
+		var dir: Vector3 = boss.charge_dir
+		var along := rel.dot(dir)
+		var perp := rel - dir * along
+		if along > -1.2 and perp.length() < 2.2:
+			var side := perp.normalized() if perp.length() > 0.2 else Vector3(-dir.z, 0, dir.x)
+			var to3 := r.position + side * 2.0
+			var off3 := Vector3(to3.x - c.x, 0.0, to3.z - c.z)
+			if off3.length() > float(boss.arena_r) - 0.8:
+				to3 = r.position - side * 2.0 + dir * 0.0
+			out_move = _toward(Vector3(to3.x - r.position.x, 0.0, to3.z - r.position.z), 0.0)
 	elif st == "tell" or st == "stomp":
 		var safe := float(boss.stomp_r) + 1.4
 		if dist < safe:

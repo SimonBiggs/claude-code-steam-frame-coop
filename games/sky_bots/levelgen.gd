@@ -63,7 +63,8 @@ const ISLANDS := 6
 const ISLAND_NAMES: Array[String] = ["MEADOW HOP", "GEAR WORKS", "CRAB COVE", "SNOWY PEAKS", "JUNGLE JUMBLE", "CLOCKWORK KEEP"]
 const ISLAND_PICS: Array[String] = ["meadowisle", "gearisle", "coveisle", "snowisle", "jungleisle", "clockisle"]
 const THEMES: Array[String] = ["meadow", "gears", "cove", "snow", "jungle", "clock"]
-const BOSSES := {3: "crab", 6: "king"}  ## the islands that end on a boss arena: Cranky Crab, King Keywind
+const BOSSES := {3: "crab", 6: "king"}
+const SIGNATURE := {4: "spring", 5: "fan", 6: "belt"}  ## each far island's own gadget (always there, early on)  ## the islands that end on a boss arena: Cranky Crab, King Keywind
 const DAILY_NAME := "TODAY'S ISLAND"
 ## Each island's sections (shuffled, "steps" first; the secret is never first; the goal / boss arena comes last).
 const POOLS := {
@@ -167,6 +168,9 @@ static func _try(r: RandomNumberGenerator, island: int, m: String) -> Dictionary
 	if island == 0 or island > 3:  # (the long-gadget islands: the secret always fits, early on)
 		pool.erase("secret")
 		pool.insert(1, "secret")
+	if SIGNATURE.has(island):  # (... and the island's own gadget comes first, so it always fits)
+		pool.erase(SIGNATURE[island])
+		pool.insert(0, SIGNATURE[island])
 	var sections: Array = ["steps"] + pool
 	var boss := boss_of(island) != ""
 	var end_len := 13.0 if boss else 6.0
@@ -708,6 +712,9 @@ static func check(lv: Dictionary) -> Array:
 		out.append("the goal isn't on the last floor")
 	elif goal.x - last_x > MAX_CP_GAP:
 		out.append("the goal is %.1f past the last checkpoint" % (goal.x - last_x))
+	var sig := String(SIGNATURE.get(int(lv.get("island", 1)), ""))
+	if sig != "" and (lv.get(sig + "s", []) as Array).is_empty():
+		out.append("no %s on its own island" % sig)
 	var bk := boss_of(int(lv.get("island", 1)))
 	if bk != "":
 		var bd: Dictionary = lv.get("boss", {})
