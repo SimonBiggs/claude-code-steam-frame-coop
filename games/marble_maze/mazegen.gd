@@ -18,6 +18,20 @@ extends RefCounted
 ## open, and that no cell you can reach is a trap (from everywhere you can still get to the pads /
 ## the goal). Plus: the shiny can be reached, arrows never fling you at a hole, the goal is at least a
 ## few steps away. Pure functions (no nodes): host, TV machine and tests all make the same maze.
+## THIRD PASS: BOARD TYPES (spec "style") and GADGETS.
+##   rooms    the rooms-and-doors maze above.
+##   islands  the same rooms floating over the sky: the walls between rooms are AIR ('_', you'd fall) except some
+##            railings ('#', spec "rails" = how many), and every door is a narrow PLANK ('-' crossed left/right, '|'
+##            forward/back). Never air right next to the start or the goal.
+##   pinball  one big hall with a few short wall bars and lots of bumpers: bounce your way to the goal.
+##   zigzag   long lanes 1-2 cells high joined at alternate ends (a racing snake), the odd pillar and shortcut.
+##   Gadgets: 'N' MAGNET tile (pulls marbles that roll near it towards its middle, always weaker than a marble's own
+##   push: MAGNET_PULL < MARBLE_STEER), 'W' WARP HOLE -> 'w' its exit (one way: roll in, pop out there), 'H' / 'V'
+##   MOVING WALLS (a block sliding one cell each way left/right or forward/back: either a gate across a one-cell
+##   corridor that slides into the walls either side, or out in the open with floor all round; never near a hole or
+##   the edge), spec "patches" = little ICE PATCHES of 2-4 cells.
+## check() knows them all: planks only one way across, air is a wall to the walk, a warp hole leads to its exit only,
+## magnets / warp exits / moving walls / bumpers / zoom arrows never next to (or flinging into) a hole or the air.
 
 const Seeded := preload("res://core/seeded.gd")
 
@@ -25,13 +39,18 @@ const W := 12
 const H := 10
 const DIRS: Array[Vector2i] = [Vector2i(1, 0), Vector2i(-1, 0), Vector2i(0, 1), Vector2i(0, -1)]
 const ARROWS := {">": Vector2i(1, 0), "<": Vector2i(-1, 0), "^": Vector2i(0, -1), "v": Vector2i(0, 1)}
-const ALPHABET := "#.SGO*BIPD><^vT"
+const ALPHABET := "#.SGO*BIPD><^vTNWwHV_-|"
+const STYLES: Array[String] = ["rooms", "islands", "pinball", "zigzag"]
+const MAGNET_PULL := 0.3  # board.gd: a magnet tile's strongest pull (board units / s^2)
+const MAGNET_REACH := 1.6  # cells
+const MARBLE_STEER := 0.45  # marble.gd STEER (the gen test checks they agree)
 const MIN_GOAL_STEPS := 7
 const TRIES := 40
 
 ## The default spec (every key optional): how many of each feature, and room sizes.
 const SPEC := {"name": "MAZE", "theme": "garden", "new": "", "holes": 0, "bumpers": 0, "ice": 0, "arrows": 0,
-	"tp": false, "pads": false, "shiny": true, "loops": 2, "minw": 2, "maxw": 3, "door": 0.5}
+	"tp": false, "pads": false, "shiny": true, "loops": 2, "minw": 2, "maxw": 3, "door": 0.5,
+	"style": "rooms", "patches": 0, "magnets": 0, "warp": false, "movers": 0, "rails": 0.45}
 
 
 ## A fair maze for (seed, spec). Tries several streams; if none passes check() (very rare) it returns
@@ -53,8 +72,31 @@ static func generate(seed_value: int, spec_in: Dictionary) -> Dictionary:
 
 
 static func _level(seed_value: int, spec: Dictionary, rows: Array) -> Dictionary:
-	return {"name": str(spec.name), "theme": str(spec.theme), "tip": "", "time": 0, "new": str(spec.new),
-		"map": rows, "seed": seed_value}
+	var lv := {"name": str(spec.name), "theme": str(spec.theme), "tip": "", "time": 0, "new": str(spec.new),
+		"map": rows, "seed": seed_value, "style": str(spec.get("style", "rooms"))}
+	lv["steps"] = maxi(0, _path(_grid_of(rows)).size() - 1)  # the shortest way's length (race par: story.gd)
+	return lv
+
+
+static func _grid_of(rows: Array) -> Array:
+	var g: Array = []
+	for row in rows:
+		var a: Array = []
+		for k in str(row):
+			a.append(k)
+		g.append(a)
+	return g
+
+
+## A grid with the border walls and every inside cell set to fill.
+static func _blank(fill: String) -> Array:
+	var g: Array = []
+	for y in H:
+		var row: Array = []
+		for x in W:
+			row.append("#" if x == 0 or y == 0 or x == W - 1 or y == H - 1 else fill)
+		g.append(row)
+	return g
 
 
 ## A wide, plain maze (the first lesson's shape): the safety net.
@@ -65,7 +107,54 @@ static func _plain() -> Array:
 
 # --- Building ----------------------------------------------------------------------------
 
-static func _try(r: RandomNumberGenerator, spec: Dictionary) -> Array:
+static func _try(r: RandomNumberGenerator, spec_in: Dictionary) -> Array:
+	var spec := spec_in
+	var style := str(spec.get("style", "rooms"))
+	if style != "rooms":
+		spec = spec_in.duplicate()
+		spec["pads"] = false  # team gates live in the rooms maze only
+		if style == "pinball":
+			spec["patches"] = int(spec.get("patches", 0)) + int(spec.get("ice", 0))  # one hall: ice comes in patches
+			spec["ice"] = 0
+	var lay: Dictionary
+	if style == "pinball":
+		lay = _lay_pinball(r)
+	elif style == "zigzag":
+		lay = _lay_zigzag(r, spec)
+	else:
+		lay = _lay_rooms(r, spec, style == "islands")
+	if lay.is_empty():
+		return []
+	var g: Array = lay.g
+	var rooms: Array = lay.rooms
+	if not _place_ice(r, g, rooms, int(spec.ice)):
+		return []
+	_place_patches(r, g, int(spec.get("patches", 0)))
+	_place_arrows(r, g, int(spec.arrows))
+	# A rooms maze must have its teleporters / warp hole (the place's own thing); the other board types try, and go
+	# without when they can't fit one fairly (a pinball hall or sky islands with everything at once).
+	if bool(spec.tp) and not _place_teleporters(r, g, rooms) and style == "rooms":
+		return []
+	if bool(spec.get("warp", false)) and not _place_warp(r, g) and style == "rooms":
+		return []
+	_place_movers(r, g, int(spec.get("movers", 0)))
+	_place_magnets(r, g, int(spec.get("magnets", 0)))
+	if int(spec.bumpers) > 0:
+		_scatter(r, g, "B", int(spec.bumpers), bool(spec.get("ice_holes", false)))
+	if int(spec.holes) > 0:
+		_scatter(r, g, "O", int(spec.holes), bool(spec.get("ice_holes", false)))
+	if bool(spec.pads) and not _place_pads(r, g, rooms):
+		return []
+	if bool(spec.shiny):
+		_place_shiny(g)
+	var out: Array = []
+	for row in g:
+		out.append("".join(PackedStringArray(row)))
+	return out
+
+
+## The rooms maze (islands: over the sky, planks for doors): {g, rooms} or {} to try again.
+static func _lay_rooms(r: RandomNumberGenerator, spec: Dictionary, islands: bool) -> Dictionary:
 	var g: Array = []
 	for y in H:
 		var row: Array = []
@@ -87,7 +176,7 @@ static func _try(r: RandomNumberGenerator, spec: Dictionary) -> Array:
 	var nx := cw.size()
 	var ny := rh.size()
 	if nx * ny < 4:
-		return []
+		return {}
 	for j in ny:
 		for i in nx:
 			for yy in rh[j]:
@@ -156,7 +245,7 @@ static func _try(r: RandomNumberGenerator, spec: Dictionary) -> Array:
 					side[o] = true
 					q.append(o)
 	elif bool(spec.pads):
-		return []
+		return {}
 	# Extra doors (loops), never across the gate's cut.
 	var extra: Array = []
 	var cands: Array = []
@@ -181,7 +270,8 @@ static func _try(r: RandomNumberGenerator, spec: Dictionary) -> Array:
 	for i in mini(int(spec.loops), cands.size()):
 		extra.append(cands[i])
 	for e in tree + extra:
-		_carve_door(r, g, e, xs, ys, cw, rh, float(spec.door), "D" if _same_edge(e, gate_edge) else ".")
+		_carve_door(r, g, e, xs, ys, cw, rh, 0.0 if islands else float(spec.door),
+			"D" if _same_edge(e, gate_edge) else ("plank" if islands else "."))
 	# Start and goal.
 	g[1][1] = "S"
 	var gx0: int = xs[far.x]
@@ -196,7 +286,7 @@ static func _try(r: RandomNumberGenerator, spec: Dictionary) -> Array:
 				bd = int(dist[c])
 				best = c
 	if best.x < 0 or bd < MIN_GOAL_STEPS:
-		return []
+		return {}
 	g[best.y][best.x] = "G"
 	# The rooms (as cell lists) for placing features.
 	var rooms: Array = []
@@ -207,23 +297,116 @@ static func _try(r: RandomNumberGenerator, spec: Dictionary) -> Array:
 				for xx in cw[i]:
 					cells.append(Vector2i(xs[i] + xx, ys[j] + yy))
 			rooms.append({"id": Vector2i(i, j), "cells": cells, "start_side": gate_edge.is_empty() or side.has(Vector2i(i, j))})
-	if not _place_ice(r, g, rooms, int(spec.ice)):
-		return []
-	_place_arrows(r, g, int(spec.arrows))
-	if bool(spec.tp) and not _place_teleporters(r, g, rooms):
-		return []
-	if int(spec.bumpers) > 0:
-		_scatter(r, g, "B", int(spec.bumpers), bool(spec.get("ice_holes", false)))
-	if int(spec.holes) > 0:
-		_scatter(r, g, "O", int(spec.holes), bool(spec.get("ice_holes", false)))
-	if bool(spec.pads) and not _place_pads(r, g, rooms):
-		return []
-	if bool(spec.shiny):
-		_place_shiny(g)
-	var out: Array = []
-	for row in g:
-		out.append("".join(PackedStringArray(row)))
-	return out
+	if islands:
+		# The walls between rooms become sky, except a few railings (and never air by the start or the goal).
+		var rails := float(spec.get("rails", 0.45))
+		for yy in range(1, H - 1):
+			for xx in range(1, W - 1):
+				if g[yy][xx] == "#" and not _near(g, Vector2i(xx, yy), "SG", false) and r.randf() >= rails:
+					g[yy][xx] = "_"
+	return {"g": g, "rooms": rooms}
+
+
+## PINBALL HALL: one open hall, two to four short wall bars (never touching another bar, never by the start), the
+## goal the furthest cell in the half nearest the giant.
+static func _lay_pinball(r: RandomNumberGenerator) -> Dictionary:
+	var g := _blank(".")
+	var bars := r.randi_range(2, 4)
+	var placed := 0
+	for tries in 40:
+		if placed >= bars:
+			break
+		var horiz := r.randf() < 0.5
+		var length := r.randi_range(2, 4)
+		var x0 := r.randi_range(2, W - 3 - (length - 1 if horiz else 0))
+		var y0 := r.randi_range(2, H - 3 - (0 if horiz else length - 1))
+		var cells: Array[Vector2i] = []
+		for k in length:
+			cells.append(Vector2i(x0 + (k if horiz else 0), y0 + (0 if horiz else k)))
+		var ok := true
+		for c in cells:
+			if (c.x <= 3 and c.y <= 3) or not _border_only(g, c):
+				ok = false
+		if ok:
+			for c in cells:
+				g[c.y][c.x] = "#"
+			placed += 1
+	g[1][1] = "S"
+	var dist := _walk(g, Vector2i(1, 1), true)
+	var best := Vector2i(-1, -1)
+	var bd := -1
+	for c in dist:
+		var cc: Vector2i = c
+		if cc.y < H / 2 or g[cc.y][cc.x] != ".":
+			continue
+		var d: int = dist[cc]
+		if d > bd or (d == bd and (cc.y > best.y or (cc.y == best.y and cc.x > best.x))):
+			bd = d
+			best = cc
+	if best.x < 0 or bd < MIN_GOAL_STEPS:
+		return {}
+	g[best.y][best.x] = "G"
+	var cells2: Array[Vector2i] = []
+	for y in H:
+		for x in W:
+			if g[y][x] == ".":
+				cells2.append(Vector2i(x, y))
+	return {"g": g, "rooms": [{"id": Vector2i(0, 0), "cells": cells2, "start_side": true}]}
+
+
+## Is every wall round c (8 neighbours) part of the outer border? (A bar never touches another bar.)
+static func _border_only(g: Array, c: Vector2i) -> bool:
+	for dy in [-1, 0, 1]:
+		for dx in [-1, 0, 1]:
+			var n := c + Vector2i(dx, dy)
+			if _at(g, n) == "#" and n.x > 0 and n.y > 0 and n.x < W - 1 and n.y < H - 1:
+				return false
+	return true
+
+
+## ZIGZAG RUN: lanes 1-2 cells high, each wall between them open at alternate ends (sometimes a shortcut in the
+## middle too), the odd pillar in a wide lane; the goal at the far end of the last lane.
+static func _lay_zigzag(r: RandomNumberGenerator, spec: Dictionary) -> Dictionary:
+	var g := _blank(".")
+	var rh := _partition(r, H - 2, 1, 2)
+	var n := rh.size()
+	if n < 3:
+		return {}
+	var ys: Array[int] = []
+	var y0 := 1
+	for h in rh:
+		ys.append(y0)
+		y0 += h + 1
+	for j in n - 1:
+		var wy: int = ys[j] + rh[j]
+		var right := j % 2 == 0
+		var gw := r.randi_range(1, 2)
+		for x in range(1, W - 1):
+			var in_gap := x >= W - 1 - gw if right else x <= gw
+			if not in_gap:
+				g[wy][x] = "#"
+		if int(spec.loops) > 0 and r.randf() < 0.2 * float(spec.loops):
+			g[wy][r.randi_range(4, W - 5)] = "."
+	for j in n:
+		if rh[j] == 2 and r.randf() < 0.6:
+			g[ys[j] + r.randi_range(0, 1)][r.randi_range(3, W - 4)] = "#"
+	g[1][1] = "S"
+	var last := n - 1
+	var gx := W - 2 if last % 2 == 0 else 1
+	var gy: int = ys[last] + rh[last] - 1
+	g[gy][gx] = "G"
+	var dist := _walk(g, Vector2i(1, 1), true)
+	if int(dist.get(Vector2i(gx, gy), -1)) < MIN_GOAL_STEPS:
+		return {}
+	var rooms: Array = []
+	for j in n:
+		var cells: Array[Vector2i] = []
+		for yy in rh[j]:
+			for x in range(1, W - 1):
+				if g[ys[j] + yy][x] == ".":
+					cells.append(Vector2i(x, ys[j] + yy))
+		rooms.append({"id": Vector2i(0, j), "cells": cells, "start_side": true})
+	return {"g": g, "rooms": rooms}
 
 
 static func _same_edge(e: Array, f: Array) -> bool:
@@ -281,6 +464,8 @@ static func _carve_door(r: RandomNumberGenerator, g: Array, e: Array, xs: Array[
 	var n := clampi(int(round(length * door)), 1, length)
 	if ch == "D":
 		n = mini(n, 2)
+	if ch == "plank":
+		ch = "-" if a.y == b.y else "|"  # a door through a wall column is crossed left/right
 	var off := r.randi_range(0, length - n)
 	for k in n:
 		var c: Vector2i = cells[off + k]
@@ -396,6 +581,160 @@ static func _place_teleporters(r: RandomNumberGenerator, g: Array, rooms: Array)
 	return false
 
 
+## Little ICE PATCHES: 2-4 joined plain cells each, away from the start and the goal.
+static func _place_patches(r: RandomNumberGenerator, g: Array, count: int) -> void:
+	for k in count:
+		for tries in 20:
+			var c := Vector2i(r.randi_range(1, W - 2), r.randi_range(1, H - 2))
+			if g[c.y][c.x] != "." or _near(g, c, "SG", true):
+				continue
+			var cells: Array[Vector2i] = [c]
+			var want := r.randi_range(2, 4)
+			for grow in 8:
+				if cells.size() >= want:
+					break
+				var from: Vector2i = cells[r.randi() % cells.size()]
+				var nb: Vector2i = from + DIRS[r.randi() % 4]
+				if _at(g, nb) == "." and not cells.has(nb) and not _near(g, nb, "SG", true):
+					cells.append(nb)
+			var backup := _copy(g)
+			for cc in cells:
+				g[cc.y][cc.x] = "I"
+			if _fair(g):
+				break
+			_restore(g, backup)
+
+
+## A WARP HOLE ('W') near the way in its first part and its exit ('w') somewhere else (often further on: a
+## shortcut, sometimes back a bit), both on calm floor.
+static func _place_warp(r: RandomNumberGenerator, g: Array) -> bool:
+	var path := _path(g)
+	if path.size() < 8:
+		return false
+	var near_path := _walk_multi(g, path.slice(1, path.size() * 3 / 5), true)
+	var ins: Array = []
+	var outs: Array = []
+	for y in H:
+		for x in W:
+			var c := Vector2i(x, y)
+			if g[y][x] != "." or _near(g, c, "SGTOB_-|NWwHVDP*", true):
+				continue
+			outs.append(c)
+			if int(near_path.get(c, 99)) <= 1:
+				ins.append(c)
+	if ins.is_empty() or outs.size() < 2:
+		return false
+	ins = Seeded.shuffled(r, ins)
+	outs = Seeded.shuffled(r, outs)
+	for a in ins.slice(0, 6):
+		for b in outs.slice(0, 8):
+			var ca: Vector2i = a
+			var cb: Vector2i = b
+			if absi(ca.x - cb.x) + absi(ca.y - cb.y) < 5:
+				continue
+			g[ca.y][ca.x] = "W"
+			g[cb.y][cb.x] = "w"
+			if _fair(g):
+				return true
+			g[ca.y][ca.x] = "."
+			g[cb.y][cb.x] = "."
+	return false
+
+
+## MOVING WALLS: 'H' slides left/right, 'V' forward/back, one cell each way. Either a gate across a one-cell
+## corridor (walls on both sides along its slide, floor before and after) or out in the open (floor all round).
+static func _place_movers(r: RandomNumberGenerator, g: Array, count: int) -> void:
+	if count <= 0:
+		return
+	var cells: Array = []
+	for y in range(1, H - 1):
+		for x in range(1, W - 1):
+			if g[y][x] == ".":
+				cells.append(Vector2i(x, y))
+	cells = Seeded.shuffled(r, cells)
+	var placed := 0
+	for c in cells:
+		if placed >= count:
+			break
+		var cc: Vector2i = c
+		if g[cc.y][cc.x] != "." or _near(g, cc, "SGTWwPD*", true):
+			continue
+		for kind in (["H", "V"] if r.randf() < 0.5 else ["V", "H"]):
+			g[cc.y][cc.x] = kind
+			if _mover_problem(g, cc) == "" and _fair(g):
+				placed += 1
+				break
+			g[cc.y][cc.x] = "."
+
+
+## Why a moving wall at c is unfair ("" = fine): see _place_movers. Never within reach of a hole, the air, a warp
+## hole, a teleporter, a team pad / gate, the start, the goal or the shiny; never two near each other.
+static func _mover_problem(g: Array, c: Vector2i) -> String:
+	var k := _at(g, c)
+	var a := Vector2i(1, 0) if k == "H" else Vector2i(0, 1)
+	var p := Vector2i(a.y, a.x)
+	var floor_ok := ".I"
+	var gate := _at(g, c + a) == "#" and _at(g, c - a) == "#" and floor_ok.contains(_at(g, c + p)) and floor_ok.contains(_at(g, c - p))
+	var open := true
+	for dy in [-1, 0, 1]:
+		for dx in [-1, 0, 1]:
+			if (dx != 0 or dy != 0) and not floor_ok.contains(_at(g, c + Vector2i(dx, dy))):
+				open = false
+	if not gate and not open:
+		return "moving wall at %s is neither a corridor gate nor in the open" % str(c)
+	for s in range(-2, 3):
+		for q in range(-1, 2):
+			var n: Vector2i = c + a * s + p * q
+			if n == c:
+				continue
+			var kn := _at(g, n)
+			if "O_WTPDQESG*HV".contains(kn):
+				return "moving wall at %s is next to '%s'" % [str(c), kn]
+	return ""
+
+
+## Is c inside a moving wall's keep-clear box (2 cells along its slide, 1 across)?
+static func _in_mover_box(g: Array, c: Vector2i) -> bool:
+	for dy in range(-2, 3):
+		for dx in range(-2, 3):
+			var m := c + Vector2i(dx, dy)
+			var k := _at(g, m)
+			if k == "H" and absi(dx) <= 2 and absi(dy) <= 1:
+				return true
+			if k == "V" and absi(dy) <= 2 and absi(dx) <= 1:
+				return true
+	return false
+
+
+## MAGNET tiles beside the way (never on it): they tug marbles rolling past.
+static func _place_magnets(r: RandomNumberGenerator, g: Array, count: int) -> void:
+	if count <= 0:
+		return
+	var path := _path(g)
+	var on := {}
+	for c in path:
+		on[c] = true
+	var cells: Array = []
+	for c in path:
+		for d in DIRS:
+			var n: Vector2i = (c as Vector2i) + d
+			if not on.has(n) and _at(g, n) == "." and not _near(g, n, "SGOW_-|TBHVNwPD*", true) and not cells.has(n):
+				cells.append(n)
+	cells = Seeded.shuffled(r, cells)
+	var placed := 0
+	for c in cells:
+		if placed >= count:
+			break
+		var cc: Vector2i = c
+		if _near(g, cc, "N", true):
+			continue
+		g[cc.y][cc.x] = "N"
+		if _fair(g):
+			placed += 1
+		else:
+			g[cc.y][cc.x] = "."
+
+
 ## Bumpers or holes, one at a time, each kept only if the maze stays fair.
 static func _scatter(r: RandomNumberGenerator, g: Array, ch: String, count: int, on_ice: bool) -> void:
 	var cells: Array = []
@@ -410,7 +749,7 @@ static func _scatter(r: RandomNumberGenerator, g: Array, ch: String, count: int,
 		if placed >= count:
 			break
 		var cc: Vector2i = c
-		if _near(g, cc, "SGTOB", true) or _arrow_lands(g, cc):
+		if _near(g, cc, "SGTOBNWw_-|", true) or _arrow_lands(g, cc):
 			continue
 		if ch == "B" and _near(g, cc, "D", false):
 			continue
@@ -428,7 +767,7 @@ static func _place_pads(r: RandomNumberGenerator, g: Array, rooms: Array) -> boo
 	var cells: Array = []
 	for c in reach:
 		var cc: Vector2i = c
-		if g[cc.y][cc.x] == "." and not _near(g, cc, "SOBTD", true):
+		if g[cc.y][cc.x] == "." and not _near(g, cc, "SOBTDNWw_-|", true) and not _in_mover_box(g, cc):
 			cells.append(cc)
 	cells = Seeded.shuffled(r, cells)
 	for a in cells:
@@ -456,7 +795,7 @@ static func _place_shiny(g: Array) -> void:
 	var bd := -1
 	for c in from_path:
 		var cc: Vector2i = c
-		if g[cc.y][cc.x] != "." or _near(g, cc, "SGT", false):
+		if g[cc.y][cc.x] != "." or _near(g, cc, "SGT", false) or _in_mover_box(g, cc):
 			continue
 		var d: int = from_path[cc]
 		if d > bd or (d == bd and (cc.y < best.y or (cc.y == best.y and cc.x < best.x))):
@@ -581,6 +920,11 @@ static func _passable(k: String, open: bool) -> bool:
 	return not "#OB_".contains(k)
 
 
+## The warp holes' exit ('w'), or (-1, -1).
+static func _warp_exit(g: Array) -> Vector2i:
+	return _find(g, "w")
+
+
 ## Where a marble at c can get to next: four ways, except back against a zoom arrow (leaving one or
 ## entering one) and never sideways off one: BOOST beats any steering, so a marble on an arrow is carried
 ## along it (only an arrow that points into a wall lets you slide off to the side). Today's maze on
@@ -595,16 +939,24 @@ static func _moves(g: Array, c: Vector2i, open: bool) -> Array[Vector2i]:
 			continue
 		if carried and ARROWS[kc] != d:
 			continue
+		if (kc == "-" and d.y != 0) or (kc == "|" and d.x != 0):
+			continue  # a plank is only crossed along it
 		var b: Vector2i = c + d
 		var kb := _at(g, b)
 		if not _passable(kb, open):
 			continue
 		if ARROWS.has(kb) and ARROWS[kb] == -d:
 			continue
+		if (kb == "-" and d.y != 0) or (kb == "|" and d.x != 0):
+			continue
 		if kb == "T":
 			var tw := _twin(g, b)
 			if tw.x >= 0:
 				b = tw
+		elif kb == "W":
+			var wx := _warp_exit(g)
+			if wx.x >= 0:
+				b = wx  # one way: roll in, pop out at the exit
 		out.append(b)
 	return out
 
@@ -682,6 +1034,10 @@ static func check(lv: Dictionary, partial: bool = false) -> Array:
 		why.append("teleporter without a twin")
 	if int(counts.get("*", 0)) > 1:
 		why.append("more than one shiny")
+	if int(counts.get("W", 0)) > 1 or int(counts.get("W", 0)) != int(counts.get("w", 0)):
+		why.append("a warp hole needs exactly one exit")
+	if MAGNET_PULL >= MARBLE_STEER * 0.8:
+		why.append("a magnet tile pulls harder than a marble can roll")
 	var pads: Array = []
 	for y in H:
 		for x in W:
@@ -718,8 +1074,20 @@ static func check(lv: Dictionary, partial: bool = false) -> Array:
 					why.append("bumper flings into the hole at %s" % str(c))
 			if ARROWS.has(k):
 				var d: Vector2i = ARROWS[k]
-				if _at(g, c + d) == "O" or _at(g, c + d * 2) == "O":
+				if "O_".contains(_at(g, c + d)) or "O_".contains(_at(g, c + d * 2)):
 					why.append("zoom arrow flings into a hole at %s" % str(c))
+			if k == "_" and _near(g, c, "SG", false):
+				why.append("air next to the start or goal at %s" % str(c))
+			if k == "B" and _near(g, c, "_-|W", false):
+				why.append("bumper flings off the edge at %s" % str(c))
+			if k == "N" and _near(g, c, "O_W", true):
+				why.append("magnet pulls into a hole at %s" % str(c))
+			if k == "w" and _near(g, c, "O_WB", true):
+				why.append("warp exit lands by a hole at %s" % str(c))
+			if k == "H" or k == "V":
+				var mp := _mover_problem(g, c)
+				if mp != "":
+					why.append(mp)
 	if has_gate and not pads.is_empty():
 		var shut := _walk(g, s, false)
 		for p in pads:
@@ -740,6 +1108,6 @@ static func features(lv: Dictionary) -> Dictionary:
 	var out := {}
 	for row in lv.get("map", []):
 		for k in str(row):
-			if "OBIPD><^vT*".contains(k):
+			if "OBIPD><^vT*NWHV-|".contains(k):
 				out[k] = int(out.get(k, 0)) + 1
 	return out

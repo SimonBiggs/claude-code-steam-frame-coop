@@ -2,6 +2,8 @@ extends "res://core/pick_flow.gd"
 ## MARBLE MAZE PICKS on the shared pick orbs (core/pick_orbs.gd), picture first, team choices (worlds.gd):
 ##   "mode"  GENTLE / BRAVE / HARD once a session, before the first story / daily maze (the family's last mode in the
 ##           middle).
+##   "race"  RACE again (a stopwatch) or on with BOBO's story, after TODAY'S RACE and at a session's start when today's
+##           race was run already (third pass, race.gd); nobody picks: BOBO (the middle / second orb).
 ##   "gift"  BOBO'S MARBLES before each place's first maze, today's maze and a session's first maze: three of HEAVY,
 ##           BOUNCY, MAGNET, STICKY, ZOOMY (worlds.gd gift_choices) - the whole team rolls as that kind.
 ## They happen on the PICK BOARD (main.gd PICK_MAP, an open room): three small glass orbs hover over the floor near
@@ -10,7 +12,7 @@ extends "res://core/pick_flow.gd"
 ## orb (it glows brightest) is taken. Host / local decide; the host sends the sticky "orbs" event [stage, entries]
 ## (a machine joining mid-pick sees the orbs too) and "take" [i, slot]; every machine draws.
 
-const WAIT := {"mode": 14.0, "gift": 12.0}
+const WAIT := {"mode": 14.0, "gift": 12.0, "race": 10.0}
 const ROW := Vector3(0.0, 0.0, 0.25)
 const GAP := 0.33
 const Y := 0.1  # the orb's middle above the floor: a marble (r 0.028) rolls under it
