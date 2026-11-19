@@ -43,8 +43,7 @@ static func stars(rows: Dictionary) -> Vector2i:
 
 ## A picture that draws once and then stands still (dozens of tiles: only the friend in focus moves).
 static func still(kind: String, px: float, color: Color) -> Control:
-	var p := StoryCard.picture(kind, px, color)
-	p.set_process(false)
+	var p := StoryCard.picture(kind, px, color, false)
 	p.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	return p
 
@@ -210,6 +209,10 @@ static func vr_panel() -> Sprite3D:
 
 static func vr_update(wall: Sprite3D, games: Array, rows: Dictionary, selected: int) -> void:
 	var vp := wall.get_node("HallView") as SubViewport
+	# Still: the wall's viewport draws a few times a second, but its pulsing badges / stars / twinkles redrew ~90
+	# canvas items EVERY frame (2026-11-19 VR hub at 7-11 fps; tests/arcade_frame_time_test.gd counts redraws). With
+	# the viewport's processing off their tweens hold still and nothing redraws between updates.
+	vp.process_mode = Node.PROCESS_MODE_DISABLED
 	for c in vp.get_children():
 		vp.remove_child(c)
 		c.queue_free()

@@ -585,7 +585,7 @@ func _process(_delta: float) -> void:
 			_join_lobby(OS.get_environment("DUO_JOIN"))
 	if hall_wall != null and is_instance_valid(hall_wall):
 		_hall_wall_t -= _delta
-		if _hall_wall_t <= 0.0:  # a few redraws a second: the glowing stars pulse, at almost no cost
+		if _hall_wall_t <= 0.0:  # a few renders a second (the walls hold still: Hall / WhatsNew vr_update), at almost no cost
 			_hall_wall_t = 0.2
 			(hall_wall.get_node("HallView") as SubViewport).render_target_update_mode = SubViewport.UPDATE_ONCE
 			if news_wall != null and is_instance_valid(news_wall):
@@ -1166,7 +1166,7 @@ func _toggle_quit_menu() -> void:
 	t.add_theme_font_size_override("font_size", 34)
 	t.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(t)
-	for item in [["Keep playing", _toggle_quit_menu], ["Quit", func() -> void: get_tree().quit()]]:
+	for item in [["Keep playing", _toggle_quit_menu], ["Quit", func() -> void: preload("res://core/vr_watch.gd").quit_on_purpose(get_tree())]]:
 		var b := Button.new()
 		b.text = item[0]
 		b.custom_minimum_size = Vector2(360, 64)

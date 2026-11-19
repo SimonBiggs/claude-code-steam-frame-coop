@@ -58,6 +58,8 @@ var opts := {}
 var base_y := 1.4
 var collision_layer := 4
 var _t := 0.0
+var _fills := {}  # orb index -> [MeshInstance3D ring, shown fraction]
+var _hint: Label3D
 
 
 ## An orb: bullets / shots that call hit(...) on bodies pick it (the game decides). Games whose shots test distance
@@ -293,6 +295,8 @@ func _picture(pic: String, col: Color) -> Sprite3D:
 
 
 func clear() -> void:
+	_fills.clear()  # (the rings are the orbs' children: they go with them)
+	show_hint("")
 	for o in orbs:
 		if is_instance_valid(o):
 			o.queue_free()
@@ -303,6 +307,112 @@ func clear() -> void:
 
 func showing() -> bool:
 	return not orbs.is_empty()
+
+
+## Every machine that shows it (core/pick_flow.gd: the host / local one): a ring round orb i filling up (0..1) while
+## someone stays inside it; 0 hides it. Cheap to call every frame (rebuilds only when it changed).
+func show_fill(i: int, frac: float, color: Color = Color(1, 1, 0.6)) -> void:
+	if i < 0 or i >= orbs.size() or not is_instance_valid(orbs[i]):
+		return
+	var o: Orb = orbs[i]
+	var f: Array = _fills.get(i, [])
+	if f.is_empty() or not is_instance_valid(f[0]):
+		if frac <= 0.0:
+			return
+		var mi := MeshInstance3D.new()
+		mi.name = "Fill"
+		mi.mesh = ImmediateMesh.new()
+		var mat := StandardMaterial3D.new()
+		mat.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
+		mat.billboard_mode = BaseMaterial3D.BILLBOARD_ENABLED
+		mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+		mat.vertex_color_use_as_albedo = true
+		mat.vertex_color_is_srgb = true
+		UiKit.see_through(mat)
+		mi.material_override = mat
+		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+		o.add_child(mi)
+		f = [mi, -1.0]
+		_fills[i] = f
+	var ring: MeshInstance3D = f[0]
+	frac = clampf(frac, 0.0, 1.0)
+	ring.visible = frac > 0.0
+	ring.position = o.icon.position if o.icon != null else Vector3.ZERO
+	if absf(frac - float(f[1])) < 0.02 or frac <= 0.0:
+		return
+	f[1] = frac
+	var sc := float(_o("scale", 1.0))
+	var r := (BALL_R if not _custom() else 0.5 * float(_o("icon_scale", 1.0))) * sc
+	var im := ring.mesh as ImmediateMesh
+	im.clear_surfaces()
+	var steps := maxi(3, int(48 * frac))
+	im.surface_begin(Mesh.PRIMITIVE_TRIANGLE_STRIP)
+	for k in steps + 1:
+		var a := PI * 0.5 - TAU * frac * float(k) / steps  # from the top, clockwise
+		var d := Vector3(cos(a), sin(a), 0.0)
+		im.surface_set_color(color)
+		im.surface_add_vertex(d * r * 1.1)
+		im.surface_set_color(Color(color, 0.85))
+		im.surface_add_vertex(d * r * 1.28)
+	im.surface_end()
+
+
+## The fill shown on orb i now (0 = none; tests).
+func fill_of(i: int) -> float:
+	var f: Array = _fills.get(i, [])
+	return float(f[1]) if not f.is_empty() and is_instance_valid(f[0]) and (f[0] as Node3D).visible else 0.0
+
+
+## A short how-to line under the row ("" hides it): core/pick_flow.gd says how a VR hand picks.
+func show_hint(text: String) -> void:
+	if text == "":
+		if _hint != null and is_instance_valid(_hint):
+			_hint.visible = false
+		return
+	if _hint == null or not is_instance_valid(_hint):
+		_hint = Label3D.new()
+		_hint.name = "PickHint"
+		_hint.outline_size = 14
+		_hint.modulate = Color(1.0, 0.95, 0.7)
+		_hint.outline_modulate = LABEL_OUTLINE
+		_hint.billboard = BaseMaterial3D.BILLBOARD_ENABLED
+		_hint.render_priority = 3
+		_hint.outline_render_priority = 2
+		add_child(_hint)
+	var sc := float(_o("scale", 1.0))
+	_hint.font_size = 44
+	_hint.pixel_size = float(_o("label_px", 0.005)) * sc * 0.75
+	_hint.text = text
+	_hint.visible = not orbs.is_empty()
+	_place_hint()
+
+
+func hint_text() -> String:
+	return _hint.text if _hint != null and is_instance_valid(_hint) and _hint.visible else ""
+
+
+## Under the middle of the row, below the names.
+func _place_hint() -> void:
+	if _hint == null or not is_instance_valid(_hint) or not _hint.visible or orbs.is_empty():
+		return
+	var mid := Vector3.ZERO
+	var low := INF
+	var n := 0
+	for o in orbs:
+		if is_instance_valid(o) and (o as Node3D).is_inside_tree():
+			var p: Vector3 = (o as Node3D).global_position
+			mid += p
+			low = minf(low, p.y)
+			n += 1
+	if n == 0:
+		return
+	mid /= n
+	var sc := float(_o("scale", 1.0))
+	var name_y := float(_o("label_y", -0.95)) * sc
+	var lines := 2 if bool(_o("two_lines", false)) else 1
+	var line_h := float(_o("font", 64)) * float(_o("label_px", 0.005)) * sc  # a name line's height
+	mid.y = low + name_y - line_h * (0.5 * lines + 0.15) - _hint.font_size * _hint.pixel_size * 0.6
+	_hint.global_position = mid
 
 
 func _dot(color: Color) -> MeshInstance3D:
@@ -422,6 +532,7 @@ func nearest_hit(pos: Vector3, r: float) -> int:
 
 func _process(delta: float) -> void:
 	_t += delta
+	_place_hint()
 	var custom := _custom()
 	var sc := float(_o("scale", 1.0))
 	var bob := float(_o("bob", 0.12)) * sc

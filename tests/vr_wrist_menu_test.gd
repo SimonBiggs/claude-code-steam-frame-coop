@@ -100,6 +100,20 @@ func _arcade_pos() -> Vector3:
 	return a.global_position if a != null else _menu_pos()
 
 
+## Where a row of the VR pause panel is in the world.
+func _row_pos(pm: Node3D, i: int) -> Vector3:
+	var r: Rect2 = pm._cell_rects[i]
+	return pm.to_global(Vector3(r.get_center().x, r.get_center().y, 0.0))
+
+
+## The right hand 25 cm in front of a panel row (on the player's side), pointing at it.
+func _point_front(pm: Node3D, i: int) -> void:
+	var target := _row_pos(pm, i)
+	var from := target + pm.global_basis.z.normalized() * 0.25 + Vector3(0.05, -0.05, 0.0)
+	rig.hand_r.global_position = from
+	rig.hand_r.global_basis = UiKit.aim((target - from).normalized(), Vector3.UP)
+
+
 func _run() -> void:
 	_rest()
 	rig.fake_trigger = 0.0
@@ -139,15 +153,55 @@ func _run() -> void:
 	await _frames(10, func(_i: int) -> void: _rest())
 	_check(get_tree().paused, "3b. letting go of the pull that paused doesn't resume")
 
-	# 4. A NEW pull while paused, held 1.5 s, leaves (not before).
+	# 4. A NEW pull while paused, held 3 s, never leaves (2026-11-19: a guest trying to resume held the trigger and
+	# left Kitchen Rush). Leaving needs the panel's YES.
 	rig.fake_trigger = 1.0
-	await _frames(60, func(_i: int) -> void: _rest())
-	_check(net.left == 0, "4a. a new pull held 1 s hasn't left yet")
-	await _frames(40, func(_i: int) -> void: _rest())
-	_check(net.left == 1, "4. a new pull held 1.5 s while paused goes to the arcade")
+	await _frames(180, func(_i: int) -> void: _rest())
+	_check(net.left == 0, "4. a new pull held 3 s while paused does NOT go to the arcade")
 	rig.fake_trigger = 0.0
 	await _frames(5, func(_i: int) -> void: _rest())
-	net.come_back()
+
+	# 4b. The PAUSED panel is up, low and close by the hands, RESUME first.
+	var pm: Node3D = net.vr_pause_menu
+	_check(pm != null and is_instance_valid(pm) and pm.is_inside_tree(), "4b. paused in VR: the PAUSED panel is open")
+	if pm != null and is_instance_valid(pm):
+		_check(String(pm.items[0].id) == "resume", "4b. RESUME is the panel's first option")
+		var hands_mid: Vector3 = (rig.hand_l.global_position + rig.hand_r.global_position) * 0.5
+		_check(_row_pos(pm, 0).distance_to(hands_mid) < 0.6, "4b. RESUME is within reach of the hands (%.2f m)" % _row_pos(pm, 0).distance_to(hands_mid))
+		# 4c. Point at RESUME and pull: plays on, the panel goes.
+		await _frames(5, func(_i: int) -> void: _point_front(pm, 0))
+		rig.fake_trigger = 1.0
+		await _frames(4, func(_i: int) -> void: _point_front(pm, 0))
+		rig.fake_trigger = 0.0
+		await _frames(30, func(_i: int) -> void: _rest())
+		_check(not get_tree().paused, "4c. point at the panel's RESUME + pull resumes")
+		_check(net.vr_pause_menu == null, "4c. the panel goes when play goes on")
+	# 4d. Pause again (MENU), then TOUCH RESUME.
+	await _frames(25, func(_i: int) -> void: _rest())
+	net._vr_toggle("test MENU")
+	await _frames(20, func(_i: int) -> void: _rest())
+	pm = net.vr_pause_menu
+	_check(get_tree().paused and pm != null, "4d. paused again: panel open")
+	if pm != null and is_instance_valid(pm):
+		var row0 := _row_pos(pm, 0)
+		var out: Vector3 = pm.global_basis.z.normalized()
+		await _frames(10, func(_i: int) -> void: rig.hand_r.global_position = row0 + out * 0.2)
+		await _frames(20, func(i: int) -> void: rig.hand_r.global_position = row0 + out * lerpf(0.2, 0.02, minf(1.0, i / 10.0)))
+		await _frames(5, func(_i: int) -> void: _rest())
+		_check(not get_tree().paused, "4d. touching RESUME resumes")
+	# 4e. MENU pressed again resumes, a bounce (twice within 0.4 s) doesn't flip it back.
+	await _frames(30, func(_i: int) -> void: _rest())
+	net._vr_toggle("test MENU")
+	net._vr_toggle("test MENU bounce")  # (same frame)
+	await _frames(3)
+	_check(get_tree().paused, "4e. a bounced MENU press still pauses (not pause + resume)")
+	await _frames(30, func(_i: int) -> void: _rest())
+	net._vr_toggle("test MENU again")
+	await _frames(5, func(_i: int) -> void: _rest())
+	_check(not get_tree().paused, "4e. MENU again resumes")
+	await _frames(30, func(_i: int) -> void: _rest())
+	net._vr_toggle("test MENU")
+	await _frames(20, func(_i: int) -> void: _rest())
 
 	# 6. Tap RESUME (a quick fresh pull on the button) resumes.
 	await _frames(5, func(_i: int) -> void: _point(_menu_pos(), 0.36, -0.03))
@@ -166,15 +220,35 @@ func _run() -> void:
 	_check(get_tree().paused and main.toggles == t0 + 1, "5. touching MENU for 0.35 s pauses")
 	await _frames(10, func(_i: int) -> void: _rest())
 
-	# 7. Point at ARCADE and pull (a fresh pull) leaves at once.
+	# 7. Point at ARCADE and pull ASKS first (nothing leaves without a YES); NO keeps playing, YES leaves.
 	var left0 := net.left
 	await _frames(5, func(_i: int) -> void: _point(_arcade_pos()))
 	rig.fake_trigger = 1.0
 	await _frames(3, func(_i: int) -> void: _point(_arcade_pos()))
-	_check(net.left == left0 + 1, "7. point at ARCADE and pull goes to the arcade")
 	rig.fake_trigger = 0.0
 	await _frames(5, func(_i: int) -> void: _rest())
+	_check(net.left == left0, "7a. point at ARCADE and pull doesn't leave by itself")
+	pm = net.vr_pause_menu
+	_check(pm != null and is_instance_valid(pm) and pm.title_text == "LEAVE THIS GAME?", "7a. ... it asks: LEAVE THIS GAME?")
+	if pm != null and is_instance_valid(pm):
+		_check(String(pm.items[0].id) == "stay" and pm.index == 0, "7a. NO (keep playing) is first and focused")
+		pm.confirm(0)
+		await _frames(30, func(_i: int) -> void: _rest())
+		_check(not get_tree().paused and net.left == left0, "7b. NO keeps playing")
+		net._vr_toggle("test MENU")
+		await _frames(30, func(_i: int) -> void: _rest())
+		pm = net.vr_pause_menu
+		if pm != null and is_instance_valid(pm):
+			pm.confirm(1)  # "Back to the arcade..."
+			await _frames(3)
+			_check(net.left == left0 and pm.title_text == "LEAVE THIS GAME?", "7c. the panel's 'Back to the arcade...' asks too")
+			pm.confirm(1)  # YES
+			await _frames(3)
+	_check(net.left == left0 + 1, "7d. YES goes to the arcade")
+	await _frames(5, func(_i: int) -> void: _rest())
 	net.come_back()
+	get_tree().paused = true
+	await _frames(5, func(_i: int) -> void: _rest())
 
 	# 8. A held trigger swept onto ARCADE while paused (the pull began before the pause) doesn't leave.
 	get_tree().paused = false

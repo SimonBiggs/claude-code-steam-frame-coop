@@ -262,6 +262,22 @@ func _exit_tree() -> void:
 
 
 var menu_was_down := false
+var vr_pause_menu: Node3D = null  # the VR PAUSED panel (core/vr_menu.gd) while paused on this VR machine
+const VrMenu := preload("res://core/vr_menu.gd")
+const VR_TOGGLE_GAP := 0.25  # (a tap on RESUME 0.4 s after the pull that paused is real: engine_sys_test)
+var _vr_clock := 0.0  # seconds _check_vr_menu has run (paused too)
+var _vr_toggle_at := -100.0
+const VR_PAUSE_OUT := 0.55  # metres in front of the head (x world scale): the PAUSED panel sits by the hands
+## What a VR pause banner says (games' toggle_vr_pause): the same three ways everywhere.
+const VR_PAUSE_HINT := "PAUSED\nTouch RESUME, or press MENU again"
+const VR_PAUSE_ITEMS := [
+	{"id": "resume", "text": "RESUME", "color": "good", "desc": "Touch it, or point + pull the trigger. Or press MENU again."},
+	{"id": "arcade", "text": "Back to the arcade...", "desc": "Asks first"},
+]
+const VR_LEAVE_ITEMS := [
+	{"id": "stay", "text": "NO, keep playing", "color": "good", "desc": ""},
+	{"id": "leave", "text": "YES, back to the arcade", "desc": "Everyone leaves this game"},
+]
 
 
 func _process(delta: float) -> void:
@@ -766,8 +782,14 @@ func _classic_game() -> bool:
 
 ## VR pause: a MENU button on the left wrist (tap it with the right hand, or point and pull the
 ## trigger), or the left menu / Y button where SteamVR passes them through. Runs even while paused.
-## While paused, a NEW pull held 1.5 s anywhere goes back to the arcade (never the pull that paused).
+## While paused, a PAUSED panel floats low and close in front, by the hands (core/vr_menu.gd, reach mode): a big
+## RESUME (touch it, or point + pull the trigger) and "Back to the arcade...", which ASKS first (NO, keep playing /
+## YES). Pressing MENU again resumes too (the panel says so). The wrist ARCADE button asks the same question.
+## 2026-11-19 (a guest in the Frame): "do you aim at the resume?", MENU pressed again and again, and trying things
+## left Kitchen Rush for the arcade (a held pull went there after 1.5 s), whose list then started Rhythm Band.
+## Nothing leaves a game without that YES now (tests/vr_wrist_menu_test.gd).
 func _check_vr_menu() -> void:
+	_vr_clock += get_process_delta_time()
 	if main == null:
 		return
 	var hl: XRController3D = null
@@ -814,7 +836,6 @@ func _check_vr_menu() -> void:
 	if pull_start:
 		set_meta("pull_fresh", paused)
 	set_meta("vr_paused_was", paused)
-	var fresh_pull: bool = trig and bool(get_meta("pull_fresh", false))
 	# While paused, an ARCADE button appears above RESUME: touch it, or point at it and pull the
 	# trigger, to go back to the arcade (Simon: "why can't I just press the menu's buttons?").
 	var abtn := _wrist_arcade_button(hl)
@@ -841,10 +862,13 @@ func _check_vr_menu() -> void:
 		else:
 			set_meta("arc_touch_t", 0.0)
 		# A pull that starts on ARCADE (so after the pause began), or a touch held 0.3 s.
-		if (on_arc and pull_start) or float(get_meta("arc_touch_t", 0.0)) > 0.3:
-			print("Net: VR arcade button")
-			go_to_arcade()
-			return
+		if ((on_arc and pull_start) or float(get_meta("arc_touch_t", 0.0)) > 0.3) and not bool(get_meta("arc_asked", false)):
+			print("Net: VR arcade button (asks first)")
+			set_meta("arc_asked", true)
+			_vr_pause_panel(true, hr, rig)
+			_ask_leave()
+		elif not (on_arc and trig) and float(get_meta("arc_touch_t", 0.0)) <= 0.0:
+			set_meta("arc_asked", false)
 	# While paused, a pull that STARTS on the button resumes only when released quickly, so a new pull
 	# HELD while paused (even pointing near the wrist, e.g. with a fishing rod) goes to the arcade.
 	# The pull that paused (still held) never resumes the moment it is released.
@@ -864,24 +888,88 @@ func _check_vr_menu() -> void:
 		# Say which path did it, so a pause nobody meant can be traced in a log.
 		var why := "tap RESUME" if tap_resume else ("pull on MENU" if on_btn and pull_start and not paused \
 			else ("touch MENU" if held_touch else "menu button"))
-		print("Net: VR pause toggled (%s)" % why)
-		if main.has_method("toggle_vr_pause"):
-			main.toggle_vr_pause()
-		else:
-			toggle_pause(0)
-	# Leaving needs a NEW pull, started while paused, HELD for 1.5 s, so a stray pull doesn't quit and
-	# the pull that paused never does.
-	if fresh_pull and paused:
-		set_meta("leave_t", float(get_meta("leave_t", 0.0)) + get_process_delta_time())
-		if float(get_meta("leave_t", 0.0)) > 1.5:
-			print("Net: VR hold to leave")
-			go_to_arcade()
-	else:
-		set_meta("leave_t", 0.0)
+		_vr_toggle(why)
+	# (No more "a pull HELD 1.5 s while paused leaves": a guest trying to resume pulled and held, 2026-11-19.)
 	menu_was_down = down
+	_vr_pause_panel(get_tree().paused, hr, rig)
 	set_meta("trig_was", trig)
 	if btn != null:
 		btn.text = "RESUME" if get_tree().paused else "MENU"
+
+
+## Pause / resume from VR (wrist MENU, the menu button, the panel's RESUME). A second toggle within VR_TOGGLE_GAP
+## seconds is a bounce (one press read twice), not "resume".
+func _vr_toggle(why: String) -> void:
+	if _vr_clock - _vr_toggle_at < VR_TOGGLE_GAP:  # (game seconds: bot tests run faster than real time)
+		print("Net: VR pause toggle ignored (%s, a bounce)" % why)
+		return
+	_vr_toggle_at = _vr_clock
+	print("Net: VR pause toggled (%s)" % why)
+	if main.has_method("toggle_vr_pause"):
+		main.toggle_vr_pause()
+	else:
+		toggle_pause(0)
+
+
+## The VR PAUSED panel: open while paused on this VR machine, gone when play goes on (any way: the panel, the
+## wrist, MENU, the TV resuming) or the game is leaving.
+func _vr_pause_panel(paused: bool, hr: Node3D, rig: Node) -> void:
+	var is_open := vr_pause_menu != null and is_instance_valid(vr_pause_menu)
+	if not paused or has_meta("leaving") or hr == null:
+		if is_open:
+			vr_pause_menu.close()
+		vr_pause_menu = null
+		return
+	if is_open:
+		return
+	var cam: Node3D = rig.get("camera") if rig != null and rig.get("camera") != null else get_viewport().get_camera_3d()
+	if cam == null or not cam.is_inside_tree():
+		return
+	var m: Node3D = VrMenu.new()
+	m.name = "VrPauseMenu"
+	m.process_mode = Node.PROCESS_MODE_ALWAYS
+	# By the hands: half a metre out in front, at hand height (never below 0.6 m under the eyes), big rows.
+	var fwd := -cam.global_basis.z
+	fwd.y = 0.0
+	fwd = fwd.normalized() if fwd.length() > 0.01 else Vector3.FORWARD
+	var ws := XRServer.world_scale
+	var hands_y: float = hr.global_position.y
+	var hl: Node3D = rig.get("hand_l") if rig != null else null
+	if hl != null and is_instance_valid(hl):
+		hands_y = (hands_y + hl.global_position.y) * 0.5
+	var at: Vector3 = cam.global_position + fwd * VR_PAUSE_OUT * ws
+	at.y = clampf(hands_y + 0.12 * ws, cam.global_position.y - 0.6 * ws, cam.global_position.y - 0.15 * ws)
+	m.setup({"title": "PAUSED", "items": VR_PAUSE_ITEMS, "cam": cam, "hand": hr, "touch": true, "follow": false,
+		"distance": VR_PAUSE_OUT, "position": at, "width": 0.8, "row_height": 0.2, "close_on_choose": false,
+		"trigger_fn": func() -> float: return _vr_trigger(rig, hr)})
+	m.chosen.connect(_on_vr_pause_choice)
+	main.add_child(m)
+	vr_pause_menu = m
+	print("Net: VR pause panel open")
+
+
+func _vr_trigger(rig: Node, hr: Node3D) -> float:
+	if rig != null and is_instance_valid(rig) and rig.has_method("trigger_value"):
+		return float(rig.call("trigger_value"))
+	return (hr as XRController3D).get_float("trigger") if hr is XRController3D and is_instance_valid(hr) else 0.0
+
+
+## Leaving the game always asks first (NO is where the hand already is).
+func _ask_leave() -> void:
+	if vr_pause_menu != null and is_instance_valid(vr_pause_menu):
+		vr_pause_menu.setup({"title": "LEAVE THIS GAME?", "items": VR_LEAVE_ITEMS, "start": 0, "width": 0.8, "row_height": 0.2})
+		print("Net: VR asks: leave this game?")
+
+
+func _on_vr_pause_choice(id: String, _item: Dictionary) -> void:
+	match id:
+		"resume", "stay":
+			_vr_toggle("panel " + id.to_upper())
+		"arcade":
+			_ask_leave()
+		"leave":
+			print("Net: VR leave confirmed")
+			go_to_arcade()
 
 
 func _wrist_arcade_button(hl: XRController3D) -> Label3D:
