@@ -396,6 +396,7 @@ func _build_island(d: Dictionary) -> void:
 		_place_all_hub()
 		if ghost != null:
 			ghost.hide_demo()
+		_refresh_hud()  # (the island's bolt card goes away in town)
 		return
 	var lv := G.generate(d)
 	hub.visible = false

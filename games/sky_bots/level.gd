@@ -18,7 +18,7 @@ const THEME := {
 	"meadow": {"top": Color(0.42, 0.76, 0.34), "side": Color(0.58, 0.4, 0.25), "rock": Color(0.52, 0.44, 0.4)},
 	"gears": {"top": Color(0.44, 0.52, 0.66), "side": Color(0.34, 0.37, 0.45), "rock": Color(0.3, 0.32, 0.4)},
 	"cove": {"top": Color(0.93, 0.82, 0.58), "side": Color(0.64, 0.53, 0.42), "rock": Color(0.5, 0.45, 0.43)},
-	"snow": {"top": Color(0.9, 0.94, 1.0), "side": Color(0.62, 0.72, 0.86), "rock": Color(0.5, 0.55, 0.65)},
+	"snow": {"top": Color(0.68, 0.83, 0.97), "side": Color(0.42, 0.5, 0.7), "rock": Color(0.4, 0.44, 0.56)},  ## (icy blue: white snow vanished on the clouds)
 	"jungle": {"top": Color(0.3, 0.58, 0.42), "side": Color(0.45, 0.32, 0.22), "rock": Color(0.36, 0.4, 0.32)},
 	"clock": {"top": Color(0.62, 0.45, 0.56), "side": Color(0.72, 0.56, 0.3), "rock": Color(0.42, 0.36, 0.4)},
 }
@@ -339,8 +339,10 @@ func _boxes() -> void:
 		b.rounded_box(Vector3(0.8, 0.8, 0.8), 0.08, MeshKit.at(Vector3(0, 0.4, 0)), BOX_COLOR)
 		for e in [-1.0, 1.0]:
 			b.box(Vector3(0.84, 0.08, 0.84), MeshKit.at(Vector3(0, 0.4 + e * 0.3, 0)), BOX_COLOR.darkened(0.3))
-		b.cylinder(0.24, 0.24, 0.04, MeshKit.at(Vector3(0, 0.42, 0.41), Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(0.6, 0.85, 1.0), 14)
-		b.star(5, 0.16, 0.07, 0.03, MeshKit.at(Vector3(0, 0.95, 0)), Color(1.0, 0.9, 0.35), true)
+		for k in 4:  # a round window on every side (a little bot peeks out)
+			var a := TAU * k / 4.0
+			b.cylinder(0.24, 0.24, 0.04, MeshKit.at(Vector3(sin(a) * 0.41, 0.42, cos(a) * 0.41), Vector3.ONE, Vector3(PI * 0.5, a, 0)), Color(0.6, 0.85, 1.0), 14)
+		b.sphere(0.1, MeshKit.at(Vector3(0, 0.95, 0)), Color(1.0, 0.9, 0.35), 8, true)
 		var mi := MeshKit.instance(b.build(), false)
 		Contrast.outline(mi, Contrast.OUTLINE)
 		mi.name = "Crate"
@@ -770,6 +772,9 @@ func animate(delta: float) -> void:
 			var off := fposmod(float(j) * length / nodes.size() + t * G.BELT * float(ba.dir), length)
 			(nodes[j] as Node3D).position = Vector3(float(ba.x0) + off, float(ba.y), float(ba.z))
 	for i in boxes.size():
+		var crate: Node3D = boxes[i].get_node("Crate")
+		crate.rotation.y = sin(now * 1.6 + i) * 0.35  # (it rattles: someone's inside)
+		crate.position.y = maxf(0.0, sin(now * 5.0 + i * 2.0)) * 0.06
 		var tiny: Node3D = boxes[i].get_node("Tiny")
 		tiny.rotation.z = sin(now * (8.0 if box_open(i) else 3.0) + i) * (0.3 if box_open(i) else 0.1)
 	var zaps: Array = lv.zaps
