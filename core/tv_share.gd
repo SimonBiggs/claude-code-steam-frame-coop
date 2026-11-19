@@ -150,6 +150,8 @@ static func pads_off() -> bool:
 ## [{pid, ppid, cmd}] for every `reaper` process (Steam's launcher for each game) on this machine.
 static func read_procs() -> Array:
 	var out := []
+	if not DirAccess.dir_exists_absolute("/proc"):  # (not Linux: nothing to read)
+		return out
 	for d in DirAccess.get_directories_at("/proc"):
 		if not d.is_valid_int():
 			continue
