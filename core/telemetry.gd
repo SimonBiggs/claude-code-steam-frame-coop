@@ -26,9 +26,28 @@ static func path() -> String:
 	return TEST_PATH if Save.test_mode() else PATH
 
 
+const START_META := "telemetry_game_start_ms"
+static var _last_ms: Dictionary = {}  # game id -> ticks of its last RUN line in this process
+
+
+## The arcade starts a game (arcade.gd _launch): RUN lines without their own "secs" are timed from here.
+static func game_started() -> void:
+	Engine.set_meta(START_META, Time.get_ticks_msec())
+
+
 ## Record one run. data: plain values only (numbers, strings, arrays, dictionaries).
+## A line without "secs" (or "seconds") gets "secs" = time since this game's previous line, or since the arcade
+## started the game, with "secs_auto": true: play-record measures real hours from secs, and games that never sent
+## it (Sky Bots, Kart Race, Tiny Town...) showed 0 minutes however long they were played (2026-11-19).
 static func run(game_id: String, data: Dictionary) -> Dictionary:
 	var d := data.duplicate(true)
+	var now := Time.get_ticks_msec()
+	if not d.has("secs") and not d.has("seconds"):
+		var from := maxi(int(Engine.get_meta(START_META, 0)), int(_last_ms.get(game_id, 0)))
+		if from > 0:
+			d["secs"] = snappedf((now - from) / 1000.0, 0.1)
+			d["secs_auto"] = true
+	_last_ms[game_id] = now
 	d["game"] = game_id
 	d["t"] = int(Time.get_unix_time_from_system())
 	d["date"] = Time.get_datetime_string_from_system()
