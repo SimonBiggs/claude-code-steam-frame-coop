@@ -3,7 +3,8 @@ extends Node
 ## picks up item boxes, uses its items and its boost; then the bot presses "continue" on the results.
 ## BOT_PLAYERS=N: TV-side karts (local split screen: P1 + up to 5 more; TV machine: up to 6).
 ## BOT_FAKE_VR=1 (local): P1 is driven through the VR cockpit with fake hands on the steering wheel
-## (both hands, then one hand gripping at an odd "2 o'clock" spot, then hands off), right trigger and
+## (both bare hands, then both squeezing grip a bit off the rim, then one hand gripping at an odd
+## "2 o'clock" spot, then hands resting on a seated lap, which must never hold it: the stick steers), right trigger and
 ## A, to test the wheel maths without a headset: steering must follow the hands relative to the grip,
 ## never a rest pose. It also checks the VR comfort limits (no speed jolts, gentle seat height).
 ## Every kart also tries a rocket start, drifts (CPU / bot auto-drift), and uses the new items; the
@@ -35,6 +36,9 @@ var fake_n := 0
 var a_t := 0.0
 var hand_ang := 0.0  # where the fake hands are on the rim (relative to the grip)
 var phase_was := ""
+var bad_lap_hold := false  # fake VR: hands resting on the lap held the wheel
+var squeeze_n := 0  # fake VR: frames squeezing grip a bit off the rim...
+var squeeze_held := 0  # ...and how many of them held the wheel with both hands
 var max_dv := 0.0  # biggest per-second speed change of the VR kart
 var max_dy := 0.0  # biggest per-second seat height change
 var last_speed := 0.0
@@ -265,6 +269,10 @@ func _end_run(mode: String) -> void:
 			fails.append("a RUN line for every race (%d of %d)" % [logged_races, races])
 		if splits_seen < 1:
 			fails.append("split lanes on some track")
+	if bad_lap_hold:
+		fails.append("VR: hands resting on a seated driver's lap must not hold the wheel")
+	if squeeze_n > 30 and squeeze_held < squeeze_n * 0.9:
+		fails.append("VR: both hands squeezing grip near the rim hold the wheel (%d of %d frames)" % [squeeze_held, squeeze_n])
 	for f in fails:
 		print("SCRIPT ERROR: BOT ASSERT FAILED: " + f)
 	print("BOT TOUR: mode=%s races=%d tracks=%d (generated %d) kinds=%s splits=%d shortcut_trips=%d story_cards=%d hats=%d runs=%d" % [
@@ -340,27 +348,41 @@ func _drive_fake_vr(delta: float) -> void:
 	var up: Vector3 = b * Vector3(0, 0, -1)
 	var ctr: Vector3 = c.wheel_center()
 	var r: float = c.WHEEL_R
-	var cyc := fmod(t, 14.0)
-	var phase := "both" if cyc < 8.0 else ("one" if cyc < 12.5 else "off")
+	var cyc := fmod(t, 17.0)
+	var phase := "both" if cyc < 6.0 else ("squeeze" if cyc < 9.0 else ("one" if cyc < 12.5 else "off"))
 	if phase != phase_was:
 		phase_was = phase
 		hand_ang = c.wheel_angle  # regrip where the wheel is now
 	# Turn the hands towards the wanted wheel angle at a human-ish speed.
 	hand_ang = move_toward(hand_ang, want_ang, 4.0 * delta)
 	var wob := sin(t * 7.0) * 0.008
-	var lap := ctr + Vector3(-0.4, -0.5, 0.3)  # resting on the lap: off the wheel
+	# Resting on a seated driver's lap, in front of the body just below the wheel: must NOT hold it.
+	var lap: Vector3 = c.EYE + Vector3(-0.15, -0.6, -0.25)
+	c.fake_grip_l = 0.0
+	c.fake_grip_r = 0.0
 	match phase:
 		"both":
 			c.fake_r = ctr + b.x * (r * cos(hand_ang) + wob) + up * (r * sin(hand_ang))
 			c.fake_l = ctr + b.x * (r * cos(hand_ang + PI)) + up * (r * sin(hand_ang + PI) + wob)
+		"squeeze":
+			# A first-timer squeezing grip with both hands a bit off the rim (10 cm out, 8 cm in front).
+			var r2 := r + 0.1
+			c.fake_grip_l = 1.0
+			c.fake_grip_r = 1.0
+			c.fake_r = ctr + b.x * (r2 * cos(hand_ang) + wob) + up * (r2 * sin(hand_ang)) + b.y * 0.08
+			c.fake_l = ctr + b.x * (r2 * cos(hand_ang + PI)) + up * (r2 * sin(hand_ang + PI) + wob) + b.y * 0.08
 		"one":
 			# One hand only, gripping near 2 o'clock: must NOT steer by itself.
 			var a2 := hand_ang + 0.6
 			c.fake_r = ctr + b.x * (r * cos(a2) + wob) + up * (r * sin(a2))
 			c.fake_l = lap
 		_:
-			c.fake_r = lap + Vector3(0.8, 0, 0)
+			c.fake_r = lap + Vector3(0.3, 0, 0)
 			c.fake_l = lap
+			# (after the hands got there: held is last frame's; a finished kart drives itself, no hands read)
+			if c.wheel_held() and cyc > 12.9 and main.state == "race" and not k.finished and k.rocket_t <= 0.0:
+				bad_lap_hold = true
+				print("BOT: lap hands hold the wheel: grip=%s L=%s R=%s" % [c.grip, c.fake_l, c.fake_r])
 	c.fake_trigger = 0.0 if k.reverse_t > 0.0 else 1.0
 	c.fake_stick = Vector2(0, -1) if k.reverse_t > 0.0 else Vector2.ZERO
 	if phase == "off":
@@ -374,6 +396,9 @@ func _drive_fake_vr(delta: float) -> void:
 	if main.state == "race" and phase != "off":
 		fake_err += absf(-c.wheel_angle / c.FULL_LOCK - want_steer)
 		fake_n += 1
+	if main.state == "race" and phase == "squeeze" and fmod(cyc - 6.0, 17.0) > 0.3:
+		squeeze_n += 1
+		squeeze_held += 1 if c.grip == "LR" else 0
 	# Comfort checks: speed and seat height must change smoothly.
 	if main.state == "race" and delta > 0.0:
 		max_dv = maxf(max_dv, absf(k.speed - last_speed) / delta)

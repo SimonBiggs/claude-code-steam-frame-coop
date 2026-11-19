@@ -1657,6 +1657,8 @@ func _start_race(ti: int) -> void:
 		_apply_track_look()
 	round_n += 1
 	race_logged = false
+	if cockpit != null:
+		cockpit.reset_steer_stats()
 	ghost_rec.clear()
 	ghost_rec_t = 0.0
 	_clear_trophies()
@@ -1710,7 +1712,7 @@ func _start_race(ti: int) -> void:
 	var title := "%s - RACE %d of 3\n%s · %d LAP%s" % [str(cup_info()["name"]), cup_race + 1, TrackScript.track_name(track_i), laps, "S" if laps > 1 else ""]
 	if round_n == 1:
 		_show_center("KART RACE GRAND PRIX!  " + title + "\n" \
-			+ "VR: hold the wheel with both hands · trigger = GO · A = item / boost\n" \
+			+ "VR: grab the wheel (grip, or a hand on the rim) · trigger = GO · A = item / boost · stick steers too\n" \
 			+ "TV: stick steers · A = go · X = item · Y = boost · B in a turn = DRIFT\n" \
 			+ "Press GO on the last red light for a ROCKET START!", _intro_time() - 3.2)
 	else:
@@ -2184,7 +2186,8 @@ func _race_telemetry(how: String, order: Array) -> void:
 		"air": air, "shortcut": short, "items": items, "hats": hats_won, "vr": cockpit != null and not cockpit.fake,
 		"net": net.mode, "solo": humans == 1, "end": how, "season": season, "gifts": ",".join(PackedStringArray(gifts.values())),
 		"sp_kind": surprise_kind, "sp_spots": track.surprises.size(), "sp_tells": int(surprises.st.tells), "sp_hits": int(surprises.st.hits),
-		"sp_saved": int(surprises.st.saved), "hz_tells": int(surprises.st.hz_tells), "town": Deep.town_size(town_races).x})
+		"sp_saved": int(surprises.st.saved), "hz_tells": int(surprises.st.hz_tells), "town": Deep.town_size(town_races).x}.merged(
+		cockpit.steer_stats() if cockpit != null else {}))
 
 
 ## Today's ghost: a see-through kart that drives the day's best run (path sampled 5 times a second).
