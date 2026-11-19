@@ -1,5 +1,6 @@
 extends CanvasLayer
 ## Pause menu. Esc or controller Start toggles it (Steam's desktop layout sends Esc for Start).
+## "Back to Arcade" asks "Leave this game?" first (NO focused). VR players get core/net.gd's VR PAUSED panel.
 ## Only a controller that is in play may open it: with a core/party.gd PartyManager on main
 ## (`main.party`) that means a pad the party owns; older games fall back to their players' `joy`.
 ## In group "pause_menu": core/net.gd calls sync_remote_pause() when the other machine resumes.
@@ -7,6 +8,8 @@ extends CanvasLayer
 var main
 var panel: ColorRect
 var buttons: Array[Button] = []
+var confirm_box: VBoxContainer  # "Leave this game?" NO / YES (Back to Arcade asks first)
+var confirm_buttons: Array[Button] = []
 var who := 1  # party games: the slot that opened the menu (sent with the pause, 1 otherwise)
 ## Who may drive the open menu: the pad that opened it (-2 = the keyboard). -3 = opened without a local pad (a
 ## remote / VR / network pause, or code calling _open()): no local pad drives it until one CLAIMS it with a fresh A
@@ -56,6 +59,26 @@ func _ready() -> void:
 		b.pressed.connect(item[1])
 		box.add_child(b)
 		buttons.append(b)
+
+	# Leaving asks first (2026-11-19: trying buttons left a game by accident): NO is focused, YES leaves.
+	confirm_box = VBoxContainer.new()
+	confirm_box.add_theme_constant_override("separation", 18)
+	confirm_box.visible = false
+	box.add_child(confirm_box)
+	var q := Label.new()
+	q.text = "Leave this game?"
+	q.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	q.add_theme_font_size_override("font_size", 44)
+	confirm_box.add_child(q)
+	for item in [["No, keep playing", _resume], ["Yes, back to the arcade", _leave_now]]:
+		var cb := Button.new()
+		cb.text = item[0]
+		cb.custom_minimum_size = Vector2(460, 76)
+		cb.add_theme_font_size_override("font_size", 38)
+		cb.add_theme_stylebox_override("focus", focus)
+		cb.pressed.connect(item[1])
+		confirm_box.add_child(cb)
+		confirm_buttons.append(cb)
 
 	var hint := Label.new()
 	hint.text = "D-pad / arrows to choose  ·  A / Enter to select  ·  Start / Esc to resume"
@@ -174,10 +197,12 @@ func _open(by_device: int = -3) -> void:
 		main.net.send_action("pause", [true], maxi(who, 1))  # networked co-op: pause the host too
 	_tell_main(true)
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
+	_show_confirm(false)
 	buttons[0].grab_focus()
 
 
 func _resume() -> void:
+	_show_confirm(false)
 	panel.visible = false
 	get_tree().paused = false
 	if main and main.net:
@@ -208,7 +233,26 @@ func _restart() -> void:
 	get_tree().reload_current_scene()
 
 
+## Back to Arcade: asks "Leave this game?" first (NO focused).
 func _arcade() -> void:
+	_show_confirm(true)
+	confirm_buttons[0].grab_focus()
+
+
+func _show_confirm(on: bool) -> void:
+	if confirm_box == null:
+		return
+	confirm_box.visible = on
+	for b in buttons:
+		b.visible = not on
+
+
+func asking_leave() -> bool:
+	return confirm_box != null and confirm_box.visible and panel.visible
+
+
+func _leave_now() -> void:
+	_show_confirm(false)
 	panel.visible = false
 	if main and main.get("net") != null:
 		main.net.go_to_arcade()

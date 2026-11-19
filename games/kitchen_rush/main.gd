@@ -2597,7 +2597,7 @@ func _set_pause_banner(paused: bool, who: String) -> void:
 func toggle_vr_pause() -> void:
 	var paused := not get_tree().paused
 	get_tree().paused = paused
-	_set_pause_banner(paused, "Press the menu button to resume")
+	_set_pause_banner(paused, net.VR_PAUSE_HINT)
 	net.event("remote_pause", [paused])
 
 

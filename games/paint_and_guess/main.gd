@@ -1999,7 +1999,7 @@ func toggle_vr_pause() -> void:
 	get_tree().paused = paused
 	players[0].trig_block = true  # the trigger that resumed must not paint or pick anything
 	cont_was = true
-	_set_pause_banner(paused, "Wrist RESUME: carry on\nHold the trigger: back to the arcade")
+	_set_pause_banner(paused, net.VR_PAUSE_HINT)
 	net.event("remote_pause", [paused])
 
 

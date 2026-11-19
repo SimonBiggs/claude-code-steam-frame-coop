@@ -48,6 +48,7 @@ var layers := UiKit.VR_LAYER      ## visual layers (e.g. a VR-only layer the TV 
 var sounds := true
 var haptics := true
 var input_enabled := true
+var trigger_fn: Callable          ## opts "trigger_fn": the trigger 0..1 from elsewhere (core/net.gd's VR pause panel: the rig is paused)
 
 # --- State ---
 var items: Array = []
@@ -121,6 +122,10 @@ func setup(opts: Dictionary) -> Me:
 	sounds = bool(opts.get("sounds", sounds))
 	haptics = bool(opts.get("haptics", haptics))
 	input_enabled = bool(opts.get("input", input_enabled))
+	if opts.has("trigger_fn"):
+		trigger_fn = opts["trigger_fn"]
+		if reader != null:
+			reader.trigger_fn = trigger_fn
 	if opts.has("position"):
 		_pending_pos = opts["position"]
 	if allow_cancel:
@@ -158,6 +163,7 @@ func bind_rig(p_rig: Node) -> void:
 
 func _ready() -> void:
 	reader = UiInput.for_rig(rig) if rig != null else UiInput.new(UiInput.PAD_NONE, UiInput.KEYS_NONE, hand)
+	reader.trigger_fn = trigger_fn
 	_build()
 	_built = true
 	_rebuild()

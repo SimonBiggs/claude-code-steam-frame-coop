@@ -123,6 +123,8 @@ func start(new_stage: String, opts: Array, done: Callable) -> void:
 	options = opts
 	on_done = done
 	t = 0.0
+	_pull_was = {}
+	_ctrls = []
 	chosen = -1
 	chosen_by = -1
 	taker = ""
@@ -140,6 +142,140 @@ func start(new_stage: String, opts: Array, done: Callable) -> void:
 func reset_dwell() -> void:
 	inside = {}
 	dwell = {}
+
+
+# --- VR: pull the trigger to pick, a filling ring, a how-to line --------------------------------------------------
+## 2026-11-19, a guest in the Steam Frame couldn't pick GENTLE / BRAVE / HARD in Rhythm Band: their hand rested in an
+## orb when it popped up (RESTING: never a pick until it leaves) and they kept pressing buttons. Now, in every game
+## whose VR hands can pick (takers() of kind "hand"):
+##  - a fresh trigger pull (or A) picks at once: the orb a hand is in (resting there too), else the orb the
+##    controller points at (press_ok: no picking by a burst of presses). A pull held since before the orbs came up
+##    must be let go first;
+##  - reaching in and staying still works as before (dwell), and a ring round the orb fills up while it counts;
+##  - a short line under the row says how: VR_HINT, or VR_HINT_INSIDE while a hand rests in one.
+## tests/pick_pull_test.gd checks it.
+const VR_HINT := "Reach into one, or point and pull the trigger"
+const VR_HINT_INSIDE := "Pull the trigger to pick it!"
+const PULL_REACH := 0.08  # a hand this much past an orb's edge still counts as in it for a pull
+const POINT_MAX := 6.0  # metres (x world scale) a pointing pull reaches
+var pull_pick := true  # a game whose trigger means something else over the orbs turns it off
+var _pull_was := {}  # controller instance id -> trigger / A down last frame (unknown = down: let go first)
+var _ctrls: Array = []
+
+
+## The VR controllers that may pull (default: every XRController3D under main, found once a pick).
+func pull_controllers() -> Array:
+	if _ctrls.is_empty() or not is_instance_valid(_ctrls[0]):
+		_ctrls = main.find_children("*", "XRController3D", true, false) if main is Node else []
+	return _ctrls
+
+
+## Is controller c's trigger (or A) down now? (A core/vr_rig.gd VrRig's own hands read its trigger: bots' fake_trigger.)
+func pull_down(c: Node3D) -> bool:
+	var rig: Variant = main.get("vr_rig") if main is Object else null
+	if rig is Node and is_instance_valid(rig) and c == rig.get("hand_r"):
+		return float(rig.call("trigger_value")) > 0.6 or bool(rig.get("fake_a")) or (c as XRController3D).is_button_pressed("ax_button")
+	if c is XRController3D:
+		return (c as XRController3D).get_float("trigger") > 0.6 or (c as XRController3D).is_button_pressed("ax_button")
+	return float(c.get_meta("trigger", 0.0)) > 0.6
+
+
+## This frame's pull picks ([[orb, slot, taker id]]).
+func _pull_picks(points: Dictionary) -> Array:
+	var hands: Array = []  # [id, point, slot]
+	for id in points:
+		var p: Array = points[id]
+		if p.size() > 2 and String(p[2]) == "hand" and p[0] is Vector3:
+			hands.append([String(id), p[0], int(p[1])])
+	var got: Array = []
+	if hands.is_empty() or not pull_pick:
+		_pull_was.clear()
+		return got
+	for c in pull_controllers():
+		if not is_instance_valid(c) or not (c as Node3D).is_inside_tree():
+			continue
+		var key: int = (c as Object).get_instance_id()
+		var down := pull_down(c)
+		var fresh: bool = down and not bool(_pull_was.get(key, true))
+		_pull_was[key] = down
+		if not fresh or t < open:
+			continue
+		var cp: Vector3 = (c as Node3D).global_position
+		var best := -1
+		var best_d := INF
+		var slot := 0
+		var who := ""
+		for h in hands:  # a hand in an orb (resting there too), the nearest to this controller first
+			var i := orbs.nearest_hit(h[1], hand_r + PULL_REACH * XRServer.world_scale)
+			var d: float = (h[1] as Vector3).distance_to(cp)
+			if i >= 0 and d < best_d:
+				best = i
+				best_d = d
+				slot = int(h[2])
+				who = String(h[0])
+		if best < 0:  # else the orb it points at
+			best = pointed_orb(c)
+			var nd := INF
+			for h in hands:
+				var d2: float = (h[1] as Vector3).distance_to(cp)
+				if d2 < nd:
+					nd = d2
+					slot = int(h[2])
+			if best >= 0 and not press_ok(slot):
+				best = -1
+		if best >= 0:
+			print("PICKS %s: trigger pull picks %d (%s)" % [stage, best, "a hand in it" if who != "" else "pointing"])
+			got.append([best, slot, who])
+	return got
+
+
+## The orb controller c points at (its -Z ray passes through it, within POINT_MAX), -1 if none.
+func pointed_orb(c: Node3D) -> int:
+	var fwd := -c.global_basis.z.normalized()
+	var best := -1
+	var best_k := INF
+	for o in orbs.orbs:
+		if not is_instance_valid(o) or not (o as Node3D).is_inside_tree():
+			continue
+		var at := orb_position(int(o.index))
+		var to := at - c.global_position
+		var along := to.dot(fwd)
+		if along <= 0.0 or along > POINT_MAX * XRServer.world_scale:
+			continue
+		var k := (to - fwd * along).length() / maxf(0.05, float(o.hit_radius))
+		if k < 1.0 and k < best_k:
+			best_k = k
+			best = int(o.index)
+	return best
+
+
+## The filling rings (dwell so far) and the how-to line, host / local.
+func _show_help(points: Dictionary) -> void:
+	var fills := {}
+	var resting := false
+	var has_hand := false
+	for id in points:
+		var p: Array = points[id]
+		var kind := String(p[2]) if p.size() > 2 else "foot"
+		has_hand = has_hand or kind == "hand"
+		var i := int(inside.get(id, -1))
+		if i == RESTING:
+			resting = resting or (kind == "hand" and orb_at(kind, p[0]) >= 0)
+			continue
+		var need := dwell_for(kind)
+		if i >= 0 and need > 0.0 and t >= open:
+			fills[i] = maxf(float(fills.get(i, 0.0)), float(dwell.get(id, 0.0)) / need)
+	for i in orbs.orbs.size():
+		orbs.show_fill(i, float(fills.get(i, 0.0)), Color(1.0, 1.0, 0.6))
+	orbs.show_hint((VR_HINT_INSIDE if resting else VR_HINT) if has_hand and pull_pick and t >= open else "")
+
+
+func _clear_help() -> void:
+	if orbs == null or not is_instance_valid(orbs):
+		return
+	for i in orbs.orbs.size():
+		orbs.show_fill(i, 0.0)
+	orbs.show_hint("")
 
 
 ## Host / local: tell every machine what the orbs are now.
@@ -206,6 +342,8 @@ func tick(delta: float) -> void:
 	if stage == "":
 		return
 	if chosen >= 0:
+		if done_t == 0.0:
+			_clear_help()
 		done_t += delta
 		if done_t >= after:
 			_finish()
@@ -214,6 +352,8 @@ func tick(delta: float) -> void:
 	follow(delta)
 	var points := takers()
 	var picks := _dwell_picks(delta, points)
+	picks.append_array(_pull_picks(points))
+	_show_help(points)
 	var extra := extra_pick() if picks.is_empty() or vote else []
 	if extra.size() == 2:
 		picks.append([int(extra[0]), int(extra[1]), ""])

@@ -2743,7 +2743,7 @@ func toggle_vr_pause() -> void:
 	get_tree().paused = paused
 	if not paused:
 		players[0].trig_lock = true  # a trigger still held from the pause must not reel or continue
-	_set_pause_banner(paused, "Wrist RESUME: carry on\nHold the trigger: back to the arcade")
+	_set_pause_banner(paused, net.VR_PAUSE_HINT)
 	net.event("remote_pause", [paused])
 
 

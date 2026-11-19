@@ -307,7 +307,7 @@ class Runner extends Node:
 			"A launches the highlighted game %s (now running: %s)" % [want_scene, cur.scene_file_path if cur else "nothing"])
 		vp.queue_free()
 		await frames(30)  # let the game run a moment (its errors count too)
-		# The game's pause menu (core/pause_menu.gd): Start, d-pad down twice, ONE A on "Back to Arcade" -> the arcade.
+		# The game's pause menu (core/pause_menu.gd): Start, d-pad down twice, A on "Back to Arcade" asks, down + A (YES) -> the arcade.
 		var menus := get_tree().get_nodes_in_group("pause_menu")
 		check(not menus.is_empty(), "the game has the shared pause menu")
 		if not menus.is_empty():
@@ -319,9 +319,15 @@ class Runner extends Node:
 			var fb := get_viewport().gui_get_focus_owner()
 			check(fb is Button and (fb as Button).text == "Back to Arcade", "d-pad down twice highlights Back to Arcade (got %s)" % (fb.get("text") if fb else "nothing"))
 			await press(JOY_BUTTON_A)
+			# Leaving asks first: NO (keep playing) is focused, YES is one down.
+			fb = get_viewport().gui_get_focus_owner()
+			check(menus[0].asking_leave() and fb is Button and (fb as Button).text == "No, keep playing", "Back to Arcade asks 'Leave this game?' with NO focused (got %s)" % (fb.get("text") if fb else "nothing"))
+			check(get_tree().current_scene.scene_file_path == want_scene, "Back to Arcade alone doesn't leave the game")
+			await press(JOY_BUTTON_DPAD_DOWN)
+			await press(JOY_BUTTON_A)
 			await get_tree().create_timer(1.0).timeout  # net.go_to_arcade waits 0.4 s (game time)
 			await frames(5)
 			var now := get_tree().current_scene
-			check(now != null and now.scene_file_path == "res://arcade.tscn", "one A press on Back to Arcade goes back to the arcade (now: %s)" % (now.scene_file_path if now else "nothing"))
+			check(now != null and now.scene_file_path == "res://arcade.tscn", "Back to Arcade + YES goes back to the arcade (now: %s)" % (now.scene_file_path if now else "nothing"))
 			check(not get_tree().paused, "the arcade is not paused")
 			kit.allow_pause = false
