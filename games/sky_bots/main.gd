@@ -13,6 +13,11 @@ extends Node3D
 ##   flicks grumbles off, pokes the crab and the cracked wall, picks up bolts. A ghost glove (core/ghost_hand.gd) shows
 ##   how to lift a lift. Solo VR: CPU buddies BIP and BOP (brain.gd) run the islands and the giant helps them.
 ## - A spark brought home lights the Sky Lamp and builds Gizmo Town; each gold gear builds more (saved).
+## - Every island is its own place (levelgen.gd STYLE, level.gd _backdrop, THEME_SKY): rolling meadow lawns under a
+##   windmill, the gear works' metal stairs in the factory rain, stepping stones over Crab Cove's sea at sunset, a
+##   climb up and down Snowy Peaks in the snow, the jungle canopy at dawn, Clockwork Keep's tower climb at night. And
+##   each has its own GIANT JOB the robots can't pass without the giant (drawbridges, a crank, a boulder, an ice wall,
+##   palm trees, a clock hand: giant.gd), and a MEGA GRUMBLE that drops out of the sky (the boss-less islands).
 ## - CHAPTER TWO (after Crab Cove): SNOWY PEAKS (spring pads), JUNGLE JUMBLE (wind fans), CLOCKWORK KEEP (conveyor
 ##   belts, and KING KEYWIND: he tells his charge with a warn line, dashes, bonks the rim, then he's dizzy). Every island
 ##   has two BOT BOXES with LITTLE BOTS inside (bump, punch or pound them open): they move to Gizmo Town and sew costume
@@ -57,6 +62,10 @@ const CHEER_TIME := 5.0
 const BUDDIES := 2  ## solo VR: CPU buddies BIP and BOP
 const VR_CARD_UP := 0.25
 const CLOUD_Y := Giant.FLOOR_Y
+const THEME_SKY := {"meadow": "day", "gears": "stormy", "cove": "sunset", "snow": "snowy", "jungle": "dawn", "clock": "night"}
+## What the giant's headline asks for at each job (VR).
+const JOB_HEAD := {"bridge": "PULL THE BRIDGES DOWN!", "crank": "TURN THE CRANK!", "boulder": "THROW THE BOULDER!",
+	"ice": "SMASH THE ICE!", "tree": "PUSH THE TREES OVER!", "clock": "SWING THE CLOCK HAND!"}
 const ISLE_COLORS: Array[Color] = [Color(0.5, 0.9, 0.45), Color(0.6, 0.75, 1.0), Color(1.0, 0.6, 0.45), Color(0.85, 0.93, 1.0),
 	Color(0.35, 0.8, 0.5), Color(0.75, 0.55, 0.95)]
 
@@ -109,6 +118,11 @@ var session_seed := 0
 var finish_log: Array = []  ## [island, rid, seconds] (bots)
 var force_island := -1  ## bots / What's New: start straight on this island (SKY_ISLAND)
 var hub_wait := HUB_WAIT  ## bots shorten it
+var job_wait_t: Array = []  ## host: per job, how long robots have waited at it
+var job_seen_open: Array = []  ## host: per job, its opening was celebrated
+var job_by_button: Array = []  ## host: per job, the button pushed it
+var job_idle_t := 0.0  ## VR: seconds since the giant last moved a job (the ghost glove shows how after a while)
+var job_moves_seen := 0
 
 
 func _ready() -> void:
@@ -213,7 +227,7 @@ func _build_world(vr: bool) -> void:
 		var a := r.randf() * TAU
 		var d := r.randf_range(12.0, 70.0)
 		var p := Vector3(cos(a) * d, CLOUD_Y, sin(a) * d)
-		if absf(p.x) < 40.0 and p.z > 2.0 and p.z < 14.0:
+		if absf(p.x) < 50.0 and p.z > 2.0 and p.z < 14.0:
 			continue  # (keep the giant's walk clear)
 		b.sphere(r.randf_range(2.0, 4.5), MeshKit.at(p, Vector3(1.6, 0.6, 1.2)), Color(1.0, 1.0, 1.0), 10)
 	add_child(MeshKit.instance(b.build(), false))
@@ -380,7 +394,8 @@ func _go_island(i: int) -> void:
 	net.state_set("phase", "play")
 	run = {"island": i, "seed": int(desc.s), "attempt": int(level.lv.get("attempt", 0)), "bolts": 0, "falls": 0, "bumps": 0,
 		"zaps": 0, "pops": 0, "punches": 0, "jumps": 0, "gear": false, "lifts": 0, "flicks": 0, "crab_hits": 0, "tiny": 0,
-		"springs": 0, "dashes": 0, "pounds": 0, "boss": String((level.lv.boss as Dictionary).get("kind", ""))}
+		"springs": 0, "dashes": 0, "pounds": 0, "boss": String((level.lv.boss as Dictionary).get("kind", "")),
+		"job": G.job_of(desc), "jobs": 0, "jobs_giant": 0, "jobs_button": 0, "job_wait": 0.0, "mega": 0}
 	for rid in brains:
 		(brains[rid] as Brain).reset()
 	print("Sky Bots island %d (%s): seed %d, %s, attempt %d, %d platforms, %d bolts" % [i, G.island_name(desc), int(desc.s), mode,
@@ -394,6 +409,8 @@ func _build_island(d: Dictionary) -> void:
 	if d.is_empty():
 		level.build({}, "meadow", season, net.mode != "client")
 		level.lv = {}
+		if sky != null:
+			sky.set_preset("day", 1.0)
 		level.visible = false
 		hub.visible = true
 		hub.process_mode = Node.PROCESS_MODE_INHERIT
@@ -407,6 +424,15 @@ func _build_island(d: Dictionary) -> void:
 	hub.process_mode = Node.PROCESS_MODE_DISABLED  # (its floor's collision goes too: robots fell onto the hidden town)
 	level.visible = true
 	level.build(lv, G.theme_of(d), season, net.mode != "client")
+	if sky != null:
+		sky.set_preset(String(THEME_SKY.get(G.theme_of(d), "day")), 1.5)
+	job_wait_t.clear()
+	job_seen_open.clear()
+	job_by_button.clear()
+	for j in (lv.get("jobs", []) as Array).size():
+		job_wait_t.append(0.0)
+		job_seen_open.append(false)
+		job_by_button.append(false)
 	level.set_bolts(net.state_get("bolts", PackedInt32Array()) if net.mode == "client" else PackedInt32Array())
 	level.set_boxes(int(net.state_get("boxes", 0)) if net.mode == "client" else 0)
 	if boss != null:
@@ -618,7 +644,8 @@ func _physics_process(delta: float) -> void:
 				r.inp_jump = true
 			if br.out_punch:
 				r.inp_punch = true
-			if br.stuck_t > 12.0 and String(((level.lv.route as Array)[br.k] as Dictionary).act) != "boss":
+			var bact := String(((level.lv.route as Array)[br.k] as Dictionary).act)
+			if br.stuck_t > 12.0 and bact != "boss" and bact != "job":
 				br.warps += 1  # a CPU buddy really stuck: hops on to its next step (never a person)
 				br.stuck_t = 0.0
 				r.place(br.target(level, br.k) + Vector3(0, 0.4, 0))
@@ -649,7 +676,11 @@ func _physics_process(delta: float) -> void:
 			island_t += delta
 			var tells: Array = level.host_grumbles(delta, robots.values())
 			for tl in tells:
-				_grumble_tell(tl[0], tl[1], float(tl[2]))
+				if tl[0] is String:
+					_mega_moment(String(tl[0]), tl[1])
+				else:
+					_grumble_tell(tl[0], tl[1], float(tl[2]))
+			_host_jobs(delta)
 			if boss != null and boss.alive():
 				boss.host_step(delta, robots.values())
 			hint_t -= delta
@@ -742,8 +773,9 @@ func _robot_rules(r: Robot) -> void:
 			continue
 		var gp := level.grumble_pos(i)
 		var rel := r.position - gp
-		if Vector2(rel.x, rel.z).length() < 0.8 and absf(rel.y) < 0.95:
-			if rel.y > 0.4 and r.velocity.y < 0.0:  # hopped on it
+		var big := level.grumble_big(i)
+		if Vector2(rel.x, rel.z).length() < (Level.MEGA_R if big else 0.8) and absf(rel.y) < (1.8 if big else 0.95):
+			if rel.y > (1.0 if big else 0.4) and r.velocity.y < 0.0:  # hopped on it
 				r.hop(7.0)
 				_ask("pop", r, [i])
 			elif r.safe_t <= 0.0:
@@ -807,7 +839,7 @@ func _robot_event(r: Robot, e: Array) -> void:
 			if phase() != "play":
 				return
 			for i in level.grumbles.size():
-				if level.grumble_alive(i) and Vector2(level.grumble_pos(i).x - p.x, level.grumble_pos(i).z - p.z).length() < G.POUND_R \
+				if level.grumble_alive(i) and Vector2(level.grumble_pos(i).x - p.x, level.grumble_pos(i).z - p.z).length() < G.POUND_R + (0.8 if level.grumble_big(i) else 0.0) \
 						and absf(level.grumble_pos(i).y - p.y) < 0.8:
 					_ask("pop", r, [i])
 			var bx := level.box_near(p, G.POUND_R)
@@ -824,7 +856,7 @@ func _robot_event(r: Robot, e: Array) -> void:
 				return
 			var at: Vector3 = e[1]
 			for i in level.grumbles.size():
-				if level.grumble_alive(i) and at.distance_to(level.grumble_pos(i) + Vector3(0, 0.4, 0)) < 1.15:
+				if level.grumble_alive(i) and at.distance_to(level.grumble_pos(i) + Vector3(0, 0.4 * (2.0 if level.grumble_big(i) else 1.0), 0)) < (1.9 if level.grumble_big(i) else 1.15):
 					_ask("pop", r, [i])
 			if level.near_wall(at, 0.7) or level.near_wall(r.position + Vector3.UP * 0.5, 1.0):
 				_ask("wall", r, [])
@@ -1025,6 +1057,26 @@ func next_hat(slot: int) -> void:
 func pop_grumble(i: int, who: String) -> void:
 	if not level.grumble_alive(i):
 		return
+	if level.grumble_big(i) and who != "giant":
+		var gp0 := level.grumble_pos(i)
+		var away := 0.0
+		if robots.has(int(who)) if who.is_valid_int() else false:
+			away = signf(gp0.x - (robots[int(who)] as Node3D).position.x)
+		if not level.grumbles[i].has("hit_t") or Time.get_ticks_msec() - int(level.grumbles[i].hit_t) > 350:
+			level.grumbles[i].hit_t = Time.get_ticks_msec()
+			if not level.mega_hit(i, away):
+				sound_at("hit", gp0 + Vector3(0, 1.2, 0), 0.0, 0.8)
+				confetti(gp0 + Vector3(0, 1.4, 0), Level.MEGA_COLORS.get(level.theme, Level.GRUMBLE_COLOR), 14)
+				if net.mode == "host":
+					net.event("confetti", [gp0 + Vector3(0, 1.4, 0), Level.MEGA_COLORS.get(level.theme, Level.GRUMBLE_COLOR), 14])
+				return
+		else:
+			return
+	if level.grumble_big(i):
+		run["mega"] = 1
+		print("Sky Bots: the MEGA GRUMBLE popped by %s" % who)
+		_story("mega_down")
+		show_headline("MEGA GRUMBLE POPPED!")
 	level.pop_grumble(i)
 	run["pops"] = int(run.get("pops", 0)) + 1
 	if who == "giant":
@@ -1107,7 +1159,8 @@ func _telemetry(end: String) -> void:
 		"flicks_all": giant.flicks if giant != null else 0, "crab_stomps": boss.stomps if boss != null else 0,
 		"cpu_warps": warps, "sparks": int(save.data.sparks), "gears": int(save.data.gears), "grown": Story.power(save.data),
 		"tiny_all": int(save.data.tiny), "hats": Hats.unlocked(int(save.data.tiny)) - 1, "boxes_all": (level.lv.get("boxes", []) as Array).size(),
-		"cp": int(net.state_get("cp", 0))}, true)
+		"cp": int(net.state_get("cp", 0)), "jobs_giant_all": giant.jobs_done if giant != null else 0,
+		"job_moves_all": giant.job_moves if giant != null else 0}, true)
 	Telemetry.run(GAME_ID, info)
 
 
@@ -1279,6 +1332,8 @@ func _process(delta: float) -> void:
 		return
 	for r in robots.values():
 		(r as Robot).animate(delta)
+	if not level.lv.is_empty():
+		level.press_buttons(robots.values())
 	level.animate(delta)
 	if boss != null:
 		boss.animate(delta)
@@ -1312,6 +1367,16 @@ func _process(delta: float) -> void:
 ## VR practice: the see-through glove reaches the nearest lift's handle, grips and lifts it, until the giant has
 ## lifted one (and again after a long while without).
 func _ghost(delta: float) -> void:
+	if giant.job_moves != job_moves_seen:
+		job_moves_seen = giant.job_moves
+		job_idle_t = 0.0
+	else:
+		job_idle_t += delta
+	var jw := _job_waiting()
+	if phase() == "play" and jw >= 0:
+		if ghost.gate(giant.held_job < 0 and job_idle_t > 3.0, delta):
+			_ghost_job(jw, delta)
+		return
 	var lifts: Array = level.lifts() if not level.lv.is_empty() else []
 	var on := phase() == "play" and giant.held_lift < 0 and giant.lifts_used == 0 and not lifts.is_empty() and island_t > 2.0
 	if not ghost.gate(on, delta):
@@ -1661,3 +1726,170 @@ func apply_event(kind: String, args: Array) -> void:
 			if args.size() >= 4:
 				show_story({"who": String(args[0]), "line": String(args[1]), "pic": String(args[2]),
 					"color": Color.from_string(String(args[3]), Story.COLOR), "duration": 3.5})
+
+
+# --- GIANT JOBS (host rules; giant.gd moves them, a robot BUTTON is the fallback) -----------------------------------
+
+## Host, every play frame: robots waiting at a job ask the giant (a story line and headline the first time); the
+## BUTTON wakes up with no VR giant here, or once they've waited GIANT_WAIT; robots on it open the job; palm trees
+## past half fall by themselves; an opened job is celebrated.
+func _host_jobs(delta: float) -> void:
+	var jobs: Array = level.lv.get("jobs", [])
+	for j in mini(jobs.size(), job_wait_t.size()):
+		var job: Dictionary = jobs[j]
+		var kind := String(job.kind)
+		if level.job_open(j):
+			if not bool(job_seen_open[j]):
+				_job_opened(j)
+			continue
+		var waiting := false
+		var pressing := false
+		var wp: Vector3 = job.wait
+		for r in robots.values():
+			var p: Vector3 = (r as Node3D).position
+			if absf(p.y - wp.y) < 1.2 and absf(p.x - wp.x) < 3.4 and absf(p.z - wp.z) < 3.0:
+				waiting = true
+			if level.on_button(j, p):
+				pressing = true
+		if waiting:
+			job_wait_t[j] = float(job_wait_t[j]) + delta
+			run["job_wait"] = snappedf(float(run.get("job_wait", 0.0)) + delta, 0.1)
+			if not told.has("job%d" % j):
+				told["job%d" % j] = true
+				if vr_rig != null:
+					_story("job_" + kind)
+					show_headline(String(JOB_HEAD.get(kind, "HELP!")))
+					sound_at("bell", wp + Vector3(0, 2, 0), -4.0, 1.5)
+				else:
+					_story("job_button")
+		var awake := vr_rig == null or float(job_wait_t[j]) > G.GIANT_WAIT
+		if awake and not bool(level.job_btn[j]):
+			level.job_btn[j] = true
+			sound_at("ding", job.btn, -2.0, 1.2)
+			if vr_rig != null:
+				_story("job_button")
+		if pressing:
+			job_by_button[j] = true
+			for i in (level.jobs_prog[j] as Array).size():
+				level.set_job(j, i, float(level.jobs_prog[j][i]) + G.BUTTON_RATE * delta)
+		if kind == "tree":
+			for i in (level.jobs_prog[j] as Array).size():
+				var k := float(level.jobs_prog[j][i])
+				if k >= 0.5 and k < 1.0:
+					level.set_job(j, i, k + (0.6 + k * 2.0) * delta)  # (timber!)
+
+
+func _job_opened(j: int) -> void:
+	job_seen_open[j] = true
+	var job: Dictionary = (level.lv.jobs as Array)[j]
+	var p: Vector3 = job.grab
+	var by_giant := vr_rig != null and not bool(job_by_button[j])
+	run["jobs"] = int(run.get("jobs", 0)) + 1
+	run["jobs_giant" if by_giant else "jobs_button"] = int(run.get("jobs_giant" if by_giant else "jobs_button", 0)) + 1
+	if by_giant:
+		giant.jobs_done += 1
+	var col: Color = {"ice": Level.ICE_COLOR, "boulder": Level.ROCK_COLOR, "tree": Color(0.3, 0.7, 0.3)}.get(String(job.kind), Color(1.0, 0.85, 0.3))
+	match String(job.kind):
+		"ice":
+			sound_at("explosion", p, -4.0, 1.5)
+		"boulder":
+			sound_at("whoosh", p, 0.0, 0.6)
+		"tree":
+			sound_at("explosion", p, -8.0, 0.7)
+		_:
+			sound_at("land", p, 0.0, 0.5)
+	sound_at("fanfare", p, -6.0, 1.3)
+	confetti(p + Vector3(0, 1, 0), col, 40)
+	if net.mode == "host":
+		net.event("confetti", [p + Vector3(0, 1, 0), col, 40])
+	for slot in cams:
+		(cams[slot] as CameraRig).shake(0.25)
+	if by_giant:
+		_story("job_done")
+		show_headline("THANK YOU, GIANT!")
+		vr_rig.pulse(VrRig.RIGHT, 0.6, 0.15)
+		vr_rig.pulse(VrRig.LEFT, 0.6, 0.15)
+	print("Sky Bots: %s job opened by %s after %.1f s waiting" % [String(job.kind), "the giant" if by_giant else "the button", float(job_wait_t[j])])
+
+
+## Host (giant.gd): the giant hit the ice / sent a palm tree falling.
+func job_hit(j: int, p: Vector3) -> void:
+	var job: Dictionary = (level.lv.jobs as Array)[j]
+	if String(job.kind) == "ice":
+		sound_at("hit", p, 0.0, 0.7)
+		confetti(p, Level.ICE_COLOR, 18)
+		if net.mode == "host":
+			net.event("confetti", [p, Level.ICE_COLOR, 18])
+	elif not told.has("timber%d" % j):
+		told["timber%d" % j] = true
+		sound_at("whoosh", p, -2.0, 0.5)
+
+
+## Host (giant.gd): a held job moved a notch (a ratchet click, rising as it opens).
+func job_tick(_j: int, p: Vector3, k: float) -> void:
+	sound_at("pop", p, -10.0, 0.7 + k * 0.8)
+
+
+## The job robots are waiting at now (-1 none), for the ghost glove.
+func _job_waiting() -> int:
+	for j in mini(job_wait_t.size(), (level.lv.get("jobs", []) as Array).size()):
+		if float(job_wait_t[j]) > 1.0 and not level.job_open(j):
+			return j
+	return -1
+
+
+## VR: the see-through glove shows job j's move: pull a drawbridge's knob down, swing the clock hand, turn the crank,
+## carry the boulder off, smash the ice, push a palm tree over.
+func _ghost_job(j: int, delta: float) -> void:
+	var job: Dictionary = (level.lv.jobs as Array)[j]
+	var kind := String(job.kind)
+	var plats: Array = level.lv.plats
+	var piece := 0
+	var prog: Array = level.jobs_prog[j]
+	for i in prog.size():
+		if float(prog[i]) < 1.0:
+			piece = i
+			break
+	var cycle := 3.2
+	var t := ghost.play("job_" + kind, cycle, delta)
+	var k: Dictionary
+	match kind:
+		"bridge", "clock":
+			var h0 := G.gate_handle(job, piece, plats, 0.0)
+			k = GhostHand.track([[0.0, h0 + Vector3(0, 1.5, 2.0), 0.0], [0.7, h0, 0.0], [0.9, h0, 1.0],
+				[1.7, G.gate_handle(job, piece, plats, 0.5), 1.0], [2.5, G.gate_handle(job, piece, plats, 1.0), 1.0],
+				[2.9, G.gate_handle(job, piece, plats, 1.0), 0.0]], t)
+		"tree":
+			var h1 := G.gate_handle(job, piece, plats, 0.0)
+			k = GhostHand.track([[0.0, h1 + Vector3(-float(job.dirs[piece]) * 1.5, 1.0, 1.0), 0.0], [0.8, h1, 0.0],
+				[2.0, G.gate_handle(job, piece, plats, 0.55), 0.0], [2.8, G.gate_handle(job, piece, plats, 0.6) + Vector3(0, 0, 1.5), 0.0]], t)
+		"crank":
+			var cc: Vector3 = job.crank
+			var keys: Array = [[0.0, cc + Vector3(1.0, 1.5, 2.0), 0.0], [0.5, cc + Vector3(1.0, 0, 0.5), 0.0]]
+			for q in 9:
+				var a := q * TAU / 4.0
+				keys.append([0.6 + q * 0.28, cc + Vector3(cos(a), sin(a), 0.0) + Vector3(0, 0, 0.5), 1.0])
+			k = GhostHand.track(keys, t)
+		"boulder":
+			var g: Vector3 = job.grab
+			k = GhostHand.track([[0.0, g + Vector3(0, 2.0, 2.5), 0.0], [0.7, g + Vector3(0, 0.5, 1.2), 0.0], [0.9, g + Vector3(0, 0.5, 1.2), 1.0],
+				[2.2, g + Vector3(0, 3.5, 3.0), 1.0], [2.6, g + Vector3(0, 3.5, 3.0), 0.0]], t)
+		"ice":
+			var g2: Vector3 = job.grab
+			ghost.set_alpha(ghost.fade(cycle, 0.3, 0.5))
+			ghost.pose(GhostHand.slash(t, g2 + Vector3(0, 0, 1.2), g2 + Vector3(0, 2.5, 4.0), cycle), 1.0)
+			return
+	ghost.set_alpha(ghost.fade(cycle, 0.3, 0.5))
+	ghost.pose(Transform3D(GhostHand.yaw_to(Vector3(0, 0, -1)), k.p), float(k.grip))
+
+
+## Host: the MEGA GRUMBLE drops out of the sky ("drop": a shadow ring, a whistle), and lands ("thud": a shake).
+func _mega_moment(what: String, p: Vector3) -> void:
+	print("Sky Bots: the MEGA GRUMBLE %s at x %.1f" % ["drops out of the sky" if what == "drop" else "lands", p.x])
+	if what == "drop":
+		boss_tell(p, Level.MEGA_R + 0.6, Level.DROP_TIME)
+		sound_at("whoosh", p + Vector3(0, 8, 0), 0.0, 0.5)
+		_story("mega")
+		show_headline("MEGA GRUMBLE!")
+	else:
+		boss_stomp(p, Level.MEGA_R + 0.8)

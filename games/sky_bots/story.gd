@@ -40,6 +40,16 @@ const LINES := {
 	"king": ["King Keywind! Hop out of his way!", "kingkeywind"],
 	"king_down": ["King Keywind needs a nap!", "kingkeywind"],
 	"all_keys": ["Every island is safe again!", "skylamp"],
+	"job_bridge": ["Giant! Pull the bridges down!", "skybot"],
+	"job_crank": ["Giant! Turn the crank round!", "skybot"],
+	"job_boulder": ["Giant! Throw the boulder away!", "skybot"],
+	"job_ice": ["Giant! Smash the ice wall!", "skybot"],
+	"job_tree": ["Giant! Push the palm trees over!", "skybot"],
+	"job_clock": ["Giant! Swing the clock hand round!", "skybot"],
+	"job_button": ["Stand on the red button!", "skybot"],
+	"job_done": ["Thank you, giant!", "gizmo"],
+	"mega": ["MEGA GRUMBLE! Hit it lots!", "grumble"],
+	"mega_down": ["The Mega Grumble is beaten!", "grumble"],
 }
 
 

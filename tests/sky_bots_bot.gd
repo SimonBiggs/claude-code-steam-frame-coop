@@ -8,7 +8,9 @@ extends Node
 ## island gets cleared and everyone goes home to Gizmo Town, which grows; the giant lifted a lift; zero script errors.
 ## SKY_ISLAND=n starts straight on island n (3 = Crab Cove: Cranky Crab must be beaten; 6 = Clockwork Keep: King
 ## Keywind must be beaten; 4 Snowy Peaks springs, 5 Jungle Jumble fans; 0 = TODAY'S ISLAND). Every island: a bot box
-## gets opened (a little bot rescued), and the bots' brains ground-pound boxes (B in the air).
+## gets opened (a little bot rescued), and the bots' brains ground-pound boxes (B in the air). Every island's GIANT
+## JOB gets opened: by the fake VR giant's hands with a VR host (pull the drawbridges, turn the crank, throw the
+## boulder, smash the ice, push the palm trees, swing the clock hand), by a robot on the BUTTON without one.
 ## Local:     godot-test --headless --path . --fixed-fps 60 --quit-after 7200 res://tests/sky_bots_bot.tscn
 ## Networked: DUO_PORT=2xxxx DUO_HOST=1 BOT_VR=1 ... & DUO_PORT=2xxxx DUO_JOIN=127.0.0.1 ... (real time)
 ## multibot: seconds=180
@@ -43,6 +45,9 @@ var boxes_seen := 0
 var sprung := false
 var fanned := false
 var hats_seen := false
+var jobs_open_seen := 0
+var mega_popped := false
+var job_phase := 0
 
 
 func _ready() -> void:
@@ -74,7 +79,7 @@ func _ready() -> void:
 	kit.every(0.25, _watch)
 	var full := 150.0 if host else (140.0 if client else 120.0)
 	var end: float = preload("res://tests/bot_end.gd").end_at(full)
-	short = preload("res://tests/bot_end.gd").short_run(48.0)  # (an island takes the bots 15-35 s)
+	short = preload("res://tests/bot_end.gd").short_run(80.0)  # (an island takes the bots 21-50 s since the giant jobs + Mega Grumble, plus the picks)
 	kit.at(end, "finish", func() -> void:
 		_checks()
 		kit.finish())
@@ -115,6 +120,13 @@ func _watch() -> String:
 			sprung = sprung or main.level.boings > 0
 			fanned = fanned or main.gadget_push(rb, false).y > 0.0
 	hats_seen = hats_seen or (main.net.state_get("hats", []) as Array).size() == 10
+	if not main.level.lv.is_empty():
+		var nj := 0
+		for j in main.level.jobs_prog.size():
+			nj += 1 if main.level.job_open(j) else 0
+		jobs_open_seen = maxi(jobs_open_seen, nj)
+		for i in main.level.grumbles.size():
+			mega_popped = mega_popped or (main.level.grumble_big(i) and bool(main.level.grumbles[i].gone))
 	var hp: Array = main.net.state_get("hubp", [])
 	if hp.size() >= 1:
 		if grew_from < 0:
@@ -214,6 +226,11 @@ func _vr_bot(delta: float) -> void:
 		kit.vr_stick(rig, Vector2.ZERO)
 		kit.vr_trigger(rig, 0.0)
 		return
+	# A GIANT JOB the robots wait at: do it with the hands.
+	var jw: int = main._job_waiting() if main.net.mode != "client" else -1
+	if jw >= 0:
+		_vr_job(jw, head, delta)
+		return
 	# Walk along with the robots (their middle in x).
 	var mx := 0.0
 	var n := 0
@@ -250,6 +267,50 @@ func _vr_bot(delta: float) -> void:
 		return
 	kit.vr_trigger(rig, 0.0)
 	kit.vr_idle(rig)
+
+
+## The fake giant's hands on job j, like a person: reach the handle, pull the trigger, move it the job's way.
+func _vr_job(j: int, head: Vector3, delta: float) -> void:
+	var rig = main.vr_rig
+	var job: Dictionary = main.level.lv.jobs[j]
+	var kind := String(job.kind)
+	var plats: Array = main.level.lv.plats
+	var g: Vector3 = job.grab
+	kit.vr_stick(rig, Vector2(clampf((g.x - head.x) / 6.0, -1.0, 1.0) if absf(g.x - head.x) > 3.0 else 0.0, 0.0))
+	var prog: Array = main.level.jobs_prog[j]
+	var piece := 0
+	for i in prog.size():
+		if float(prog[i]) < 1.0:
+			piece = i
+			break
+	var k := float(prog[piece])
+	var held: bool = main.giant.held_job == j and int(main.giant.held_piece) == piece
+	match kind:
+		"bridge", "clock", "crank":
+			if not held:
+				kit.vr_trigger(rig, 0.0)
+				if kit.vr_reach(rig, VrRig.RIGHT, G.gate_handle(job, piece, plats, k), 4.0, delta):
+					kit.vr_trigger(rig, 1.0)
+			else:
+				kit.vr_reach(rig, VrRig.RIGHT, G.gate_handle(job, piece, plats, minf(1.0, k + (0.03 if kind == "crank" else 0.2))), 3.0, delta)
+		"boulder":
+			if not held:
+				kit.vr_trigger(rig, 0.0)
+				if kit.vr_reach(rig, VrRig.RIGHT, g, 4.0, delta):
+					kit.vr_trigger(rig, 1.0)
+			else:
+				kit.vr_reach(rig, VrRig.RIGHT, g + Vector3(0, 3.0, 3.5), 2.0, delta)
+		"ice":  # pull back, then smash in fast
+			kit.vr_trigger(rig, 0.0)
+			if job_phase == 0:
+				if kit.vr_reach(rig, VrRig.RIGHT, g + Vector3(0, 1.0, 3.0), 6.0, delta):
+					job_phase = 1
+			elif kit.vr_reach(rig, VrRig.RIGHT, g, 14.0, delta):  # (a smash: fast)
+				job_phase = 0
+		"tree":  # push the crown down (no trigger)
+			kit.vr_trigger(rig, 0.0)
+			if k < 0.5:
+				kit.vr_reach(rig, VrRig.RIGHT, G.gate_handle(job, piece, plats, minf(1.0, k + 0.15)), 2.5, delta)
 
 
 func _report() -> String:
@@ -289,7 +350,7 @@ func _checks() -> void:
 	if mode != "client" and kit.seen("phase", "pick") > 0:
 		kit.assert_true(saw_orbs, "%s: the pick orbs showed" % mode)
 	if main.vr_rig != null and mode != "client" and not short:
-		kit.assert_true(vr_lifted > 0 or main.giant.lifts_used > 0 or not _saw_lift(), "the VR giant lifted a lift")
+		kit.assert_true(vr_lifted > 0 or main.giant.lifts_used > 0 or main.giant.jobs_done > 0 or not _saw_lift(), "the VR giant lifted a lift or did a giant job")
 	if OS.get_environment("SKY_ISLAND") == "3" and not short and mode != "client":
 		kit.assert_true(crab_down, "Cranky Crab was beaten")
 	if OS.get_environment("SKY_ISLAND") == "6" and not short and mode != "client":
@@ -301,6 +362,12 @@ func _checks() -> void:
 	if not short and cleared:
 		kit.assert_true(boxes_seen > 0, "%s: a bot box was opened (%d)" % [mode, boxes_seen])
 	kit.assert_true(hats_seen, "%s: every robot's hat is shared" % mode)
+	if not short and cleared:
+		kit.assert_true(jobs_open_seen > 0, "%s: a giant job was opened (%s)" % [mode, "the VR giant's hands" if main.vr_rig != null else "the button"])
+	if OS.get_environment("SKY_ISLAND") in ["1", "2", "4", "5"] and not short and cleared and kit.seen("phase", "cheer") > 0:
+		kit.assert_true(mega_popped, "%s: the MEGA GRUMBLE dropped in and was beaten" % mode)
+	if main.vr_rig != null and mode != "client" and not short and cleared:
+		kit.assert_true(main.giant.jobs_done > 0, "the VR giant's hands opened a giant job (%d moves)" % main.giant.job_moves)
 
 
 func _saw_lift() -> bool:
