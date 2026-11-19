@@ -295,6 +295,7 @@ func _stampede() -> void:
 	var kinds: Array[String] = ["dino", "raptor", "dino", "ankylo"]
 	if main.wave >= 6:
 		kinds.append("dino")
+	kinds.resize(main.stampede_size(kinds.size()))  # fewer dinos (main.DINO_SHARE): a smaller herd
 	for i in kinds.size():
 		var aa := a + (i - kinds.size() * 0.5) * 0.12
 		var pos: Vector3 = Vector3(cos(aa), 0.0, sin(aa)) * (main.ARENA_RADIUS - 1.5)
