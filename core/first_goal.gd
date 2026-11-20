@@ -14,12 +14,18 @@ extends Node
 ##       "start": "phase() == 'play'",       # optional: play has begun (default: no pick / intro / story card up)
 ##       "rise": "st('score0', 0)",          # the small win: this number goes up (or "done": a true/false expression)
 ##       "target": "nearest('balloons')",    # optional: a Node3D / Vector3 to put the arrow over
+##       (any of start / rise / done / target / miss may have a "_vr" or "_tv" version: the VR player's own win)
 ##       "miss": "v('misses')",              # optional: a rising count of misses (core/rescue.gd struggling signal)
-##     }
+##       "flat_y": 0.5,                      # optional: where the TV / Deck card sits (share of the screen height,
+##                                           #   default 0.82) when the game's own UI lives low (answer tiles)
+##       "wordless": true, "icon": "star",   # optional: a game made without how-to words on purpose (the family found
+##     }                                     #   games too text-driven; its bot fails on words): button glyph + icon
+##                                           #   on the TV, only the arrow in VR. Needs a "target" or an "icon".
 ## Expressions (Godot Expression) run on this node with `main` (the game's main node) in scope, plus helpers:
 ##   v(prop, def)  main.get(prop)        st(key, def)  main.net state      phase()  net phase or main.phase
 ##   count(group)  nodes in a group      nearest(group) / nearest_of(array or dict)  the nearest to the player's camera
 ##   node(name)    main.find_child(name)  sum(x)  sum of an Array / Dictionary's numbers   local_slot()
+## (Expression gotcha: a ternary inside parentheses doesn't parse; a top-level "a if c else b" does. `device` is in scope.)
 ## A broken expression is an engine ERROR from res:// (fails every bot), so all game bots check the data.
 ## Rescue: while the goal waits, core/rescue.gd ticks (time waiting without the win = struggling); a game's "miss"
 ## counter feeds it too. When help kicks in, the prompt pulses back bigger with its arrow (also after the first win,
@@ -66,7 +72,10 @@ var _arrow: Node3D = null
 var _pulse := 0.0
 var _small := false
 var _after_t := 0.0
-var _scripts := {}  # id -> Script or null (scanned once per id)
+var _band := 0.82  ## where the TV card sits (share of the height): data flat_y, else the first band free of the game's HUD
+var _band_t := 0.0
+## Bands tried in turn: low (under the action), a little higher, then up under the top HUD.
+const BANDS := [0.82, 0.66, 0.3]
 
 
 func _ready() -> void:
@@ -127,6 +136,8 @@ static func problems_of(id: String) -> Array[String]:
 		out.append("%s: no \"you\" (what the player is)" % id)
 	if not d.has("rise") and not d.has("done"):
 		out.append("%s: no \"rise\" or \"done\" (the small win)" % id)
+	if bool(d.get("wordless", false)) and not d.has("target") and not d.has("icon"):
+		out.append("%s: wordless needs a \"target\" (arrow) or an \"icon\"" % id)
 	var dd: Dictionary = d.get("do", {})
 	for dev in ["tv", "vr"]:
 		var pair: Array = dd.get(dev, [])
@@ -134,8 +145,9 @@ static func problems_of(id: String) -> Array[String]:
 			out.append("%s: \"do\".%s must be [button, text]" % [id, dev])
 		elif String(pair[1]).length() > 44:
 			out.append("%s: \"do\".%s text is %d letters (keep it under 45: one glance)" % [id, dev, String(pair[1]).length()])
-	for k in ["start", "rise", "done", "target", "miss"]:
-		if d.has(k):
+	for k in d:
+		var base := String(k).trim_suffix("_vr").trim_suffix("_tv")
+		if base in ["start", "rise", "done", "target", "miss"]:
 			var e := Expression.new()
 			if e.parse(String(d[k]), ["main"]) != OK:
 				out.append("%s: \"%s\" doesn't parse: %s" % [id, k, e.get_error_text()])
@@ -199,6 +211,10 @@ func _step(dt: float) -> void:
 			_set_visible(not blocked)
 			if blocked:
 				return
+			_band_t -= dt
+			if _band_t <= 0.0 and device != "vr":
+				_band_t = 0.5
+				_pick_band()
 			if not _on_screen:
 				_on_screen = true
 				on_screen_t = t
@@ -210,7 +226,7 @@ func _step(dt: float) -> void:
 				_shrink(true)
 		"done", "off":
 			_after_t += dt
-			if _after_t < 90.0 and data.has("miss"):
+			if _after_t < 90.0 and data.has(_k("miss")):
 				_feed_rescue(dt, false)
 	_place_arrow()
 
@@ -219,10 +235,10 @@ func _feed_rescue(dt: float, waiting: bool) -> void:
 	if rescue == null:
 		return
 	var r := _num("rise")
-	if data.has("rise") and r > _rise_last:
+	if data.has(_k("rise")) and r > _rise_last:
 		rescue.note(true)
 	_rise_last = r
-	if data.has("miss"):
+	if data.has(_k("miss")):
 		var m := _num("miss")
 		while m > _miss_base and m - _miss_base < 50:
 			rescue.note(false)
@@ -234,9 +250,9 @@ func _feed_rescue(dt: float, waiting: bool) -> void:
 
 
 func _won() -> bool:
-	if data.has("done") and _truthy("done", false):
+	if data.has(_k("done")) and _truthy("done", false):
 		return true
-	return data.has("rise") and _num("rise") > _base + 0.001
+	return data.has(_k("rise")) and _num("rise") > _base + 0.001
 
 
 func _win() -> void:
@@ -248,7 +264,7 @@ func _win() -> void:
 	UiKit.sound("ui_select", -4.0, 1.2)
 	if _card != null and is_instance_valid(_card):
 		var l: Label = _card.get_meta("text_label", null)
-		if l != null:
+		if l != null and is_instance_valid(l):
 			l.text = "Nice one!"
 		var tw := _card.create_tween()
 		tw.tween_property(_card, "scale", Vector2(1.12, 1.12), 0.12)
@@ -300,7 +316,7 @@ func _blocked() -> bool:
 			return true
 	if not tree.get_nodes_in_group("story_card_vr").is_empty():
 		return true
-	for n in tree.get_nodes_in_group(VrViewCheck.KEEP_CLEAR):  # pick orbs showing
+	for n in tree.get_nodes_in_group("pick_orb"):  # pick orbs showing (core/pick_orbs.gd PICK_GROUP)
 		if n is Node3D and (n as Node3D).is_visible_in_tree():
 			return true
 	if device != "vr" and not tree.get_nodes_in_group("hint_pill").is_empty():  # a game's own hint is showing
@@ -326,6 +342,7 @@ func _covers(c: Control) -> bool:
 # --- Expressions -----------------------------------------------------------------------------------------------------
 
 func _eval(key: String, def: Variant) -> Variant:
+	key = _k(key)
 	if not data.has(key):
 		return def
 	var text := String(data[key])
@@ -341,6 +358,12 @@ func _eval(key: String, def: Variant) -> Variant:
 		_fail(key, text, e.get_error_text())
 		return def
 	return out
+
+
+## A key's device version when the data has one ("rise_vr" for the VR player, "rise_tv" for TV and Deck).
+func _k(key: String) -> String:
+	var dk := key + ("_vr" if device == "vr" else "_tv")
+	return dk if data.has(dk) else key
 
 
 func _fail(key: String, text: String, why: String) -> void:
@@ -500,11 +523,12 @@ func _you() -> String:
 func _show(prefix: String = "") -> void:
 	_small = false
 	var pair := _pair()
+	var wordless := bool(data.get("wordless", false))
 	if device == "vr":
 		var cam := VrViewCheck.vr_camera(get_tree().root)
-		if cam == null:
+		if cam == null or wordless:
 			return
-		var world: Node = main if main is Node3D else cam.get_parent()
+		var world: Node = self  # a service under /root: freed with the prompt, never inside the game's own tree
 		var body := "%s:  %s" % [String(pair[0]), prefix + String(pair[1])]
 		_vr_card = HudKit.vr_card(world, cam, _you(), body,
 			{"width": 1.1, "color": "gold", "height": -0.34, "distance": 1.6, "title_size": 0.06, "body_size": 0.05})
@@ -524,7 +548,7 @@ func _show(prefix: String = "") -> void:
 		_ui.add_child(_card)
 		var v := UiKit.vbox(4, s)
 		_card.add_child(v)
-		var you := _you()
+		var you := "" if wordless else _you()
 		if you != "":
 			var yl := UiKit.label(you, "small", UiKit.color_of("gold", UiKit.ACCENT).lightened(0.25), HORIZONTAL_ALIGNMENT_CENTER)
 			v.add_child(yl)
@@ -536,9 +560,15 @@ func _show(prefix: String = "") -> void:
 			var gl := UiKit.glyph(String(pair[0]), s)
 			gl.size_flags_vertical = Control.SIZE_SHRINK_CENTER
 			h.add_child(gl)
-		var l := UiKit.label(prefix + String(pair[1]), "heading")
-		h.add_child(l)
-		_card.set_meta("text_label", l)
+		if wordless:
+			if data.has("icon"):
+				var ic := UiKit.icon(String(data["icon"]), "gold", 56.0 * s)
+				ic.size_flags_vertical = Control.SIZE_SHRINK_CENTER
+				h.add_child(ic)
+		else:
+			var l := UiKit.label(prefix + String(pair[1]), "heading")
+			h.add_child(l)
+			_card.set_meta("text_label", l)
 		_card.pivot_offset_ratio = Vector2(0.5, 0.5)
 		_card.modulate.a = 0.0
 		UiKit.fade(_card, 1.0, 0.3)
@@ -570,13 +600,63 @@ func _animate(delta: float) -> void:
 		var k := (0.78 if _small else 1.0) + 0.1 * sin(_pulse * PI * 4.0) * _pulse
 		_card.scale = Vector2(k, k)
 		# low in the view (story toasts and scores live at the top; core/hints.gd pills at 0.74 hide it while they show)
-		var y := vs.y * (0.82 if not _small else 0.9) - sz.y * 0.5
+		var y := vs.y * (_band if not _small else 0.9) - sz.y * 0.5
 		_card.position = Vector2((vs.x - sz.x) * 0.5, y)
+
+
+## The game's own words and pictures on screen (HUD cues, answer tiles, help lines) in screen pixels: Controls under
+## main, mapped out of split-screen SubViewports through their SubViewportContainer.
+func _hud_rects() -> Array[Rect2]:
+	var out: Array[Rect2] = []
+	if main == null:
+		return out
+	var vs := get_viewport().get_visible_rect().size
+	for n in main.find_children("*", "Control", true, false):
+		var c := n as Control
+		if not (c is Label or c is TextureRect or c is Button or c is RichTextLabel) or not c.is_visible_in_tree():
+			continue
+		if c.modulate.a < 0.2 or c.get_global_rect().size.x * c.get_global_rect().size.y < 64.0:
+			continue
+		var r := c.get_global_rect()
+		var vp := c.get_viewport()
+		if vp is SubViewport:
+			var box := vp.get_parent() as Control
+			if box == null or not box.is_visible_in_tree():
+				continue
+			var k := box.get_global_rect().size / Vector2(maxf(1.0, (vp as SubViewport).size.x), maxf(1.0, (vp as SubViewport).size.y))
+			r = Rect2(box.get_global_rect().position + r.position * k, r.size * k)
+		elif r.size.x >= vs.x * 0.9 and r.size.y >= vs.y * 0.9:
+			continue  # full-screen backdrops
+		out.append(r)
+	return out
+
+
+## Sit in the first band (BANDS) where the card covers none of the game's HUD; data "flat_y" pins it.
+func _pick_band() -> void:
+	if data.has("flat_y"):
+		_band = float(data["flat_y"])
+		return
+	if _card == null or not is_instance_valid(_card):
+		return
+	var vs := _card.get_viewport_rect().size
+	var sz := _card.get_combined_minimum_size()
+	var rects := _hud_rects()
+	for b in BANDS:
+		var cr := Rect2(Vector2((vs.x - sz.x) * 0.5, vs.y * float(b) - sz.y * 0.5), sz).grow(8.0)
+		var hit := false
+		for r in rects:
+			if cr.intersects(r):
+				hit = true
+				break
+		if not hit:
+			_band = float(b)
+			return
+	# (all taken: stay where it is, rather than hopping)
 
 
 ## A bobbing arrow over the thing to do it to (in the world: every view and the headset see it).
 func _place_arrow() -> void:
-	if state != "show" or not data.has("target"):
+	if state != "show" or not data.has(_k("target")):
 		if _arrow != null and is_instance_valid(_arrow) and state != "show":
 			_arrow.queue_free()
 			_arrow = null
@@ -596,10 +676,26 @@ func _place_arrow() -> void:
 		main.add_child(_arrow)
 	var cam := _cam()
 	var dist := cam.global_position.distance_to(pos) if cam != null else 10.0
+	# about 5% of the view, but never much bigger than the thing itself (a golf ball under a huge arrow)
 	var size := clampf(dist * 0.05, 0.15, 6.0)
+	if tg is Node3D:
+		size = minf(size, maxf(0.15, _size_of(tg as Node3D) * 0.9))
 	_arrow.set_meta("base", pos + Vector3.UP * size * 1.8)
 	_arrow.set_meta("size", size)
 	_arrow.visible = not _blocked()
+
+
+## A node's rough size in metres: its biggest drawn piece's box (scaled), 0 = unknown (then no cap).
+func _size_of(n: Node3D) -> float:
+	var best := 0.0
+	var list: Array = [n]
+	list.append_array(n.find_children("*", "VisualInstance3D", true, false).slice(0, 24))
+	for x in list:
+		if x is VisualInstance3D:
+			var vi := x as VisualInstance3D
+			var sz := vi.get_aabb().size * vi.global_transform.basis.get_scale()
+			best = maxf(best, maxf(sz.x, maxf(sz.y, sz.z)))
+	return best if best > 0.0 else 99.0
 
 
 func _make_arrow() -> Node3D:
@@ -625,7 +721,7 @@ class Arrow extends Node3D:
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.albedo_color = Color(1.0, 0.82, 0.2)
 		m.no_depth_test = true
-		m.render_priority = 2
+		m.render_priority = UiKit.VR_PRIO_PANEL - 1  # under VR cards and their words (Marble Maze: it hid the card's text)
 		mesh.material_override = m
 		mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(mesh)

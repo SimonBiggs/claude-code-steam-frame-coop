@@ -115,6 +115,7 @@ var session_seed := 0
 var story_shown: Array[String] = []  # pictures shown (bots check)
 var aimed := {}  # host: runner id -> throws the CPU giant made at them this round (fair shares)
 var throw_k := 0
+var giant_throws := 0  # host: balls the giant has thrown (core/first_goal.gd: the VR giant's first small win)
 var hit_log := {}  # host: runner id -> times they were hit this round (the gentle bubble)
 var safe_len := {}  # host: runner id -> how long they'll blink when they pop back
 var round_live := false  # host: a round is being played (for the RUN line)
@@ -1098,6 +1099,7 @@ func _release(b: Ball, v: Vector3) -> void:
 	b.vel = v
 	b.thrower = GIANT
 	b.danger = v.length() > 2.0
+	giant_throws += 1
 	b.rest = 0.0
 	sound_at("whoosh", b.node.position, -2.0, 0.9)
 

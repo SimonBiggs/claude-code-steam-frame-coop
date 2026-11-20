@@ -294,6 +294,8 @@ func _scan_text() -> String:
 			continue
 		if main.vr_rig != null and String(main.get_path_to(n)).contains("WristMenu"):
 			continue  # the core wrist menu button (not the game's text)
+		if _first_goal(n):
+			continue  # shared core prompts: core/first_goal.gd's first goal, core/pick_orbs.gd's VR "how do I choose" line
 		if not (n as Node).call("is_visible_in_tree"):
 			continue
 		if n is Control and (n as Control).modulate.a < 0.05:
@@ -871,3 +873,16 @@ func _simple_checks() -> void:
 				kit.assert_true(main.toys.touched.has(toy), "the cockpit %s reacted to a touch" % toy)
 	else:
 		kit.assert_true(main.toys.trees_thrown > 0 and main.toys.wobbles_seen > 0, "client: the thrown tree and the wobble were mirrored")
+
+
+## Part of a shared core prompt: core/first_goal.gd's card (meta "first_goal") or the pick orbs' VR how-to line
+## (core/pick_orbs.gd "PickHint": a VR guest asked "How do I choose?", 2026-11-19)?
+func _first_goal(n: Node) -> bool:
+	if n.name == &"PickHint":
+		return true
+	var x := n
+	while x != null:
+		if x.has_meta("first_goal"):
+			return true
+		x = x.get_parent()
+	return false
