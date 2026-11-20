@@ -33,6 +33,8 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "delve-soot", "date": "2026-11-20", "game": "dungeon_delve", "pic": "soot", "line": "Stop Soot! Find the end!", "try": {"DD_TRY": "brave"}},
+	{"id": "delve-healer", "date": "2026-11-20", "game": "dungeon_delve", "pic": "healer_ring", "line": "New hero: the HEALER!", "try": {"DD_TRY": "brave"}},
 	{"id": "skybots-giantjobs", "date": "2026-11-19", "game": "sky_bots", "pic": "skybot", "line": "Giant jobs! Mega Grumbles!", "try": {"SKY_ISLAND": "1"}},
 	{"id": "skybots-isles2", "date": "2026-11-19", "game": "sky_bots", "pic": "tinybot", "line": "New islands! Rescue bots!", "try": {"SKY_ISLAND": "4"}},
 	{"id": "mm3-race", "date": "2026-11-19", "game": "marble_maze", "pic": "mmwatch", "line": "Today's race! Beat the clock", "try": {"MM_TRY": "race"}},

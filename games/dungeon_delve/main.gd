@@ -102,6 +102,8 @@ var deep_cam := Vector3.ZERO
 var deep_cam_h := 12.0
 var shake := 0.0
 var _moved_pots := {}
+var guides := {}  ## local slot -> Node3D: the first-30-seconds guide (gold chevrons on the floor to what to do next)
+var guide_text := ""  ## what the guide says in the pill ("" = no guide)
 
 # VR
 var headline: Label3D
@@ -689,12 +691,79 @@ func _process(delta: float) -> void:
 	if not deep.active:
 		dungeon.animate(delta, focus)
 	_animate_arrow(delta)
+	_guide(delta)
 	_headline(delta)
 	var big: Node3D = dungeon.props[dungeon.big_id]["node"]
 	big.scale = Vector3.ONE * (2.0 + (0.08 * sin(Time.get_ticks_msec() * 0.006) if results_showing() else 0.0))
 	if split != null:
 		_tv_camera(delta)
 		_update_pill()
+
+
+# --- The first 30 seconds: a guide to what to do next ---------------------------------------------------
+
+## Where a local hero should go next in the practice room, and what the pill says: bonk the practice pot (right by
+## where you pop in), then stand on BRAVE. [] = no guide (in a run, in the gentle rooms, on the results).
+func guide_goal(slot: int) -> Array:
+	if deep == null or deep.active or not heroes.has(slot) or results_showing():
+		return []
+	if int(net.state_get("room", 0)) != 0 or not String(net.state_get("phase", "")) in ["practice", "cleared"]:
+		return []
+	if not dungeon.is_used(0):
+		return [dungeon.prop_center(0), "Bonk the pot!"]
+	return [deep.PADS["brave"], ">Stand on BRAVE to go down!"]
+
+
+## Every machine with a screen: gold chevrons on the floor from each local hero towards its goal (they hide when
+## the hero is there, or busy at a statue, the hat stand or another pad).
+func _guide(_delta: float) -> void:
+	var text := ""
+	var t := Time.get_ticks_msec() * 0.001
+	for s in party.local_slots():
+		var goal := guide_goal(int(s))
+		var g: Node3D = guides.get(s)
+		if goal.is_empty():
+			if g != null:
+				g.visible = false
+			continue
+		if text == "":
+			text = String(goal[1])
+		if g == null or not is_instance_valid(g):
+			g = _make_guide()
+			guides[s] = g
+		var from: Vector3 = (heroes[s] as Hero).position
+		var to: Vector3 = goal[0]
+		var flat := Vector3(to.x - from.x, 0.0, to.z - from.z)
+		var busy := false
+		for spot in deep.CLASS_SPOTS.values() + deep.PADS.values() + [deep.HAT_RACK]:
+			if (spot as Vector3) != deep.PADS["brave"] and Vector2(from.x - (spot as Vector3).x, from.z - (spot as Vector3).z).length() < 1.1:
+				busy = true
+		g.visible = flat.length() > 1.3 and not busy
+		if not g.visible:
+			continue
+		var dir := flat.normalized()
+		var span := minf(flat.length() - 0.9, 2.6)
+		for i in g.get_child_count():
+			var c := g.get_child(i) as Node3D
+			var k := fmod(t * 0.9 + float(i) / g.get_child_count(), 1.0)
+			c.position = Vector3(from.x, 0.06, from.z) + dir * (0.6 + k * span)
+			c.rotation.y = atan2(dir.x, dir.z)
+			c.scale = Vector3.ONE * (0.6 + 0.4 * sin(k * PI))
+	guide_text = text
+
+
+func _make_guide() -> Node3D:
+	var root := Node3D.new()
+	root.name = "Guide"
+	add_child(root)
+	var b := MeshKit.Builder.new()
+	# a flat chevron pointing +Z (rotated to face the goal)
+	b.polygon(PackedVector2Array([Vector2(-0.28, -0.1), Vector2(0.0, 0.18), Vector2(0.28, -0.1), Vector2(0.28, -0.24), Vector2(0.0, 0.04), Vector2(-0.28, -0.24)]), 0.03,
+		MeshKit.at(Vector3.ZERO, Vector3.ONE, Vector3(PI * 0.5, 0, 0)), Color(1.0, 0.85, 0.3), true)
+	var m := b.build()
+	for i in 3:
+		root.add_child(MeshKit.instance(m, false))
+	return root
 
 
 ## Heroes for every TV seat (not slot 0 when a VR knight plays).
@@ -1001,6 +1070,8 @@ func _update_pill() -> void:
 	key_row.get_parent().visible = true
 	if party.local_slots().is_empty():
 		want = "Join"
+	elif guide_text != "":
+		want = guide_text
 	else:
 		for s in party.local_slots():
 			if heroes.has(s) and not bonked.has(s):
@@ -1011,7 +1082,12 @@ func _update_pill() -> void:
 		pill_text = want
 		for c in pill.get_children():
 			c.queue_free()
-		if want != "":
+		if want.begins_with(">"):  # a "go there" line (no button): an arrow and the words
+			var row := UiKit.hbox(8)
+			row.add_child(UiKit.icon("arrow_up", "gold", 30.0))
+			row.add_child(UiKit.label(want.substr(1), "small", UiKit.GOLD))
+			pill.add_child(row)
+		elif want != "":
 			pill.add_child(UiKit.prompts([["A", want]]))
 	pill.visible = want != ""
 
