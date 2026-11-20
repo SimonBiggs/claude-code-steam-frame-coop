@@ -45,7 +45,7 @@ const MAGNET_PULL := 0.3  # board.gd: a magnet tile's strongest pull (board unit
 const MAGNET_REACH := 1.6  # cells
 const MARBLE_STEER := 0.45  # marble.gd STEER (the gen test checks they agree)
 const MIN_GOAL_STEPS := 7
-const TRIES := 40
+const TRIES := 120  # 40 left 3 in 4000 of the nightly's deep-lap Rainbow Hill mazes on the plain fallback (2026-11-20): ~8% of its tries fit pads + teleporters + warp. Mazes are made on a worker thread (BgGen).
 
 ## The default spec (every key optional): how many of each feature, and room sizes.
 const SPEC := {"name": "MAZE", "theme": "garden", "new": "", "holes": 0, "bumpers": 0, "ice": 0, "arrows": 0,
