@@ -15,16 +15,36 @@ extends RefCounted
 static func worst(worst_ms: float, ms: float, again: Callable) -> float:
 	if ms <= worst_ms:
 		return worst_ms
-	for i in RETRIES:
-		OS.delay_msec(RETRY_GAP_MS)
+	# Tiny calls never matter for a 5-100 ms budget, and re-timing them made a would-be worst that never settles (the
+	# caller's wall clock vs the retries' on-CPU time): Cannon Cove's 0.1 ms waves took 92 s instead of 4 (2026-11-20).
+	if ms < MIN_RETRY_MS:
+		return ms
+	# First re-time at once (on-CPU time x the machine's current slowness, cached for 0.5 s): the caller's wall-clock
+	# reading is often just the busy machine, and the spread-out retries (40 ms gaps) are only for what still looks slow.
+	# (Waiting before every check made Whack-a-Mole's quick run 34 s instead of 14.)
+	var scale := _scale_cached(false)
+	for i in RETRIES + 1:
+		if i > 0:
+			OS.delay_msec(RETRY_GAP_MS)
+			if i == 1:
+				scale = _scale_cached(true)
 		var t := cpu_usec()
 		again.call()
-		ms = minf(ms, (cpu_usec() - t) / 1000.0)
+		ms = minf(ms, (cpu_usec() - t) / 1000.0 * scale)
 		if ms <= worst_ms:
 			break
-	if ms > worst_ms:
-		ms *= load_scale()
 	return maxf(worst_ms, ms)
+
+
+static var _scale := 1.0
+static var _scale_at := -1000000
+
+
+static func _scale_cached(fresh: bool) -> float:
+	if fresh or Time.get_ticks_msec() - _scale_at > 500:
+		_scale = load_scale()
+		_scale_at = Time.get_ticks_msec()
+	return _scale
 
 
 ## On-CPU time alone still read 47 ms under load: busy sibling hyperthreads and shared caches slow the work itself.
@@ -40,7 +60,8 @@ static func load_scale() -> float:
 		now = minf(now, cpu_usec() - t)
 		if acc < 0:
 			print(acc)
-	return clampf(REF_QUIET_US / maxf(now, 1.0), 0.25, 1.0)
+	var s := clampf(REF_QUIET_US / maxf(now, 1.0), 0.25, 1.0)
+	return 1.0 if s > 0.8 else s  # a quiet machine's jitter must not shrink the worst (more re-times, slower tests)
 
 
 ## 2026-11-20: still not enough: the nightly failed Mini Golf at 40.3 ms (18-27 ms on a quiet machine) and under
@@ -55,6 +76,7 @@ static func cpu_usec() -> float:
 
 
 const RETRIES := 5
+const MIN_RETRY_MS := 2.0
 const RETRY_GAP_MS := 40
 const REF_LOOPS := 100000
 const REF_QUIET_US := 2000.0  # REF_LOOPS on a quiet Steam Machine (TestTime.calibrate())
