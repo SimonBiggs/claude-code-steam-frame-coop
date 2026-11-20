@@ -26,7 +26,7 @@ func _check(ok: bool, what: String) -> void:
 		print("SCRIPT ERROR: RESCUE: " + what)
 
 
-func _init() -> void:
+func _initialize() -> void:
 	# Struggling: 8 misses, then 10 s.
 	var r = Rescue.new()
 	for i in 8:
