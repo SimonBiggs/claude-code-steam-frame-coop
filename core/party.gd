@@ -524,6 +524,8 @@ func _ignored(device: int) -> bool:
 		return true
 	if device < VIRTUAL_PAD_BASE and preload("res://core/tv_share.gd").pads_off():
 		return true  # the TV belongs to another game: its pads are not ours (core/tv_share.gd)
+	if device < VIRTUAL_PAD_BASE and preload("res://core/machine.gd").headset_pad(device):
+		return true  # the VR player's own controllers seen as a pad (core/machine.gd headset_pad)
 	return Engine.has_meta(BOT_IGNORE_META) and device < VIRTUAL_PAD_BASE
 
 
@@ -922,7 +924,10 @@ func _try_start() -> void:
 		_restore()
 		if auto_join_first_pad and local_slots().is_empty() and not _any_pending():
 			var pads := connected_pads()
-			if not pads.is_empty():
+			var want := int(OS.get_environment("DUO_TV_CLIENT_PAD")) if OS.has_environment("DUO_TV_CLIENT_PAD") else -1
+			if pads.has(want):
+				join_device(want)  # the TV screen core/tv_seat.gd started: the pad that pressed A sits first
+			elif not pads.is_empty():
 				join_device(pads[0])
 
 
