@@ -1,0 +1,45 @@
+#!/bin/bash
+# claude-say "text": speak through the TV speakers in the living room (Simon, 2026-10-17: "you'll need
+# to be able to talk to me"). Logged in said.log so voice-inject ignores the mic hearing it back.
+printf '%s\t%s\n' "$(date +%s)" "$(printf '%s' "$*" | tr '\t\n' '  ')" >> ~/.claude/said.log
+# Also show it in Minecraft chat when the game is connected to the mc bridge (Simon, 15:28).
+python3 - "$*" <<'PY' >/dev/null 2>&1 &
+import json, sys, urllib.request
+cmd = "tellraw @a " + json.dumps({"rawtext": [{"text": "\u00a7bClaude: \u00a7f" + sys.argv[1]}]})
+try: urllib.request.urlopen(urllib.request.Request("http://127.0.0.1:3001/cmd", data=cmd.encode()), timeout=5)
+except OSError: pass
+PY
+# Simon (15:28): "I don't think we need audio anymore. Just use the text." CLAUDE_SAY_AUDIO=1 speaks too.
+[ -z "$CLAUDE_SAY_AUDIO" ] && exit 0
+# No silent fallbacks: captions need a desktop display; in Gaming Mode the user manager has none.
+systemctl --user show-environment 2>/dev/null | grep -q '^DISPLAY=' \
+	|| echo "claude-say: no subtitles (no desktop display, e.g. Gaming Mode) - speech only" >&2
+# Where to play (2026-11-20): while the Steam Frame streams, SteamVR makes vrlink-sink the default sink, so a plain
+# pw-play spoke only in the headset and the room never heard the answer. say-sinks names the TV/room speakers AND the
+# headset (when streaming); CLAUDE_SAY_TO=room|headset|all (default all). It warns (log + channel) when the room
+# speakers are missing; nothing at all -> the default sink, said on stderr and in the log (never quiet).
+sinks=$(~/.local/bin/say-sinks "${CLAUDE_SAY_TO:-all}")
+if [ -z "$sinks" ]; then
+	echo "claude-say: no TV speakers or headset found: playing on the default sink ($(pactl get-default-sink 2>/dev/null))" >&2
+	printf '%s claude-say: no TV speakers or headset: default sink\n' "$(date '+%F %T')" >> ~/.claude/say-audio.log
+fi
+# The words also show in the arcade when it runs (addons/gdev/caption.gd: TV line + VR caption): Gaming Mode has no
+# desktop subtitles, and the VR player can't see the TV.
+arcade_pid=$(cat ~/GodotProjects/duo-arena/.dev/pid 2>/dev/null)
+[ -n "$arcade_pid" ] && kill -0 "$arcade_pid" 2>/dev/null && printf '%s' "$*" > ~/GodotProjects/duo-arena/.dev/caption.txt
+(
+	# One line at a time (David 19:08: "your voice is overlapping"). Streaming sentence by sentence
+	# (~/.local/share/kokoro/say-stream.py) sounded weird to Simon (19:09), so the whole line is rendered first.
+	wav=$(mktemp --suffix=.wav)
+	printf '%s' "$*" | uv run -q ~/.local/share/kokoro/say.py "${FRAME_SAY_VOICE:-bm_lewis}" "$wav" >/dev/null 2>&1 \
+		|| printf '%s' "$*" | piper -m ~/.local/share/piper/en_GB-alan-medium.onnx -f "$wav" >/dev/null 2>&1 || exit 0
+	# Subtitles on the TV (family 2026-11-07): claude-captions.service shows SHOW lines and hides on HIDE.
+	systemctl --user is-active -q claude-captions || systemctl --user start --no-block claude-captions
+	text="$(printf '%s' "$*" | tr '\t\n' '  ')"
+	flock ~/.claude/say.lock sh -c 'printf "%s\tSHOW\t%s\n" "$(date +%s)" "$2" >> ~/.claude/caption.log
+		if [ -n "$3" ]; then for s in $3; do pw-play --target "$s" --volume 1.0 "$1" 2>/dev/null & done; wait
+		else pw-play --volume 1.0 "$1" 2>/dev/null; fi
+		printf "%s\tHIDE\n" "$(date +%s)" >> ~/.claude/caption.log
+		printf "%s\t%s\n" "$(date +%s)" "$2" >> ~/.claude/said.log' _ "$wav" "$text" "$sinks"  # end line: saidecho window = end + 20 s
+	rm -f "$wav"
+) >/dev/null 2>&1 &

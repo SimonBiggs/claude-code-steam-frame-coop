@@ -11,6 +11,11 @@
 #  4b the game quits CLEANLY by itself (2026-11-19 19:44: SteamVR went down, Godot exited 0) -> gdev restarts it
 #  5 SIGTERM gdev (Steam stopping the game) -> the game stops too, no restart
 #  6 a fresh gdev run, VR live, then `gdev stop` -> stopped, no restart
+#  7 the headset sleeps longer than ASLEEP_GO_FLAT (fake vrserver log) -> flat on purpose with the "headset is asleep"
+#    card; it wakes ("0 - leaving standby") -> restart into VR
+#  8 VR wanted (.dev/vr_want, as arcade-vr writes) in a run whose OpenXR failed (VR_WATCH_FAKE_FAILED) -> restarts flat
+#    (--xr-mode off) first, asks for SteamVR (VR_WATCH_STEAMVR_CMD starts a fake vrserver), "Put the Frame on", the
+#    headset connects -> restart into VR, wish done (.dev/vr_status live)
 # Prints VR SURVIVE: PASS / FAIL. Uses the project's .dev/ (a worktree's, never the live dir).
 set -u
 PROJ=$(realpath "${1:-$PWD}")
@@ -110,6 +115,55 @@ if wait_for 60 "$LOG" "VrWatch: VR session live"; then
 else bad "second run has no VR session"; fi
 kill "$SRV2" 2>/dev/null
 GD=""
-echo "--- gdev said:"; grep -h "^\[gdev\]" "$T/gdev.out" "$T/gdev2.out"
+echo "7 the headset falls asleep in VR -> flat on purpose (asleep card), wakes -> back in VR"
+: > "$T/server.txt"
+export VR_WATCH_SERVER_LOG="$T/server.txt" BOT_VR=1
+unset ARCADE_GAME
+"$T/fakevrsrv" 100000 & SRV3=$!
+"$PROJ/tools/gdev" run "$PROJ" > "$T/gdev3.out" 2>&1 & GD=$!
+if wait_for 60 "$LOG" "VrWatch: VR session live"; then
+  # standby that began 200 s ago (longer than ASLEEP_GO_FLAT)
+  echo "$(LC_ALL=C date -d '-200 sec' +"%a %b %d %Y %H:%M:%S.000000") [Info] - 0 - entering standby" >> "$T/server.txt"
+  wait_for 30 "$T/gdev3.out" "restarting as it asked: headset asleep" && ok "gdev restarted it flat" || bad "no flat restart for the sleeping headset"
+  grep -qh "the headset has been asleep" "$LOG" "$LOG.1" 2>/dev/null && ok "asleep too long: went flat on purpose" || bad "a sleeping headset didn't send the arcade flat"  # (the restart rotates game.log)
+  wait_for 60 "$LOG" "card shown: The headset is asleep" && ok "TV card: the headset is asleep (charge it)" || bad "no 'headset is asleep' card"
+  sleep 2
+  echo "$(stamp) [Info] - 0 - leaving standby" >> "$T/server.txt"
+  wait_for 30 "$T/gdev3.out" "headset is back" && ok "woke up -> restarting into VR" || { bad "the headset waking wasn't noticed"; tail -5 "$LOG"; }
+  wait_for 60 "$LOG" "VrWatch: restarted to rejoin VR" && wait_for 20 "$LOG" "VrWatch: VR session live" && ok "VR live after waking" || bad "no VR after waking"
+else bad "asleep run has no VR session"; fi
+"$PROJ/tools/gdev" -C "$PROJ" stop
+for _ in $(seq 20); do kill -0 "$GD" 2>/dev/null || break; sleep 0.5; done
+kill "$SRV3" 2>/dev/null; GD=""
+unset VR_WATCH_SERVER_LOG
+
+echo "8 VR wanted (arcade-vr) while the arcade came up flat without SteamVR -> flat-first, SteamVR started, headset -> VR"
+cp /usr/bin/sleep "$T/fakevrsrv2"
+: > "$T/link.txt"
+printf '#!/bin/bash\n"%s/fakevrsrv2" 100000 > /dev/null 2>&1 &\necho "$(LC_ALL=C date +"%%a %%b %%d %%Y %%H:%%M:%%S.000000") [Info] - vrserver 2.18.4 startup with PID=$!, config=x" >> "%s/link.txt"\n' "$T" "$T" > "$T/fake-steamvr"
+chmod +x "$T/fake-steamvr"
+export VR_WATCH_SERVER=fakevrsrv2 VR_WATCH_FAKE_FAILED=1 VR_WATCH_STEAMVR_CMD="$T/fake-steamvr"
+unset BOT_VR
+date +%s > "$PROJ/.dev/vr_want"
+"$PROJ/tools/gdev" run "$PROJ" > "$T/gdev4.out" 2>&1 & GD=$!
+wait_for 60 "$T/gdev4.out" "restarting flat without OpenXR before starting SteamVR" && ok "OpenXR failed at launch: restarts flat before starting SteamVR" || bad "no flat-first restart"
+wait_for 60 "$LOG" "asked Steam to start SteamVR" && ok "asked for SteamVR" || { bad "SteamVR not asked for"; tail -8 "$LOG"; }
+P8=$(game_pid)
+[ -n "$P8" ] && tr '\0' ' ' < "/proc/$P8/cmdline" 2>/dev/null | grep -q -- "--xr-mode off" && ok "SteamVR started from a run without OpenXR (pid $P8)" || bad "SteamVR asked for from a run with OpenXR loaded"
+wait_for 20 "$LOG" "Put the Frame on" && ok "TV: Put the Frame on / choose Steam Machine" || bad "no 'Put the Frame on' step"
+grep -q "headset" "$PROJ/.dev/vr_status" && ok "status for arcade-vr: $(cut -f2- "$PROJ/.dev/vr_status" | tr '\t' ' ')" || bad "no .dev/vr_status step"
+sleep 1.2
+echo "$(stamp) [Info] - ReceivedHMDStaticProps. Model Number: Deckard MP, Serial Number: TEST" >> "$T/link.txt"
+wait_for 30 "$LOG" "headset is connected: restarting into VR" && ok "headset connected -> restarting into VR" || { bad "connected headset not noticed"; tail -5 "$LOG"; }
+export BOT_VR=1  # (the fake headset's VR session in the rejoin run comes from VrWatch's restart env)
+wait_for 60 "$LOG" "VR wanted and VR is live: done" && ok "VR live: wish done" || bad "VR never went live after the wish"
+[ ! -f "$PROJ/.dev/vr_want" ] && grep -q "live" "$PROJ/.dev/vr_status" && ok "wish removed, status live" || bad "wish/status not cleared"
+"$PROJ/tools/gdev" -C "$PROJ" stop
+for _ in $(seq 20); do kill -0 "$GD" 2>/dev/null || break; sleep 0.5; done
+GD=""; pkill -x fakevrsrv2 2>/dev/null
+rm -f "$PROJ/.dev/vr_want" "$PROJ/.dev/vr_status"
+grep -h "SCRIPT ERROR" "$LOG" | head -3 | grep -q . && bad "SCRIPT ERRORs: $(grep -m3 -A2 'SCRIPT ERROR' "$LOG")"
+unset VR_WATCH_FAKE_FAILED VR_WATCH_STEAMVR_CMD
+echo "--- gdev said:"; grep -h "^\[gdev\]" "$T/gdev.out" "$T/gdev2.out" "$T/gdev3.out" "$T/gdev4.out"
 echo "VR SURVIVE: $([ $FAILS -eq 0 ] && echo PASS || echo FAIL) ($FAILS problems)"
 exit $FAILS

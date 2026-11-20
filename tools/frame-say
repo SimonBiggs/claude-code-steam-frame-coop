@@ -21,7 +21,8 @@ mkdir -p ~/GodotProjects/duo-arena/.dev && printf '%s' "$*" > ~/GodotProjects/du
 	# Simon (16:28): speak in the HEADSET (the kids turn the TV down). FRAME_SAY_TV=1 also uses the TV.
 	ssh -i $KEY steamos@frame 'f=$(mktemp --suffix=.wav); cat > $f; XDG_RUNTIME_DIR=/run/user/1000 pw-play --volume 0.9 $f; rm -f $f' < "$wav" &
 	echo "say_audio_start $(date +%s.%N | cut -c1-13) | ${*:0:40}" >> $TL
-	[ -n "$FRAME_SAY_TV" ] && pw-play --volume 0.8 "$wav" 2>/dev/null
+	# The TV speakers by name: while the Frame streams, the default sink is the headset (vrlink-sink), 2026-11-20.
+	[ -n "$FRAME_SAY_TV" ] && room=$(~/.local/bin/say-sinks room) && [ -n "$room" ] && pw-play --target "$room" --volume 0.8 "$wav" 2>/dev/null
 	wait; rm -f "$wav"
 	printf '%s\t%s\n' "$(date +%s)" "$*" >> ~/.claude/said.log  # end line for saidecho
 ) >/dev/null 2>&1 &
