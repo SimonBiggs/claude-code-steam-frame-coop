@@ -8,4 +8,5 @@ const GOAL := {
 	"do": {"tv": ["L-STICK", "Walk to a board, tell the pilot!"], "vr": ["HANDS", "Press the glowing button on the desk!"]},
 	"start": "phase() == 'work'",
 	"done": "phase() == 'ready' or phase() == 'launch'",
+	"seats": {0: {"you": "the Pilot", "do": ["L-STICK", "Point at the glowing button, press A!"], "as": "vr"}},  # flat P1 (no headset) plays the VR role
 }

@@ -10,4 +10,5 @@ const GOAL := {
 	"start": "phase() == 'count' or phase() == 'seek'",
 	# a find, a squeak, or anyone safely hidden for a few seconds
 	"rise": "v('finds', 0) + sum(v('squeaks', [])) + min(1.0, floor(sum(v('hidden_time', [])) / 3.0))",
+	"seats": {0: {"you": "the Seeker", "do": ["RT", "Find a hider, shine your torch on them!"], "as": "vr"}},  # flat P1 (no headset) plays the VR role
 }

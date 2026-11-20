@@ -9,4 +9,5 @@ const GOAL := {
 	"start": "v('state') == 'play' or v('state') == 'practice'",
 	"done": "v('band_hits', 0) > 0 or v('prac_first_done', -1.0) >= 0.0",
 	"miss": "v('band_misses', 0)",
+	"seats": {0: {"you": "the Drummer", "do": ["A", "Press as a ball lands on a drum!"], "as": "vr"}},  # flat P1 (no headset) plays the VR role
 }

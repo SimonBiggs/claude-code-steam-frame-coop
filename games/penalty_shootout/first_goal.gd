@@ -8,4 +8,5 @@ const GOAL := {
 	"do": {"tv": ["A", "Hold A, let go to shoot!"], "vr": ["HANDS", "Touch the ball to save it!"]},
 	# practice rings hit, keeper practice saves, shots, saves
 	"rise": "v('sp_hits', 0) + v('kp_step', 0) + v('shots_total', 0) + v('saves', 0)",
+	"seats": {0: {"you": "the Goalkeeper", "do": ["A", "Shuffle with the stick, A to dive!"], "as": "vr"}},  # flat P1 (no headset) plays the VR role
 }

@@ -10,4 +10,5 @@ const GOAL := {
 	"rise": "v('ring_hit', {}).size()",
 	"done": "v('state', '') == 'clear'",
 	"target": "v('ring_node')",
+	"seats": {0: {"you": "the Giant at the maze", "do": ["L-STICK", "Tilt the table to roll to the ring!"], "as": "vr"}},  # flat P1 (no headset) plays the VR role
 }

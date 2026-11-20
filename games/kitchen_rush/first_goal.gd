@@ -8,4 +8,5 @@ const GOAL := {
 	"do": {"tv": ["A", "Grab a BUN from the glowing crate!"], "vr": ["HANDS", "Chop the cheese on the board!"]},
 	# chops, fetches, dishes, plates served (host / local)
 	"rise": "sum(v('stats', []))",
+	"seats": {0: {"you": "the Chef", "do": ["X", "Chop the cheese on the board!"], "as": "vr"}},  # flat P1 (no headset) plays the VR role
 }

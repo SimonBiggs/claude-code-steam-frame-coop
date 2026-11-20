@@ -10,4 +10,5 @@ const GOAL := {
 	"rise_tv": "sum(v('gstats', {}))",
 	"rise_vr": "v('rings_got', 0)",
 	"target": "nearest('dr_targets')",
+	"seats": {0: {"you": "the Dragon Rider", "do": ["L-STICK", "Steer through a glowing ring!"], "as": "vr"}},  # flat P1 (no headset) plays the VR role
 }

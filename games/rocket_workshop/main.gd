@@ -318,7 +318,10 @@ func _setup_game(mode: String) -> void:
 	_build_views(mode)
 	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED if mode == "client" else Input.MOUSE_MODE_VISIBLE
 	_assign_joypads()
-	if seats.deck_alone():
+	if seats.deck_alone() or lone_tv_pad(mode):
+		# One controller and no headset: that player is the PILOT (full screen, the blueprint floats behind the desk;
+		# more controllers drop in as crew). On the TV it used to be crew with nobody at the desk: nothing could
+		# ever launch (2026-11-15: opened twice, 0 rockets, quit at 21 s and 14 s).
 		seats.deck_solo(0)
 	ready_to_play = true
 	_ensure_join_listener()
@@ -846,6 +849,14 @@ func _stat(index: int, key: String, amount: float) -> void:
 
 
 # --- Game flow (host) ----------------------------------------------------------
+
+## Split screen on one machine with exactly one controller and no headset (BOT_LONE_TV=1 fakes it in bots, whose pads
+## are injected and not listed).
+func lone_tv_pad(mode: String) -> bool:
+	if mode != "local" or players.is_empty() or players[0].vr:
+		return false
+	return Input.get_connected_joypads().size() == 1 or OS.get_environment("BOT_LONE_TV") == "1"
+
 
 func crew_count() -> int:
 	var n := 0
