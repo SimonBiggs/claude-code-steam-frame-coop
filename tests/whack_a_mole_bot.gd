@@ -259,6 +259,7 @@ func _vr_took_any() -> bool:
 
 func _checks() -> void:
 	var mode: String = main.net.mode
+	kit.check_first_goals()  # every player here: their own card (own split view), own "Nice one!", the host's wins synced
 	# Second pass (deep.gd) on every machine.
 	kit.assert_true(orbs_seen.has("mode") or mode == "client", "%s: the mode was picked on the pick orbs (%s)" % [mode, str(orbs_seen.keys())])
 	kit.assert_true(orbs_seen.has("gift") or mode == "client", "%s: Fig's hammer gifts were offered on the pick orbs" % mode)

@@ -6,6 +6,8 @@ const GOAL := {
 	"you_vr": "the Gunner",
 	"you": "a Pirate",
 	"do": {"tv": ["A", "Carry a cannonball to a cannon!"], "vr": ["GRIP", "Pull the cannon back, let go!"]},
+	# P1 is the gunner even without a headset (player.gd: gunner = index 0; flat: aim with the stick, fire with A / RT)
+	"seats": {0: {"you": "the Gunner", "do": ["RT", "Aim with the stick, fire with RT!"]}},
 	"rise_tv": "sum(v('stats', []))",
 	"rise_vr": "v('practice_hits', 0) + sum(v('stats', []))",
 }
