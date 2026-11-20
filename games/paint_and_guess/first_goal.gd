@@ -8,5 +8,6 @@ const GOAL := {
 	"do": {"tv": ["A", "Pick what's being painted!"], "vr": ["TRIGGER", "Hold it on the easel to paint!"]},
 	"start": "v('state', '') == 'draw'",
 	# VR: a stroke painted; TV: the first guesser's points
-	"rise": "v('next_stroke_id', 1) if device == 'vr' else (v('players')[1].score if v('players', []).size() > 1 else 0)",
+	"rise_tv": "v('players')[1].score if v('players', []).size() > 1 else 0",
+	"rise_vr": "v('next_stroke_id', 1)",
 }

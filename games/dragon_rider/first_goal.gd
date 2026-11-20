@@ -7,6 +7,7 @@ const GOAL := {
 	"you": "a Dragon Rider",
 	"do": {"tv": ["RT", "Pop a balloon with bubbles!"], "vr": ["HANDS", "Steer through a glowing ring!"]},
 	"start": "v('phase', '') == 'fly'",
-	"rise": "[sum(v('gstats', {})), v('rings_got', 0)][int(get('device') == 'vr')]",
+	"rise_tv": "sum(v('gstats', {}))",
+	"rise_vr": "v('rings_got', 0)",
 	"target": "nearest('dr_targets')",
 }

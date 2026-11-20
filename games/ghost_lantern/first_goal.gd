@@ -6,6 +6,7 @@ const GOAL := {
 	"you_vr": "the Lantern Keeper",
 	"you": "a Ghost Hunter",
 	"do": {"tv": ["RT", "Hold to vacuum a glowing ghost!"], "vr": ["HANDS", "Shine your lantern on the ghost!"]},
-	"done": "[sum(v('tv_catches', {})) > 0 or v('caught', 0) > 0, not v('practice', false) or v('caught', 0) > 0][int(get('device') == 'vr')]",
+	"done_tv": "sum(v('tv_catches', {})) > 0 or v('caught', 0) > 0",
+	"done_vr": "not v('practice', false) or v('caught', 0) > 0",
 	"target": "nearest('ghosts')",
 }

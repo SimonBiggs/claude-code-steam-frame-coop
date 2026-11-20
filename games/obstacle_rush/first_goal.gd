@@ -7,5 +7,6 @@ const GOAL := {
 	"you": "an Obstacle Runner",
 	"do": {"tv": ["A", "Run and jump to the glowing ring!"], "vr": ["TRIGGER", "Grab a ball and throw it!"]},
 	"start": "phase() == 'play'",
-	"rise": "v('giant').throws if device == 'vr' and v('giant') != null else v('ring_done', {}).size() + v('finish_log', []).size()",
+	"rise_tv": "v('ring_done', {}).size() + v('finish_log', []).size()",
+	"rise_vr": "v('giant').throws if v('giant') != null else 0",
 }

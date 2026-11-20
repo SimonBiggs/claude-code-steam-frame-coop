@@ -6,5 +6,6 @@ const GOAL := {
 	"you_vr": "the Angler",
 	"you": "a Fisher",
 	"do": {"tv": ["L-STICK", "Row to a floating treasure!"], "vr": ["TRIGGER", "Flick your rod to cast!"]},
-	"rise": "[v('scooped', 0) + v('catches', []).size(), v('catches', []).size()][int(get('device') == 'vr')]",
+	"rise_tv": "v('scooped', 0) + v('catches', []).size()",
+	"rise_vr": "v('catches', []).size()",
 }

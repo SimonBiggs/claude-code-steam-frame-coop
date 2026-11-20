@@ -7,5 +7,6 @@ const GOAL := {
 	"you": "a Dodgeball Player",
 	"do": {"tv": ["A", "Grab a ball, throw it at the belly!"], "vr": ["TRIGGER", "Grab a ball, throw it at a runner!"]},
 	"start": "phase() == 'play'",
-	"rise": "[st('tv_score', 0), st('giant_score', 0) + v('giant_throws', 0)][int(get('device') == 'vr')]",
+	"rise_tv": "st('tv_score', 0)",
+	"rise_vr": "st('giant_score', 0) + v('giant_throws', 0)",
 }

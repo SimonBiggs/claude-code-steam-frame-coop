@@ -11,5 +11,6 @@ const GOAL := {
 	"do": {"tv": ["L-STICK", "Go to the glowing ring or target!"], "vr": ["HANDS", "Punch the glowing target!"]},
 	"start": "phase() == 'play'",
 	# score, a support ring flown through, or (VR) a practice target done
-	"rise": "st('score', 0) + v('toys').rings_popped - v('missions').practice_parts.size() if device == 'vr' else st('score', 0) + v('toys').rings_popped",
+	"rise_tv": "st('score', 0) + v('toys').rings_popped",
+	"rise_vr": "st('score', 0) + v('toys').rings_popped - v('missions').practice_parts.size()",
 }

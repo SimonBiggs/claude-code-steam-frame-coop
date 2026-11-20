@@ -829,7 +829,7 @@ func _scan_text() -> String:
 			continue
 		if String(main.get_path_to(n)).contains("WristMenu"):
 			continue  # core/vr_rig.gd's wrist MENU button (the button's name, like PAUSED)
-		if _first_goal(n):
+		if BotKit.core_prompt(n):
 			continue  # shared core prompts: core/first_goal.gd's first goal, core/pick_orbs.gd's VR "how do I choose" line
 		if not (n as Node).call("is_visible_in_tree"):
 			continue
@@ -895,15 +895,3 @@ func _cue_checks(mode: String) -> void:
 		kit.assert_true(main.hud.join_cue == null or cues.has("join_cue"), "SIMPLE: the join cue showed for a spare pad")
 	kit.assert_true(bad_text.is_empty(), "%s: SIMPLE: no how-to text on this machine" % mode)
 
-
-## Part of a shared core prompt: core/first_goal.gd's card (meta "first_goal") or the pick orbs' VR how-to line
-## (core/pick_orbs.gd "PickHint": a VR guest asked "How do I choose?", 2026-11-19)?
-func _first_goal(n: Node) -> bool:
-	if n.name == &"PickHint":
-		return true
-	var x := n
-	while x != null:
-		if x.has_meta("first_goal"):
-			return true
-		x = x.get_parent()
-	return false

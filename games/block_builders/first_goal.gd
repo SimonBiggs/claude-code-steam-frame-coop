@@ -6,5 +6,6 @@ const GOAL := {
 	"you_vr": "the Giant Builder",
 	"you": "a Block Builder",
 	"do": {"tv": ["A", "Jump over to the flag!"], "vr": ["TRIGGER", "Grab a plank, drop it in the gap!"]},
-	"done": "[v('ring_state', 0) >= 2 or v('first_flag_t', -1.0) >= 0.0, v('place_total', 0) > 0][int(get('device') == 'vr')]",
+	"done_tv": "v('ring_state', 0) >= 2 or v('first_flag_t', -1.0) >= 0.0",
+	"done_vr": "v('place_total', 0) > 0",
 }

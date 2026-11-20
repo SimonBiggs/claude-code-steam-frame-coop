@@ -866,6 +866,8 @@ func _scan_text() -> String:
 	for n in nodes:
 		if main.pause_menu != null and main.pause_menu.is_ancestor_of(n):
 			continue
+		if BotKit.core_prompt(n):
+			continue  # shared core prompts (first goal, pick hint, VR / wrist menu): tests/bot_kit.gd
 		if not (n as Node).call("is_visible_in_tree"):
 			continue
 		if _in_story_card(n):

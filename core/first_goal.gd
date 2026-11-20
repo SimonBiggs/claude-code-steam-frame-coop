@@ -134,8 +134,12 @@ static func problems_of(id: String) -> Array[String]:
 		return ["%s: no games/%s/first_goal.gd with a GOAL (core/first_goal.gd)" % [id, id]]
 	if String(d.get("you", "")).strip_edges() == "":
 		out.append("%s: no \"you\" (what the player is)" % id)
-	if not d.has("rise") and not d.has("done"):
-		out.append("%s: no \"rise\" or \"done\" (the small win)" % id)
+	for dev in ["tv", "vr"]:
+		var has_win := false
+		for k in ["rise", "done", "rise_" + dev, "done_" + dev]:
+			has_win = has_win or d.has(k)
+		if not has_win:
+			out.append("%s: no \"rise\" or \"done\" (the small win) for %s" % [id, dev])
 	if bool(d.get("wordless", false)) and not d.has("target") and not d.has("icon"):
 		out.append("%s: wordless needs a \"target\" (arrow) or an \"icon\"" % id)
 	var dd: Dictionary = d.get("do", {})
@@ -263,7 +267,7 @@ func _win() -> void:
 	_remember()
 	UiKit.sound("ui_select", -4.0, 1.2)
 	if _card != null and is_instance_valid(_card):
-		var l: Label = _card.get_meta("text_label", null)
+		var l: Label = _card.get_meta("text_label") if _card.has_meta("text_label") else null  # (a null default errors)
 		if l != null and is_instance_valid(l):
 			l.text = "Nice one!"
 		var tw := _card.create_tween()
@@ -533,6 +537,7 @@ func _show(prefix: String = "") -> void:
 		_vr_card = HudKit.vr_card(world, cam, _you(), body,
 			{"width": 1.1, "color": "gold", "height": -0.34, "distance": 1.6, "title_size": 0.06, "body_size": 0.05})
 		_vr_card.set_meta("first_goal", true)
+		_vr_card.set_meta("vr_yields", true)  # it steps aside / hides for the game's cards, never they for it
 	else:
 		if _layer == null:
 			_layer = CanvasLayer.new()
@@ -586,9 +591,20 @@ func _set_visible(on: bool) -> void:
 	if _card != null and is_instance_valid(_card) and state == "show":
 		_card.visible = on
 	if _vr_card != null and is_instance_valid(_vr_card):
-		_vr_card.visible = on
+		_vr_card.visible = on and not _vr_covered()
 	if _arrow != null and is_instance_valid(_arrow):
 		_arrow.visible = on
+
+
+## Is the VR prompt over one of the game's own panels (after stepping aside)? Then it waits, hidden.
+func _vr_covered() -> bool:
+	var cam := VrViewCheck.vr_camera(get_tree().root)
+	if cam == null or _vr_card == null:
+		return false
+	for o in VrViewCheck.shown_panels(get_tree().root):
+		if o != _vr_card and not _vr_card.is_ancestor_of(o) and VrViewCheck.overlap(cam.global_position, _vr_card, o):
+			return true
+	return false
 
 
 func _animate(delta: float) -> void:
