@@ -14,6 +14,8 @@ const LIVE = join(GP, "duo-arena");
 const STAGE = join(GP, ".duo-arena-stage");
 const BIN = join(HOME, ".local/bin");
 const DEPLOYED = ["core", "games", "arcade", "tests"];  // what duo-deploy copies stage -> live
+// root files + docs/ staging keeps in step with live (dev.land copies them; dev.debt "stage-root" checks). 2026-11-20: staging's launch.sh still pinned DUO_JOIN=frame, docs a month old.
+const STAGE_ROOT_FILES = ["launch.sh", "openxr_action_map.tres", "README.md", ".gitignore", ".gitattributes"];
 const TOOL_COPIES: Record<string, string> = {  // installed file -> repo copy (keep in sync)
   [join(BIN, "gdev")]: "tools/gdev", [join(HOME, ".local/share/gdev/bridge.gd")]: "tools/gdev-bridge.gd",
   [join(HOME, ".local/share/gdev/control.gd")]: "tools/control.gd",
@@ -420,6 +422,8 @@ export async function debt() {
   // tools/ is not in stage.diff (not game code) but dev.land rsyncs it from wt-merge: a direct commit to live leaves staging's copy behind.
   const toolDrift = (await sh(`diff -rq --exclude=__pycache__ ${LIVE}/tools ${STAGE}/tools | wc -l`)).out;
   if (+toolDrift > 0) issues.push({ kind: "stage-tools", what: `${toolDrift} tools/ files differ between live and staging`, fix: "rsync -a --delete --exclude __pycache__ ~/GodotProjects/duo-arena/tools/ ~/GodotProjects/.duo-arena-stage/tools/" });
+  const rootDrift = (await sh(`cd ${LIVE}; for f in ${STAGE_ROOT_FILES.join(" ")}; do [ -e $f ] && ! cmp -s $f ${STAGE}/$f && echo $f; done; diff -rq docs ${STAGE}/docs >/dev/null 2>&1 || echo docs/`)).out.trim();
+  if (rootDrift) issues.push({ kind: "stage-root", what: `staging's root files differ from live: ${rootDrift.split("\n").join(", ")}`, fix: `cd ~/GodotProjects/duo-arena && rsync -a --delete docs/ ../.duo-arena-stage/docs/ && cp ${STAGE_ROOT_FILES.join(" ")} ../.duo-arena-stage/` });
   // Staging must run like the TV: addons/boot (services) and project.godot (autoloads) match live (2026-10-31: no Boot in staging).
   const bootDrift = (await sh(`diff -rq --exclude=*.uid --exclude=*.import ${LIVE}/addons/boot ${STAGE}/addons/boot 2>&1 | wc -l; diff <(sed 's|^config/name=.*||' ${LIVE}/project.godot) <(sed 's|^config/name=.*||' ${STAGE}/project.godot) | wc -l`)).out.split("\n").map(Number);
   if (bootDrift.some(n => n > 0)) issues.push({ kind: "stage-boot", what: "staging's addons/boot or project.godot differs from live (bots there run without the TV's services)", fix: "rsync -a ~/GodotProjects/duo-arena/addons/boot/ ~/GodotProjects/.duo-arena-stage/addons/boot/; sed 's|^config/name=\"Duo Arena\"$|config/name=\"Duo Arena Stage\"|' ~/GodotProjects/duo-arena/project.godot > ~/GodotProjects/.duo-arena-stage/project.godot" });
@@ -791,7 +795,7 @@ export async function land(branch: string, genTests: string[], botId: string, ot
   const stale = (await sh("git log --merges --first-parent --format=%s main..merge-arcade", join(GP, "wt-merge"))).out.split("\n").filter(Boolean);
   if (stale.some(s => !s.includes(`'${branch}'`))) {
     await sh("git merge --abort 2>/dev/null; git reset -q --hard main", join(GP, "wt-merge"));
-    await sh(`for d in ${DEPLOYED.join(" ")} tools addons/boot addons/gdev; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/; sed 's|^config/name="Duo Arena"$|config/name="Duo Arena Stage"|' wt-merge/project.godot > .duo-arena-stage/project.godot`, GP);
+    await sh(`for d in ${DEPLOYED.join(" ")} tools addons/boot addons/gdev; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/; rsync -a --delete wt-merge/docs/ .duo-arena-stage/docs/; for f in ${STAGE_ROOT_FILES.join(" ")}; do [ -e wt-merge/$f ] && cp wt-merge/$f .duo-arena-stage/; done; sed 's|^config/name="Duo Arena"$|config/name="Duo Arena Stage"|' wt-merge/project.godot > .duo-arena-stage/project.godot`, GP);
   }
   // The branch's worktree must be fully committed: land merges the BRANCH, so anything uncommitted (an edit, or an
   // untracked .uid / .gd a re-import made) would silently stay behind (2026-11-11: marble-deep2's
@@ -823,7 +827,7 @@ export async function land(branch: string, genTests: string[], botId: string, ot
     retry = differing.length > 0 && differing.every(f => ours.has(f) || [...ours].some(o => o.startsWith(f + "/")));
   }
   if (drift.out.trim() && !retry) return { stop: "live!=stage", out: drift.out };
-  await sh(`for d in ${DEPLOYED.join(" ")} tools addons/boot addons/gdev; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/; sed 's|^config/name="Duo Arena"$|config/name="Duo Arena Stage"|' wt-merge/project.godot > .duo-arena-stage/project.godot`, GP);
+  await sh(`for d in ${DEPLOYED.join(" ")} tools addons/boot addons/gdev; do rsync -a --delete --exclude '*.import' --exclude '__pycache__' wt-merge/$d/ .duo-arena-stage/$d/; done; cp wt-merge/arcade.tscn .duo-arena-stage/; rsync -a --delete wt-merge/docs/ .duo-arena-stage/docs/; for f in ${STAGE_ROOT_FILES.join(" ")}; do [ -e wt-merge/$f ] && cp wt-merge/$f .duo-arena-stage/; done; sed 's|^config/name="Duo Arena"$|config/name="Duo Arena Stage"|' wt-merge/project.godot > .duo-arena-stage/project.godot`, GP);
   const out: Record<string, string> = {};
   if (uidFix.note) out["uid-autocommit"] = uidFix.note;
   let ok = true;
