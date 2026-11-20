@@ -67,6 +67,10 @@ const FanClubScript := preload("res://games/rhythm_band/fans.gd")
 const Seeded := preload("res://core/seeded.gd")
 const Save := preload("res://core/save.gd")
 const Telemetry := preload("res://core/telemetry.gd")
+const Rescue := preload("res://core/rescue.gd")
+## RESCUE: a band missing more than half its notes gets wider timing windows (up to RESCUE_WIN times) until
+## it's hitting again (2026-11-15 TV: first play on HARD, 8 hits / 11 misses, quit at 31 s).
+const RESCUE_WIN := 0.8
 const StoryCard := preload("res://core/story_card.gd")
 const PickOrbs := preload("res://core/pick_orbs.gd")
 const Deep := preload("res://games/rhythm_band/deep.gd")
@@ -150,6 +154,8 @@ var score := 0
 var best := 0
 var band_hits := 0
 var band_misses := 0
+var rescue = Rescue.new()  # host / local: the band's rescue (core/rescue.gd)
+var rescue_lvl := 0.0  # every machine: the help level judging uses (host shares it as net state "rescue")
 var last_stars := 0
 var tour_stars := 0
 var drum_level := 1
@@ -1119,7 +1125,7 @@ func multiplier() -> int:
 ## The timing window (song seconds) for a level: the mode's and the gift's share, times the clock's speed (a fast part
 ## keeps the same window in real seconds).
 func window(level: int, drummer: bool = false) -> Vector2:
-	return WINDOWS[clampi(level, 0, 2)] * Deep.win_share(mode, gift, drummer) * rate_now()
+	return WINDOWS[clampi(level, 0, 2)] * Deep.win_share(mode, gift, drummer) * rate_now() * (1.0 + RESCUE_WIN * rescue_lvl)
 
 
 ## GENTLE with a flat drummer (pad / keys, not VR): a press of any drum button hits the drum that is due.
@@ -1149,6 +1155,8 @@ func star_meter_value() -> float:
 ## tn: the note's time (for IN SYNC), star: a gold note.
 func _band_result(q: int, star: bool = false, src: int = -1, tn: float = -1.0) -> void:
 	var n := 1 + active_guitarists().size()
+	if net == null or net.mode != "client":
+		rescue.note(q < 2)
 	if q < 2:
 		band_hits += 1
 		combo += 1
@@ -1616,6 +1624,7 @@ func _process(delta: float) -> void:
 				song_t = -START_LEAD
 				net.event("play", [song_serial])
 		"play":
+			_update_rescue(delta)
 			_check_drum_misses()
 			cheer_cd -= delta
 			if crowd > 0.8 and cheer_cd <= 0.0:
@@ -1633,6 +1642,17 @@ func _process(delta: float) -> void:
 		"tour":
 			if state_t > 1.5 and cont_edge:
 				_enter_menu()
+
+
+## Host / local: the band's rescue level, shared with the TVs (they judge their own guitarists).
+func _update_rescue(delta: float) -> void:
+	rescue.tick(delta)
+	if rescue.crossed():
+		_show_center("BIGGER BEATS!", 1.4, true, "BIGGER BEATS!")
+	var l: float = rescue.level()
+	if absf(l - rescue_lvl) >= 0.05 or (l == 0.0 and rescue_lvl > 0.0) or (l == 1.0 and rescue_lvl < 1.0):
+		rescue_lvl = l
+		net.state_set("rescue", snappedf(l, 0.05))
 
 
 func _check_drum_misses() -> void:
@@ -2219,6 +2239,8 @@ func _on_state_changed(key: String, value: Variant) -> void:
 		mode = Deep.mode_of(String(value))
 	if key == "fans" or key == "days":
 		fan_club.set_fans(net.state_get("fans", []), int(net.state_get("days", 0)))
+	if key == "rescue" and net.mode == "client":
+		rescue_lvl = float(net.state_get("rescue", 0.0))
 	if key == "fest":
 		festival.set_pieces(int(net.state_get("fest", 0)), true)
 
@@ -2242,7 +2264,7 @@ func _run_line(end: String) -> void:
 		"mode": str(net.mode), "pick_mode": mode, "gift": gift, "season": season, "changes": hz_list.size(),
 		"kinds": hz_list.map(func(e: Dictionary) -> String: return String(e.kind)), "solos": solos_done.duplicate(),
 		"festival": Deep.festival(int(save.data.songs)), "picks": picks.history.size(), "fans": (save.data.fans as Array).size(), "fans_total": int(save.data.fans_total),
-		"songs": int(save.data.songs), "days": int(save.data.days), "session_songs": songs_played})
+		"songs": int(save.data.songs), "days": int(save.data.days), "session_songs": songs_played}.merged(rescue.run_fields()))
 
 
 ## Doodle says something (host / local: every machine sees it; beats wait their turn).

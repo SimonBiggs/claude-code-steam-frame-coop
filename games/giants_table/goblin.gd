@@ -483,7 +483,7 @@ func _think(delta: float) -> void:
 		if d < min_d and d > 0.001:
 			steer += off / d * (min_d - d) * 4.0
 	var move := (dir + steer).normalized()
-	var spd := speed * (0.85 if carrying else 1.0)
+	var spd: float = speed * (0.85 if carrying else 1.0) * (main.goblin_pace() if main != null and main.has_method("goblin_pace") else 1.0)
 	if W.in_water(pos.x, pos.z):
 		spd *= 0.5
 	var np := pos + move * spd * delta

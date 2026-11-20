@@ -19,6 +19,8 @@ extends Node
 ## in; BOT_PLAIN=1 keeps the normal start) and knights step out of a trick's ring while the Giant catches every other
 ## ball / barrel. Checks: the orbs showed (every machine), a real pick was made (not the middle by default), tricks
 ## were told (every machine) and the knights stayed clear.
+## BOT_STUCK_GIANT=1: the Giant takes the picks but never grabs or smacks (a first-time guest who can't work it out,
+## 2026-11-19): checks the RESCUE (core/rescue.gd) kicks in - longer reach, slower goblins, rescue_peak on the RUN line.
 
 const W := preload("res://games/giants_table/world.gd")
 const BotEnd := preload("res://tests/bot_end.gd")  # check(): counted checks, so every run ends with a real BOT RESULT
@@ -30,6 +32,10 @@ var giant_mode := "pick"
 var giant_target = null
 var giant_wait := 0.0
 var last_print := -100.0
+var stuck := OS.has_environment("BOT_STUCK_GIANT")  # giant never grabs: the rescue must kick in
+var rescue_max := 0.0
+var pace_min := 1.0
+var reach_max := 0.0
 var lazy := OS.has_environment("BOT_LAZY_GIANT")  # giant only rescues knights: tests downs and revives
 var bot_players := clampi(int(OS.get_environment("BOT_PLAYERS")), 0, 6) if OS.has_environment("BOT_PLAYERS") else 0
 var joined := 1
@@ -74,8 +80,15 @@ func _physics_process(delta: float) -> void:
 		main._on_game_over("The goblins stole the campfire!")
 	_note_deep()
 	var picking := _drive_picks(delta)
+	if main.net.mode != "client":
+		rescue_max = maxf(rescue_max, main.rescue.level())
+		pace_min = minf(pace_min, main.goblin_pace())
+		reach_max = maxf(reach_max, main.grab_reach() / Deep.reach(main.gift))
 	if picking.has("giant"):
 		pass
+	elif stuck and main.giant != null:
+		main.giant.bot_grip = false
+		main.giant.bot_target = main.giant.flat_cursor if main.giant.flat else main.giant.bot_target
 	elif main.giant != null and main.giant.flat:
 		_drive_giant(delta)
 	elif main.giant != null and main.giant.vr:
@@ -595,6 +608,10 @@ func _exit_tree() -> void:
 		BotEnd.check(seen.has("a trick told"), "a goblin trick was told (mode %s)" % main.net.mode)
 	if main != null and main.wave >= 1:
 		check_host_mode(main.net, main.mode)
+	if main != null and stuck and main.net.mode != "client":
+		BotEnd.check(rescue_max > 0.5, "RESCUE: a Giant who never grabs got help (peak %.2f)" % rescue_max)
+		BotEnd.check(pace_min < 0.85, "RESCUE: goblins slowed for a stuck Giant (pace %.2f)" % pace_min)
+		BotEnd.check(reach_max > 1.4, "RESCUE: a stuck Giant's reach grew (x%.2f)" % reach_max)
 	if main != null and main.wave >= 1:
 		# (tools/multibot.ts: every machine the same raid. Not the gift count: a joiner leaves ~10 s before the host,
 		# which may save a night after it has gone.)

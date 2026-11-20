@@ -159,6 +159,12 @@ var game_over_time := 0.0
 var down_t := 0.0
 var boulder_t := 0.0
 var kills := {}  # how goblins were beaten (stats for tests)
+## RESCUE (core/rescue.gd): a Giant who hasn't caught anything gets longer arms and slower goblins until they do
+## (2026-11-19, Steam Frame guest: 0 of 5 goblins beaten in wave 1, quit at 101 s). Host only.
+const Rescue := preload("res://core/rescue.gd")
+const RESCUE_REACH := 1.0   # extra reach at full help (x2)
+const RESCUE_SLOW := 0.45   # goblins this much slower at full help
+var rescue = Rescue.new()
 
 var info_label: Label
 var center_label: Label
@@ -973,6 +979,7 @@ func _process(delta: float) -> void:
 		if game_over_time > 1.5 and (_restart_pressed() or giant.restart_held() or (SIMPLE_MODE and game_over_time > 7.0)):
 			get_tree().reload_current_scene()
 		return
+	_update_rescue(delta)
 	if not practice_done:
 		# Simple mode: practise while the knights join (the TV can join any time).
 		practice.tick(delta)
@@ -1325,6 +1332,7 @@ func goblin_escaped(g) -> void:
 	g.set_meta("dead", true)
 	wave_lost += 1
 	game_lost += 1
+	rescue.note(false)
 	if not SIMPLE_MODE:
 		popup(g.grab_center() + Vector3.UP * 0.8, "An ember got away!", Color(1.0, 0.4, 0.3))
 	sound("hurt", -2.0, 0.6)
@@ -1335,6 +1343,7 @@ func goblin_defeated(g, how: String, by) -> void:
 	if g.has_meta("dead"):
 		return
 	g.set_meta("dead", true)
+	rescue.note(true)
 	if g.practice:
 		kills["practice"] = kills.get("practice", 0) + 1
 		practice.on_hit(g)
@@ -1972,6 +1981,8 @@ func _fall_knight(k, delta: float) -> void:
 
 
 func on_grabbed(obj) -> void:
+	if obj.is_in_group("goblins"):
+		rescue.note(true)  # catching one counts: the help eases off once the Giant has the hang of it
 	sound("pickup", -6.0, 0.8 if obj.is_in_group("boulders") else 1.2)
 	if SIMPLE_MODE:
 		if obj.is_in_group("goblins") or obj.is_in_group("knights"):
@@ -2712,7 +2723,7 @@ func _log_run(end: String) -> void:
 		"difficulty": mode, "gift": gift, "season": season, "tricks": hazards.count, "caught": hazards.catches,
 		"bumps": hazards.bumps, "bonks": gifts_node.bonks, "blocks": gifts_node.blocks,
 		"treasures": Deep.treasures(int(save.data.get("cleared", 0))) if save != null else 0,
-		"picks": picks.history.size() if picks != null else 0})
+		"picks": picks.history.size() if picks != null else 0}.merged(rescue.run_fields()))
 
 
 # --- Second pass: modes, Sparky's gifts, goblin tricks, seasons, treasures (deep.gd) --------------------------
@@ -2824,7 +2835,27 @@ func trick_caught(e: Dictionary) -> void:
 
 ## Sparky's BIG HANDS: the Giant's grab reach and hand size (giant.gd).
 func grab_reach() -> float:
-	return Deep.reach(gift)
+	return Deep.reach(gift) * (1.0 + RESCUE_REACH * rescue.level())
+
+
+## Goblins' walking pace (goblin.gd): slower while the Giant is being rescued.
+func goblin_pace() -> float:
+	return 1.0 - RESCUE_SLOW * rescue.level()
+
+
+## Host: the Giant is "waiting" while a goblin is loose on the table and nobody holds it.
+func _update_rescue(delta: float) -> void:
+	if game_over or giant == null or not (giant.vr or giant.flat):
+		return
+	var loose := false
+	for g in get_tree().get_nodes_in_group("goblins"):
+		if not g.held and not g.is_queued_for_deletion() and not (g.flying and not g.hop):
+			loose = true
+			break
+	rescue.tick(delta, loose and not (in_break and practice_done))
+	if rescue.crossed():
+		_giant_tip("Reach right down to a goblin and SQUEEZE to grab it!")
+		_show_center("REACH DOWN & SQUEEZE!", 2.0)
 
 
 func hand_scale() -> float:
