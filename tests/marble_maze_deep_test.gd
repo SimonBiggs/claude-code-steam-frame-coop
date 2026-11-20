@@ -130,6 +130,12 @@ func _initialize() -> void:
 		var c := Vector2i(int(floorf(x / 0.1 + MazeGen.W * 0.5)), int(floorf(Picks.ROW.z / 0.1 + MazeGen.H * 0.5)))
 		_expect(reach.has(c) and str(gg[c.y][c.x]) == ".", "pick orb %d over plain reachable floor %s" % [i, str(c)])
 	_expect(Picks.Y - 0.6 * Picks.SCALE > 0.028 * 2.0, "a marble rolls under a pick orb")
+	# every story maze but a place's last tells how close the place is to lighting up (one more maze)
+	for i in Story.PLACES.size() * Story.MAZES_PER_PLACE * 2:
+		var line := Story.progress_line(i)
+		var last := int(Story.where(i)[1]) == Story.MAZES_PER_PLACE - 1
+		_expect((line == "") == last, "progress line after story maze %d: \"%s\"" % [i, line])
+		_expect(line.length() <= 40, "progress line short enough for a story card (%s)" % line)
 	print("MARBLE DEEP: %d mazes + events checked in %d ms" % [checked, Time.get_ticks_msec() - t0])
 	print("MARBLE DEEP: %s" % ("PASS" if fails == 0 else "FAIL (%d)" % fails))
 	quit(1 if fails > 0 else 0)

@@ -105,6 +105,20 @@ static func where(i: int) -> Array:
 	return [place_i % PLACES.size(), i % MAZES_PER_PLACE, place_i / PLACES.size()]
 
 
+## Bobo's line after story maze i is cleared, when it isn't the place's last: how many mazes are left before the place
+## lights up in the town (a reason for one more maze; 2026-11-15 the family stopped right after FLOWER PARK 1, which
+## said nothing). "" after a place's last maze (that one has its own "done" beat).
+static func progress_line(i: int) -> String:
+	var w := where(i)
+	var left: int = MAZES_PER_PLACE - 1 - int(w[1])
+	if left <= 0:
+		return ""
+	var pl := place(int(w[0]))
+	if int(w[2]) > 0:
+		return "%d more for a %s bonus star!" % [left, str(pl.name)]
+	return "%d more to light up %s!" % [left, str(pl.name)]
+
+
 ## The mazegen spec for story maze i (rising: the bonus laps get more holes, narrower rooms, fewer loops).
 static func spec(i: int) -> Dictionary:
 	var w := where(i)

@@ -2490,6 +2490,10 @@ func _progress() -> void:
 				_story(_bobo(Story.BOBO_LINES[i % Story.BOBO_LINES.size()]), 1.0)
 				if town != null:
 					town.cheer(int(w[0]))
+			elif Story.progress_line(i) != "":
+				_story(_bobo(Story.progress_line(i)), 1.0)  # how close the place is to lighting up
+				if town != null:
+					town.cheer(int(w[0]))
 	save.mark_dirty()
 	Telemetry.run("marble_maze", info)
 

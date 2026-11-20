@@ -9,4 +9,5 @@ const GOAL := {
 	"done_tv": "sum(v('tv_catches', {})) > 0 or v('caught', 0) > 0",
 	"done_vr": "not v('practice', false) or v('caught', 0) > 0",
 	"target": "nearest('ghosts')",
+	"seats": {0: {"you": "the Lantern Keeper", "do": ["RT", "Hold RT, shine the lantern on a ghost!"], "as": "vr"}},  # flat P1 (no headset) plays the VR role
 }

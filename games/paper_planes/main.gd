@@ -98,6 +98,7 @@ class Dart:  # one of the VR player's paper planes
 	var size := 1.0
 	var target := Vector3.ZERO
 	var dir := Vector3.FORWARD
+	var hit := false  # went through a hoop (rescue: a plane that lands without one is a miss)
 
 
 class Flyer:  # a TV player's plane
@@ -168,6 +169,16 @@ var tv_banner: Control
 var results_ui: Control
 var vr_results: Node
 var throws := 0  # host: darts thrown (bots read it)
+## RESCUE (core/rescue.gd): a VR thrower whose planes keep missing (or who stands holding nothing) gets a stronger
+## breeze pulling planes into the hoops, until they're hitting again. Evidence: 2026-11-19 a VR guest let the breeze
+## pick time out, threw once in 10 s, missed, and left.
+const Rescue := preload("res://core/rescue.gd")
+var rescue = Rescue.new()
+## ALL THREE STARS: a story / bonus flight ends a few seconds after the third star (no more flying on with nothing to
+## chase); a DAILY flight goes on with today's best as the next goal. Evidence: 2026-11-15 a TV daily had 3 stars at
+## 37 s of 100 s, then the family quit mid-flight.
+const ALL_STARS_GRACE := 3.0
+var all_stars_t := -1.0  # host: seconds since the third star (-1 = not yet)
 var hoops_passed := 0  # host / local: hoops flown through this session
 var scored_by := {}  # host / local: slot -> hoops this session (gates not counted; bots)
 # --- The story flight (host simulates; every machine builds clouds / village / looks from net state) ---
@@ -462,7 +473,7 @@ func _refresh_hud() -> void:
 	var got := Story.stars_for(score, goals) if playing else 0
 	var goal_text := ""
 	if playing:
-		goal_text = "/ %d" % int(goals[got]) if got < goals.size() else "WOW!"
+		goal_text = "/ %d" % int(goals[got]) if got < goals.size() else _after_stars_goal(score)
 	var c := int(net.state_get("combo", 0))
 	var mult := _mult(c)
 	for slot in score_labels:
@@ -1419,7 +1430,8 @@ func _fly_darts(delta: float) -> void:
 			v.y += (-4.3 + minf(hs * 0.4, 3.6)) * float(Deep.fold(_fold()).get("fall", 1.0)) * delta
 			v += _gust_push(d.node.position) * 2.0 * delta  # (a light paper plane: the gust turns it)
 			v -= v * 0.07 * delta
-			var aim: Variant = _assist_target(d.node.position, v, 18.0 if magnet else 14.0, 0.8 if magnet else 0.55)
+			var help: float = rescue.level()
+			var aim: Variant = _assist_target(d.node.position, v, (18.0 if magnet else 14.0) + 8.0 * help, (0.8 if magnet else 0.55) + 0.6 * help)
 			if picks.showing():  # picking: a thrown plane curves a little towards the orb it was thrown at
 				aim = _orb_assist(d.node.position, v)
 			if aim != null:
@@ -1427,7 +1439,7 @@ func _fly_darts(delta: float) -> void:
 				var dir := v.normalized()
 				var ang := dir.angle_to(want)
 				if ang > 0.001:
-					v = dir.slerp(want, minf(1.0, (2.6 if magnet else 1.8) * delta / ang)) * v.length()
+					v = dir.slerp(want, minf(1.0, ((2.6 if magnet else 1.8) + 2.0 * help) * delta / ang)) * v.length()
 			d.vel = v
 			d.prev = d.node.position
 			var p := d.prev + v * delta
@@ -1444,10 +1456,14 @@ func _fly_darts(delta: float) -> void:
 				var hid := _check_pass(d.prev, p, 0.15)
 				if hid >= 0:
 					tele["dart_hits"] = int(tele.get("dart_hits", 0)) + 1
+					d.hit = true
+					rescue.note(true)
 					_score_hoop(hid, 0, p)
 					if not darts.has(id):
 						continue
 			if p.y < 0.04 or d.t > 8.0:
+				if passable and not d.hit:
+					rescue.note(false)  # a plane that landed without a hoop
 				d.state = 2
 				d.t = 0.0
 				d.node.position.y = maxf(0.03, p.y)
@@ -1761,7 +1777,49 @@ func _next_formation() -> void:
 	sfx.play("pop", -8.0, 1.3)
 
 
+## Host: the VR thrower's rescue (core/rescue.gd): waiting = playing with no plane in the air.
+func _tick_rescue(delta: float) -> void:
+	if vr_rig == null:
+		return
+	var flying := false
+	for id in darts:
+		flying = flying or (darts[id] as Dart).state == 1
+	rescue.tick(delta, not flying)
+	if rescue.crossed():
+		_story(_pip_beat("Throw it at a hoop! My breeze will help!", 4.0), 0.0)
+
+
+## Host: after the third star a story / bonus flight ends ALL_STARS_GRACE s later; a daily flight carries on chasing
+## today's best. True when the flight just ended.
+func _all_stars_done(delta: float) -> bool:
+	var fl := _flight()
+	var goals: Array = fl.get("goals", [])
+	if goals.is_empty() or Story.stars_for(int(net.state_get("score", 0)), goals) < goals.size():
+		return false
+	if all_stars_t < 0.0:
+		all_stars_t = 0.0
+		tele["all_stars_s"] = int(flight_t)
+		if String(fl.get("mode", "")) != "daily":
+			_story({"who": "PIP", "line": "All three stars! Hooray!", "pic": "star", "color": "ffd24d", "duration": 2.8}, 0.0)
+			sfx.play("party_horn")
+		return false
+	all_stars_t += delta
+	if all_stars_t >= ALL_STARS_GRACE and String(fl.get("mode", "")) != "daily":
+		_end_round("stars")
+		return true
+	return false
+
+
+## The HUD goal once all three stars are in: today's best on a daily flight (beat it!), else the hooray.
+func _after_stars_goal(score: int) -> String:
+	if String(_flight().get("mode", "")) == "daily":
+		var best := int(net.state_get("daily_best", 0))
+		return "BEST %d" % best if best > score else "BEST!"
+	return "WOW!"
+
+
 func _end_round(how: String = "time") -> void:
+	all_stars_t = -1.0
 	var score := int(net.state_get("score", 0))
 	var fl := _flight()
 	var goals: Array = fl.get("goals", [1, 2, 3])
@@ -1815,6 +1873,7 @@ func _end_round(how: String = "time") -> void:
 	t["played_s"] = int(clock - float(t.get("t0", clock)))
 	t.erase("t0")
 	t["formations"] = form_i + 1
+	t.merge(rescue.run_fields(), true)
 	t["chapter_done"] = bool(adv.get("chapter_done", false))
 	t["hangar_after"] = Deep.hangar(after)
 	Telemetry.run(GAME_ID, t)
@@ -2030,6 +2089,9 @@ func _process(delta: float) -> void:
 		picks.tick(delta)  # (nobody took one: the middle one; then the flight starts in _on_picked)
 		return
 	flight_t += delta
+	_tick_rescue(delta)
+	if _all_stars_done(delta):
+		return
 	for e in hazards.due(flight_t):
 		var warn := float(Deep.mode_data(play_mode).warn)
 		var stay := Deep.stay_of(e, play_mode)
@@ -2059,6 +2121,7 @@ func _exit_tree() -> void:
 		t["score"] = int(net.state_get("score", 0))
 		t["stars"] = Story.stars_for(int(t["score"]), t.get("goals", [1, 2, 3]))
 		t["end"] = "quit"
+		t.merge(rescue.run_fields(), true)
 		t["played_s"] = int(clock - float(t.get("t0", clock)))
 		t.erase("t0")
 		t["formations"] = form_i + 1

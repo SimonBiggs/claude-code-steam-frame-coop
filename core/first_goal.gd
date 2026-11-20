@@ -27,6 +27,9 @@ extends Node
 ##       "flat_y": 0.5,                      # optional: where the TV / Deck card sits (share of the screen height,
 ##                                           #   default 0.82) when the game's own UI lives low (answer tiles)
 ##       "seats": {0: {"you": "the Gunner", "do": ["RT", "..."]}},  # optional: a seat with its own role on TV / Deck
+##                                           #   ("as": "vr": that flat seat plays the VR role, so it uses the _vr
+##                                           #   expressions; every game whose flat P1 is the VR role needs one: a lone
+##                                           #   flat pilot was told "YOU ARE THE ROCKET CREW" and quit, 2026-11-15)
 ##       "wordless": true, "icon": "star",   # optional: a game made without how-to words on purpose (the family found
 ##     }                                     #   games too text-driven; its bot fails on words): button glyph + icon
 ##                                           #   on the TV, only the arrow in VR. Needs a "target" or an "icon".
@@ -296,6 +299,8 @@ func _wanted() -> Array:
 			var pl: Variant = players[i]
 			if not (pl is Object) or not is_instance_valid(pl) or (pl as Object).get("active") == false:
 				continue
+			if mode == "host" and (pl as Object).get("remote") == true and not owners.has(i) and not owners.has(str(i)):
+				continue  # a host's seat kept for a TV machine nobody has taken: nobody sits there (Rocket Workshop's crew)
 			var owner := int(owners.get(i, owners.get(str(i), 1 if mode != "client" or i == 0 else -1)))
 			var loc := owner == me if mode == "client" else (owner == 1 or not owners.has(i))
 			if mode == "client" and (not loc or i == 0):
@@ -727,7 +732,8 @@ var device: String:
 
 ## A key's device version when the data has one ("rise_vr" for the VR player, "rise_tv" for TV and Deck).
 func _k(key: String) -> String:
-	var dk := key + ("_vr" if device == "vr" else "_tv")
+	var vrish := device == "vr" or (_cur != null and String(_role(_cur).get("as", "")) == "vr")  # a flat seat in the VR role
+	var dk := key + ("_vr" if vrish else "_tv")
 	return dk if data.has(dk) else key
 
 

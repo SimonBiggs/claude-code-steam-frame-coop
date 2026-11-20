@@ -170,6 +170,39 @@ func _initialize() -> void:
 	_expect(FirstGoal.game_of(null) == "", "game_of(null)")
 	fg.free()
 	_seat_tests()
+	_flat_role_tests()
 	print("FIRST GOAL: %d games checked, %d problems" % [n, fails])
 	print("FIRST GOAL: %s" % ("PASS" if fails == 0 else "FAIL"))
 	quit(1 if fails > 0 else 0)
+
+
+## A game whose flat P1 (no headset: split screen / flat host) plays the VR role must say so with "seats": {0: {..., "as":
+## "vr"}}: else that player is told the TV role. 2026-11-15: a lone flat Rocket Workshop pilot at the desk read "YOU ARE
+## THE ROCKET CREW / walk to a board" and quit in 14 s, twice. Found by the code that hands a pad to players[0] without VR.
+const FLAT_P1_PAD := ["players[0].joy = pads[1]", "players[0].joy = b", "players[0].joy = device  # flat host"]
+
+
+func _flat_role_tests() -> void:
+	for id in FirstGoal.game_ids():
+		var src := FileAccess.get_file_as_string("res://games/%s/main.gd" % id)
+		var flat_p1 := false
+		for pat in FLAT_P1_PAD:
+			flat_p1 = flat_p1 or src.contains(pat)
+		if not flat_p1:
+			continue
+		var d: Dictionary = FirstGoal.data_of(id)
+		var two_roles := d.has("you_vr") and String(d.get("you_vr")) != String(d.get("you_tv", d.get("you", "")))
+		if two_roles:
+			_expect((d.get("seats", {}) as Dictionary).has(0), "%s: flat P1 plays the VR role (%s) but first_goal.gd has no \"seats\": {0: {..., \"as\": \"vr\"}}" % [id, d.get("you_vr")])
+	# "as": "vr" makes that seat read the _vr expressions
+	var fg: Node = FirstGoal.new()
+	fg.data = {"you_tv": "a Crew", "you_vr": "the Pilot", "rise_vr": "1", "rise_tv": "2", "seats": {0: {"you": "the Pilot", "do": ["A", "Go!"], "as": "vr"}}}
+	var s0: Variant = _seat(fg, 0, 0)
+	s0.device = "tv"
+	var s1: Variant = _seat(fg, 1, 1)
+	s1.device = "tv"
+	fg._cur = s0
+	_expect(fg._k("rise") == "rise_vr", "a flat seat with \"as\": \"vr\" reads rise_vr (got %s)" % fg._k("rise"))
+	fg._cur = s1
+	_expect(fg._k("rise") == "rise_tv", "other flat seats read rise_tv")
+	fg.free()
