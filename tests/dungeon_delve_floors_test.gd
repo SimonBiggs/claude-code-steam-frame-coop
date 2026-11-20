@@ -16,6 +16,8 @@ extends SceneTree
 ##    doors, and never in the start, boss or camp rooms;
 ##  - every relic altar offer is valid (Relics.check_offer) for every hoard level and party (solo hero,
 ##    solo VR knight, a full party with relics already taken);
+##  - the loot curve: every floor has a chest you can reach (not a mimic), the secret room always holds treasure,
+##    and the chest gold of a biome grows biome by biome and always pays for the camp's potion (shop prices rise);
 ##  - difficulty rises smoothly with depth: monster strength climbs every floor, never by more than 25 %,
 ##    and the monsters on a floor (cost x strength, averaged over seeds) climb floor by floor.
 ## Prints "SCRIPT ERROR: FLOORS ..." for each failure (the bot runner greps for SCRIPT ERROR).
@@ -24,6 +26,7 @@ const FloorGen := preload("res://games/dungeon_delve/floorgen.gd")
 const FloorView := preload("res://games/dungeon_delve/floor_view.gd")
 const Foes := preload("res://games/dungeon_delve/foes.gd")
 const Relics := preload("res://games/dungeon_delve/relics.gd")
+const Loot := preload("res://games/dungeon_delve/loot.gd")
 const Classes := preload("res://games/dungeon_delve/classes.gd")
 const Deep := preload("res://games/dungeon_delve/deep.gd")
 const Seeded := preload("res://core/seeded.gd")
@@ -88,6 +91,7 @@ func _initialize() -> void:
 	_check_bosses()
 	_check_relics()
 	_check_difficulty()
+	_check_loot(seeds)
 	print("FLOORS: run logic checks %.1f ms" % ((Time.get_ticks_usec() - t1) / 1000.0))
 	for path2 in ["res://games/dungeon_delve/deep.gd", "res://games/dungeon_delve/foes.gd", "res://games/dungeon_delve/floor_view.gd", "res://games/dungeon_delve/deep_hud.gd"]:
 		var src2 := FileAccess.get_file_as_string(path2)
@@ -369,6 +373,41 @@ func _check_relics() -> void:
 
 
 ## Difficulty rises smoothly with depth (BRAVE and HEROIC, 1-4 players).
+## The loot curve (BRAVE and HEROIC): reachable chests on every floor, treasure in every secret room, and a biome's
+## chest gold (2 gold piles of 5 a chest, +1 pile every 6 floors down: Loot.chest_loot) growing and paying for its potion.
+func _check_loot(seeds: int) -> void:
+	for heroic in [false, true]:
+		var last_gold := 0.0
+		for z in FloorGen.ZONE_COUNT:
+			var gold := 0.0
+			for fl in FloorGen.FLOORS_PER_ZONE:
+				var g := FloorGen.global_floor(z, fl)
+				for sd in seeds:
+					var f := FloorGen.generate(700 + sd * 53, z, fl, heroic)
+					var reach := FloorGen.solve(f)
+					var n := 0
+					for c in FloorGen.chest_list(f):
+						if reach.has(int((c as Array)[0])):
+							n += 1
+					if n == 0 and not FloorGen.is_boss_floor(fl):
+						_fail("%s seed %d floor %d-%d: no chest you can reach" % ["heroic" if heroic else "brave", 700 + sd * 53, z + 1, fl + 1])
+					var si := int(f.get("secret", -1))
+					if si >= 0:
+						var sr: Dictionary = (f["rooms"] as Array)[si]
+						if (sr["chests"] as Array).is_empty() and not bool(sr.get("heart", false)):
+							_fail("%s seed %d floor %d-%d: an empty secret room" % ["heroic" if heroic else "brave", 700 + sd * 53, z + 1, fl + 1])
+					gold += n * 5.0 * (2.0 + g / 6)
+			gold /= float(seeds)
+			var rng := RandomNumberGenerator.new()
+			rng.seed = 1
+			var potion := int(((Loot.shop_stock(rng, z, heroic) as Array)[0] as Array)[1])
+			if gold < potion:
+				_fail("%s biome %d: chests hold %.0f gold, less than one camp potion (%d)" % ["heroic" if heroic else "brave", z + 1, gold, potion])
+			if gold < last_gold:
+				_fail("%s biome %d: chest gold %.0f fell from %.0f (treasure should grow deeper down)" % ["heroic" if heroic else "brave", z + 1, gold, last_gold])
+			last_gold = gold
+
+
 func _check_difficulty() -> void:
 	for heroic in [false, true]:
 		var d: Dictionary = Deep.DIFF["heroic" if heroic else "brave"]

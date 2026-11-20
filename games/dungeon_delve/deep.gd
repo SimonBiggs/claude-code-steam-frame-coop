@@ -4,7 +4,12 @@ extends Node3D
 ## the more of you stand on it). Then: 4 biomes (Slime Caves, Bone Crypt, Crystal Caves, Lava Forge) x 4
 ## seeded floors (floorgen.gd), the 4th ending in the biome's boss; a shop camp between floors, and a
 ## RELIC ALTAR at the camp after the 2nd floor and after each boss (relics.gd: pick ONE of 2-3).
-##  - HEROES (classes.gd): bonk a statue in the practice room to be a KNIGHT, ARCHER or WIZARD.
+##  - HEROES (classes.gd): bonk a statue in the practice room to be a KNIGHT, ARCHER, HEALER or WIZARD (co-op roles:
+##    the VR knight up front with his real sword, the HEALER's green ring keeping friends going, archers and wizards
+##    hitting from afar; each statue says what its hero is for).
+##  - STORY (story.gd): Smudge took Cinder's treasure and friends; cards at the start of a run, in each new biome and
+##    when a boss falls; the last boss is THE ENDING (saved: Smudge sits with Cinder in the practice room and camp).
+##  - ONE MORE GO: the results show what the hoard opens next and TODAY'S streak (days in a row, on the DAILY pad).
 ##  - CINDER'S HOARD: every coin you pick up goes into Cinder's hoard for good (bosses add a pile); a big
 ##    enough hoard unlocks new heroes and new relics (the gold pile in the practice room shows it).
 ##  - CINDER'S WISH (wishes.gd): every floor she wishes for one thing, a picture next to the floor name (find
@@ -54,6 +59,7 @@ const Classes := preload("res://games/dungeon_delve/classes.gd")
 const Wishes := preload("res://games/dungeon_delve/wishes.gd")
 const Friends := preload("res://games/dungeon_delve/friends.gd")
 const Rumble := preload("res://games/dungeon_delve/rumble.gd")
+const Story := preload("res://games/dungeon_delve/story.gd")
 const SeasonKit := preload("res://core/season_kit.gd")
 const SEASON_DRIFT := {"spring": Color(1.0, 0.8, 0.9), "summer": Color(1.0, 0.95, 0.5), "autumn": Color(0.95, 0.55, 0.2), "winter": Color(0.97, 0.98, 1.0)}
 
@@ -65,6 +71,7 @@ const MAX_POTS := 3  ## potions a hero can carry (balance-2: was 5; bots drank ~
 const REVIVE_TIME := 3.5  ## seconds a friend must stand by you (a hit on the helper starts it again)
 const REVIVE_R := 1.5
 const IFRAMES := 1.2
+const TOUCH_GRACE := 0.8  ## extra safe seconds after a bump in the first biome on BRAVE
 const STAIRS_R := 1.5
 const ATTACK_REACH := 1.05
 const PADS := {"brave": Vector3(-2.2, 0.0, -2.5), "heroic": Vector3(2.2, 0.0, -2.5), "daily": Vector3(-3.5, 0.0, 2.7)}
@@ -74,7 +81,7 @@ const TELL_HOT := Color(1.0, 0.55, 0.15)
 const HAT_RACK := Vector3(3.7, 0.0, 2.6)
 const HAT_UNLOCKS: Array = [["none", ""], ["party", "run"], ["viking", "floor3"], ["wizard", "boss0"], ["crown", "boss1"], ["halo", "boss3"]]
 ## The hero statues (bonk one to be that hero) along the right wall, and Cinder's hoard by the left wall.
-const CLASS_SPOTS := {"knight": Vector3(3.75, 0.0, -1.3), "archer": Vector3(3.75, 0.0, -0.1), "wizard": Vector3(3.75, 0.0, 1.1)}
+const CLASS_SPOTS := {"knight": Vector3(3.75, 0.0, -1.75), "archer": Vector3(3.75, 0.0, -0.7), "healer": Vector3(3.75, 0.0, 0.35), "wizard": Vector3(3.75, 0.0, 1.4)}
 const HOARD_SPOT := Vector3(-3.2, 0.0, 1.05)
 const ALTAR_SPOTS: Array[Vector2] = [Vector2(2.3, 4.2), Vector2(3.6, 3.3), Vector2(4.3, 1.9)]  ## relic stones at the camp
 const BOSS_HOARD := 40  ## a boss adds this (x biome) to Cinder's hoard
@@ -134,6 +141,10 @@ var hat_cd := {}
 var sword_cd := {}
 var _poke_cd := {}
 var _touch_prev := {}
+var story_zones := {}  ## Host: biomes whose story beat this run has told (story.gd)
+var cinder_node: Node3D  ## the lobby's little dragons (story.gd)
+var smudge_node: Node3D
+var heal_t := {}  ## Host: slot -> seconds since a HEALER's last heal ring
 var _gold := 0
 var _keys := 0
 var tally := {"kills": 0, "floors": [], "bosses": 0, "wipes": 0, "revives": 0, "keys": 0, "doors": 0, "secrets": 0,
@@ -298,7 +309,7 @@ func _build_class_statues() -> void:
 		pb.cylinder(0.36, 0.42, 0.22, MeshKit.at(Vector3(0, 0.11, 0)), Color(0.45, 0.42, 0.5), 12)
 		pb.torus(0.4, 0.035, MeshKit.at(Vector3(0, 0.23, 0)), ci["color"], 16, 4, true)
 		root.add_child(MeshKit.instance(pb.build(), false))
-		var look := {"class": "knight" if id == "knight" else ("archer" if id == "archer" else "mage"), "seed": 5, "outfit": (ci["color"] as Color).darkened(0.2)}
+		var look := {"class": Classes.look_class(id), "seed": 5, "outfit": (ci["color"] as Color).darkened(0.2)}
 		for k in ci["look"]:
 			look[k] = ci["look"][k]
 		var statue := Creatures.humanoid(look)
@@ -348,6 +359,17 @@ func _build_hoard() -> void:
 	hoard_sub.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	hoard_sub.position = HOARD_SPOT + Vector3(0.0, 1.2, 0.0)
 	lobby.add_child(hoard_sub)
+	# Cinder sits by her hoard; after the story's ending Smudge sits with her (story.gd).
+	cinder_node = MeshKit.instance(Story.cinder_mesh(), false)
+	cinder_node.position = HOARD_SPOT + Vector3(0.45, 0.0, 0.35)  # (in front of the pile: the hoard's label floats over the pile, not her)
+	cinder_node.rotation.y = 0.5
+	lobby.add_child(cinder_node)
+	smudge_node = MeshKit.instance(Story.smudge_mesh(), false)
+	smudge_node.position = HOARD_SPOT + Vector3(-0.4, 0.0, 0.5)
+	smudge_node.rotation.y = 1.2
+	smudge_node.scale = Vector3.ONE * 1.25
+	smudge_node.visible = false
+	lobby.add_child(smudge_node)
 	_hoard_shown = -1
 
 
@@ -374,7 +396,7 @@ func _hoard_pile(h: int) -> void:
 
 
 func _animate_lobby(delta: float) -> void:
-	if pad_rings.size() != PADS.size() or pad_labels.size() != PADS.size() or class_nodes.size() != Classes.ORDER.size() or hoard_node == null:
+	if pad_rings.size() != PADS.size() or pad_labels.size() != PADS.size() or class_nodes.size() != Classes.ORDER.size() or hoard_node == null or cinder_node == null:
 		# Pads added by a hot reload (the TV runs the game while it's updated): build them again now.
 		lobby.queue_free()
 		pad_rings.clear()
@@ -387,19 +409,9 @@ func _animate_lobby(delta: float) -> void:
 		_hoard_shown = h
 		_hoard_pile(h)
 		hoard_label.text = "HOARD %d" % h
-		var nx: Dictionary = Relics.next_unlock(h)
-		var nh := 1 << 30
-		var what := ""
-		if not nx.is_empty():
-			nh = int(nx["hoard"])
-			what = String(nx["name"])
-		for id in Classes.ORDER:
-			var ch := int(Classes.info(id)["hoard"])
-			if ch > h and ch < nh:
-				nh = ch
-				what = String(Classes.info(id)["name"])
-		hoard_sub.text = "%s AT %d" % [what, nh] if what != "" else "ALL UNLOCKED!"
-		hoard_sub.modulate = UiKit.TEXT_DIM if what != "" else UiKit.GOLD
+		var nu := next_unlock(h)
+		hoard_sub.text = "%s AT %d" % [String(nu[0]), h + int(nu[1])] if not nu.is_empty() else "ALL UNLOCKED!"
+		hoard_sub.modulate = UiKit.TEXT_DIM if not nu.is_empty() else UiKit.GOLD
 		for id2 in class_nodes:
 			var cn: Dictionary = class_nodes[id2]
 			var need := int(Classes.info(id2)["hoard"])
@@ -415,6 +427,11 @@ func _animate_lobby(delta: float) -> void:
 	if hoard_label != null:
 		hoard_label.visible = show_pads
 		hoard_sub.visible = show_pads
+	if cinder_node != null:
+		var tt := Time.get_ticks_msec() * 0.001
+		cinder_node.position.y = absf(sin(tt * 2.2)) * 0.08
+		smudge_node.visible = bool(net.state_get("d_smudge", false))
+		smudge_node.position.y = absf(sin(tt * 2.2 + 1.3)) * 0.08
 	if not active:
 		_sync_lobby_looks()
 	var fills: Array = net.state_get("d_pads", [0.0, 0.0])
@@ -441,6 +458,9 @@ func _animate_lobby(delta: float) -> void:
 		(pad_labels[mname] as Label3D).modulate = pad_color(mname).lightened(0.3)
 		if bl != null:
 			bl.text = "BEST %d-%d" % [g / FloorGen.FLOORS_PER_ZONE + 1, g % FloorGen.FLOORS_PER_ZONE + 1] if g > 0 else ""
+			var streak := int(net.state_get("d_streak", 0))
+			if mname == "daily" and streak >= 2:
+				bl.text = (bl.text + "  " if bl.text != "" else "") + "%d DAYS IN A ROW!" % streak
 
 
 ## Host: the lobby pads fill while players stand on them; full = the run starts.
@@ -451,6 +471,10 @@ func lobby_step(delta: float) -> void:
 		net.state_set("d_heroic_ok", heroic_unlocked())
 	if main.save != null and int(net.state_get("d_hoard", -1)) != hoard():
 		net.state_set("d_hoard", hoard())
+	if main.save != null and bool(net.state_get("d_smudge", false)) != ending_seen():
+		net.state_set("d_smudge", ending_seen())
+	if main.save != null and net.state_get("d_streak", null) != _streak_now():
+		net.state_set("d_streak", _streak_now())
 	if main.save != null and not net.state_has("d_cls"):
 		var cl := {}
 		var saved: Dictionary = progress()["cls"]
@@ -515,10 +539,14 @@ func try_hat(slot: int, at: Vector3) -> bool:
 func try_class(slot: int, at: Vector3) -> bool:
 	if active or _is_knight(slot):
 		return false
-	for id in CLASS_SPOTS:
+	var near_id := ""  # the NEAREST statue (they stand 1.1 m apart: the first one in reach could be the wrong one)
+	for id0 in CLASS_SPOTS:
+		var c0: Vector3 = CLASS_SPOTS[id0]
+		var dd := Vector2(at.x - c0.x, at.z - c0.z).length()
+		if dd <= 1.3 and (near_id == "" or dd < Vector2(at.x - (CLASS_SPOTS[near_id] as Vector3).x, at.z - (CLASS_SPOTS[near_id] as Vector3).z).length()):
+			near_id = String(id0)
+	for id in ([near_id] if near_id != "" else []):
 		var c: Vector3 = CLASS_SPOTS[id]
-		if Vector2(at.x - c.x, at.z - c.z).length() > 1.3:
-			continue
 		if float(cls_cd.get(slot, 0.0)) > 0.0:
 			return true
 		cls_cd[slot] = 0.5
@@ -536,6 +564,10 @@ func try_class(slot: int, at: Vector3) -> bool:
 		main.confetti(top, Classes.info(id)["color"], 24)
 		net.event("confetti", [top, Classes.info(id)["color"], 24])
 		net_popup(top + Vector3(0, 0.5, 0), String(Classes.info(id)["name"]), "heal")
+		var tip := String(Classes.info(id).get("tip", ""))
+		get_tree().create_timer(0.7).timeout.connect(func() -> void:
+			if is_instance_valid(self) and tip != "":
+				net_popup(top + Vector3(0, 0.15, 0), tip, "info"))  # what this hero is for (co-op roles)
 		if class_nodes.has(id):
 			((class_nodes[id] as Dictionary)["statue"] as Node3D).rotation.y = 0.6  # a little wiggle
 		return true
@@ -610,7 +642,61 @@ func progress() -> Dictionary:
 		pd["wishes"] = 0  ## Cinder's wishes kept, ever (wishes.gd)
 	if not pd.has("friends") or typeof(pd["friends"]) != TYPE_ARRAY:
 		pd["friends"] = []  ## Cinder's friends freed from cages, ever (friends.gd ids): they live at her camp
+	if not pd.has("ending"):
+		pd["ending"] = false  ## the story's ending was seen (story.gd): Smudge is a friend now
+	if not pd.has("streak") or typeof(pd["streak"]) != TYPE_DICTIONARY:
+		pd["streak"] = {"day": "", "n": 0}  ## TODAY'S DUNGEON days in a row (the DAILY pad shows it)
 	return pd
+
+
+## Host: tell a story beat (story.gd): its cards one after another, starting after delay seconds (after the banner).
+func tell_story(beats: Array, delay: float = 2.4) -> void:
+	for i in beats.size():
+		var beat: Dictionary = beats[i]
+		get_tree().create_timer(delay + i * Story.GAP).timeout.connect(func() -> void:
+			if is_instance_valid(self) and active:
+				main.story(beat))
+
+
+func ending_seen() -> bool:
+	return bool(progress().get("ending", false))
+
+
+## TODAY'S DUNGEON streak: days in a row someone played it (counted once a day, at the end of a daily run).
+func _bump_streak() -> int:
+	var st: Dictionary = progress()["streak"]
+	var today := Seeded.today()
+	if String(st.get("day", "")) == today:
+		return int(st.get("n", 1))
+	var yesterday := Time.get_date_string_from_unix_time(int(Time.get_unix_time_from_datetime_string(today + "T12:00:00")) - 86400)
+	st["n"] = int(st.get("n", 0)) + 1 if String(st.get("day", "")) == yesterday else 1
+	st["day"] = today
+	main.save.mark_dirty()
+	return int(st["n"])
+
+
+## The streak as it stands today (0 once a day was missed).
+func _streak_now() -> int:
+	var st: Dictionary = progress()["streak"]
+	var today := Seeded.today()
+	var yesterday := Time.get_date_string_from_unix_time(int(Time.get_unix_time_from_datetime_string(today + "T12:00:00")) - 86400)
+	return int(st.get("n", 0)) if String(st.get("day", "")) in [today, yesterday] else 0
+
+
+## What the hoard unlocks next: [name, gold still needed], or [] when everything is open.
+func next_unlock(h: int) -> Array:
+	var nh := 1 << 30
+	var what := ""
+	var nx: Dictionary = Relics.next_unlock(h)
+	if not nx.is_empty():
+		nh = int(nx["hoard"])
+		what = String(nx["name"])
+	for id in Classes.ORDER:
+		var ch := int(Classes.info(id)["hoard"])
+		if ch > h and ch < nh:
+			nh = ch
+			what = String(Classes.info(id)["name"])
+	return [what, nh - h] if what != "" else []
 
 
 ## HEROIC opens once the Slime King is beaten on BRAVE (kids kept stumbling onto it and losing in a minute).
@@ -829,7 +915,9 @@ func start_run(m: String) -> void:
 	wish_state = ""
 	net.state_set("phase", "deep")
 	main.monsters.clear()
+	story_zones = {zone: true}
 	load_floor(zone, floor_i, "floor")
+	tell_story(Story.intro(int(pd["runs"]) - 1, ending_seen()))
 	print("Dungeon Delve: %s run, seed %d" % [m, seed_v])
 
 
@@ -930,6 +1018,9 @@ func load_floor(z: int, fl: int, k: String) -> void:
 		main.blink(func() -> void: main.vr_rig.place(at + Vector3(0.0, 0.0, 0.8), 0.0))
 	net.event("d_floor", [z, fl, k])
 	_floor_banner(z, fl, k)
+	if k != "shop" and fl == 0 and not story_zones.has(z):  # a new biome this run (not a checkpoint restart)
+		story_zones[z] = true
+		tell_story(Story.zone_beats(z, ending_seen()))
 
 
 func _cfg() -> Dictionary:
@@ -994,7 +1085,7 @@ func _telemetry(end: String) -> void:
 	r["secs"] = snappedf(float(runrec.get("clock", 0.0)), 0.1)
 	if lock_room >= 0 and String(((f["rooms"] as Array)[lock_room] as Dictionary)["role"]) == "boss":
 		r["boss_phase_reached"] = int(runrec["boss_phase"])
-	for k2 in ["kills", "wipes", "revives", "downs", "potions", "bombs", "secrets", "puzzles", "keys", "chests", "bought", "hurts", "blocks", "reflects", "traps", "falls"]:
+	for k2 in ["kills", "wipes", "revives", "downs", "potions", "bombs", "secrets", "puzzles", "keys", "chests", "bought", "hurts", "blocks", "reflects", "traps", "falls", "heals"]:
 		r[k2] = tally.get(k2, 0)
 	r["dmg_by"] = (tally["by"] as Dictionary).duplicate()
 	r["fall_tells"] = tally.get("fall_tells", 0)
@@ -1019,9 +1110,12 @@ func finish(won: bool) -> void:
 	var key := daily_key() if daily else mode
 	var new_best := FloorGen.global_floor(zone, floor_i) > int((progress()["best"] as Dictionary).get(key, 0))
 	_record_depth()
+	var streak := 0
 	if daily:
 		main.save.data["daily"] = Seeded.today()  # TODAY'S DUNGEON played (the Trophy Hall reads it)
 		main.save.mark_dirty()
+		streak = _bump_streak()
+		net.state_set("d_streak", streak)
 	if won:
 		var pd := progress()
 		var wins: Dictionary = pd["wins"]
@@ -1032,12 +1126,30 @@ func finish(won: bool) -> void:
 		"color": "ffd25a" if won else main.CINDER_COLOR, "duration": 3.5})
 	var g := FloorGen.global_floor(zone, floor_i)
 	var beat := won or bool(runrec.get("won", false))
-	main.end_results("VICTORY!" if beat else "THE END", "victory" if beat else "defeat",
+	# (A lost run says GOOD TRY: "THE END" belongs to the story's ending now. Chips with nothing in them stay off,
+	# so the row fits a Deck with the "one more go" chips on the end.)
+	var rows: Array = [["DEEPEST", "%d-%d%s" % [zone + 1, floor_i + 1, "  NEW BEST!" if new_best else ""]], ["MONSTERS", str(int(tally["kills"]))]]
+	if int(tally["bosses"]) > 0:
+		rows.append(["BOSSES", str(int(tally["bosses"]))])
+	rows.append(["HOARD", "%d  +%d" % [hoard(), maxi(0, hoard() - int(runrec.get("hoard0", hoard())))]])
+	if int(tally["revives"]) > 0:
+		rows.append(["HELPED UP", str(int(tally["revives"]))])
+	rows.append(["TIME", HudKit.clock_text(float(runrec.get("clock", 0.0)))])
+	main.end_results("VICTORY!" if beat else "GOOD TRY!", "victory" if beat else "defeat",
 		"DEPTH %d" % (FloorGen.global_floor(zone, floor_i) + 1) + ("  -  ALL BOSSES BEATEN!" if beat else ""),
-		[["DEEPEST", "%d-%d%s" % [zone + 1, floor_i + 1, "  NEW BEST!" if new_best else ""]], ["MONSTERS", str(int(tally["kills"]))],
-		["BOSSES", str(int(tally["bosses"]))], ["HOARD", "%d  +%d" % [hoard(), maxi(0, hoard() - int(runrec.get("hoard0", hoard())))]], ["HELPED UP", str(int(tally["revives"]))],
-		["TIME", HudKit.clock_text(float(runrec.get("clock", 0.0)))]])
+		rows + _one_more_rows(streak))
 	print("Dungeon Delve: run over, %s, depth %d" % ["won" if won else "lost", g])
+
+
+## The results' "one more go" rows: what the hoard opens next (and how close it is), TODAY'S streak.
+func _one_more_rows(streak: int) -> Array:
+	var out: Array = []
+	var nu := next_unlock(hoard())
+	if not nu.is_empty():
+		out.append(["NEXT", "%s IN %d" % [String(nu[0]), int(nu[1])]])
+	if streak >= 1:
+		out.append(["STREAK", "%d DAY%s" % [streak, "S" if streak > 1 else ""]])
+	return out
 
 
 ## Back to the gentle dungeon (the results screen's "again").
@@ -1179,6 +1291,19 @@ func _build_shop_props() -> void:
 		Creatures.face_now(pet, (fn.position if i < 6 else c) - pet.position)
 		pet.set_meta("camp_friend", String(fr["id"]))
 		shop_nodes.append(pet)
+	# Cinder at her camp (and Smudge, once the story's ending has been seen), by the back wall.
+	var cin := MeshKit.instance(Story.cinder_mesh(), false)
+	cin.position = FloorGen.to_world(f, 0, Vector2(-3.4, -4.2))
+	cin.rotation.y = 0.4
+	add_child(cin)
+	shop_nodes.append(cin)
+	if bool(net.state_get("d_smudge", false)):
+		var smu := MeshKit.instance(Story.smudge_mesh(), false)
+		smu.position = FloorGen.to_world(f, 0, Vector2(-2.2, -4.4))
+		smu.rotation.y = -0.3
+		smu.scale = Vector3.ONE * 1.25
+		add_child(smu)
+		shop_nodes.append(smu)
 	if Relics.altar_after(int(f.get("floor", 0))):
 		# The relic altar: three glowing stones in the corner (relics sit on them; deep._build_altar).
 		var ab := MeshKit.Builder.new()
@@ -1287,6 +1412,7 @@ func host_step(delta: float) -> void:
 	_doors_step(alive)
 	_pickups_step(delta, alive)
 	_revive_step(delta, alive)
+	_healer_step(delta, alive)
 	_stairs_step(delta, alive)
 	_knight_step(delta)
 	_wish_step()
@@ -1641,6 +1767,18 @@ func _boss_down(kind: int, at: Vector3) -> void:
 		main.save.mark_dirty()
 		net.event("d_banner", ["YOU BEAT THE DUNGEON!", "victory"])
 		main.show_headline("YOU WON! KEEP GOING?", 5.0)
+	# The story (story.gd): Smudge grumbles; the last boss starts THE ENDING (saved: Smudge is a friend from now on).
+	var ending_now := zone == FloorGen.ZONE_COUNT - 1 and not ending_seen()
+	tell_story(Story.boss_beats(zone, ending_seen()), 2.0)
+	if ending_now:
+		progress()["ending"] = true
+		main.save.mark_dirty()
+		net.state_set("d_smudge", true)
+		runrec["ending"] = true
+		get_tree().create_timer(2.0 + Story.ENDING.size() * Story.GAP).timeout.connect(func() -> void:
+			if is_instance_valid(self) and active:
+				net.event("d_banner", ["THE END", "victory"])
+				main.show_headline("THE END! KEEP GOING DEEPER?", 5.0))
 	portal = FloorGen.room_center(f, int(f["boss"])) + Vector3(0.0, 0.0, -2.5)
 	net.state_set("d_portal", portal)
 
@@ -1684,6 +1822,19 @@ func boss_stunned(id: int) -> void:
 func heal_fx(p: Vector3) -> void:
 	main.confetti(p, Color(0.4, 1.0, 0.5), 14)
 	net.event("confetti", [p, Color(0.4, 1.0, 0.5), 14])
+
+
+## Every machine: a HEALER's ring, a soft green circle that spreads out to HEAL_R on the floor and fades.
+func heal_ring_fx(at: Vector3) -> void:
+	var b := MeshKit.Builder.new()
+	b.torus(1.0, 0.06, Transform3D.IDENTITY, Color(0.45, 1.0, 0.55), 32, 4, true)
+	var ring := MeshKit.instance(b.build(), false)
+	ring.position = Vector3(at.x, 0.15, at.z)
+	ring.scale = Vector3.ONE * 0.3
+	add_child(ring)
+	var tw := ring.create_tween()
+	tw.tween_property(ring, "scale", Vector3.ONE * Classes.HEAL_R, 0.5).set_ease(Tween.EASE_OUT).set_trans(Tween.TRANS_CUBIC)
+	tw.tween_callback(ring.queue_free)
 
 
 func poof(p: Vector3, col: Color, n: int) -> void:
@@ -1829,7 +1980,9 @@ func hurt(key: int, dmg: int, from: Vector3, blockable: bool) -> String:
 			revive[ds] = 0.0
 	st["hp"] = int(st["hp"]) - dmg
 	(tally["by"] as Dictionary)[src] = int((tally["by"] as Dictionary).get(src, 0)) + dmg
-	iframes[key] = IFRAMES
+	# Slime Caves on BRAVE: a bump into a monster gives a longer breather (the family's one real run, 2026-11-15:
+	# 15 of 24 hurts were bumps on the first two floors, then a quit).
+	iframes[key] = IFRAMES + (TOUCH_GRACE if mode == "brave" and String(FloorGen.zone_data(zone)["id"]) == "caves" and src.begins_with("touch") else 0.0)
 	tally["hurts"] = int(tally["hurts"]) + 1
 	stats_dirty = true
 	net.event("d_hurt", [key, dmg])
@@ -1944,13 +2097,48 @@ func _revive_step(delta: float, alive: Array) -> void:
 		for pl in alive:
 			var p: Vector3 = (pl as Dictionary)["p"]
 			if Vector2(p.x - at.x, p.z - at.z).length() < REVIVE_R:
-				helpers += 1
+				helpers += 2 if class_of(int((pl as Dictionary)["slot"])) == "healer" else 1  # the HEALER helps up twice as fast
 				main.awards.add(int((pl as Dictionary)["slot"]), "helps", delta)
 		var k: float = revive.get(int(s), 0.0)
 		k = k + delta * helpers / REVIVE_TIME if helpers > 0 else maxf(0.0, k - delta * 0.25)
 		revive[int(s)] = k
 		if k >= 1.0:
 			_revive(int(s))
+
+
+## Host: every HEALER sends out a soft green ring now and then: one heart for every hurt friend near her (alone: herself,
+## more slowly). Only rings when someone near her is hurt, so it never wastes itself.
+func _healer_step(delta: float, alive: Array) -> void:
+	for pl in alive:
+		var s: int = (pl as Dictionary)["slot"]
+		if _is_knight(s) or class_of(s) != "healer":
+			continue
+		var solo := alive.size() == 1
+		heal_t[s] = float(heal_t.get(s, 0.0)) + delta
+		if float(heal_t[s]) < (Classes.SOLO_HEAL_EVERY if solo else Classes.HEAL_EVERY):
+			continue
+		var at: Vector3 = (pl as Dictionary)["p"]
+		var healed := 0
+		for pl2 in alive:
+			var s2: int = (pl2 as Dictionary)["slot"]
+			if s2 == s and not solo:
+				continue
+			var p2: Vector3 = (pl2 as Dictionary)["p"]
+			var st2: Dictionary = stats[s2]
+			if Vector2(p2.x - at.x, p2.z - at.z).length() < Classes.HEAL_R and int(st2["hp"]) < int(st2["max"]):
+				st2["hp"] = int(st2["hp"]) + 1
+				healed += 1
+				net_popup((_feet_of(s2) if not _is_knight(s2) else knight_head()) + Vector3(0, 1.3 if not _is_knight(s2) else 0.3, 0), "+1", "heal")
+		if healed == 0:
+			continue  # nobody hurt nearby: keep the ring charged
+		heal_t[s] = 0.0
+		stats_dirty = true
+		tally["heals"] = int(tally.get("heals", 0)) + healed
+		main.awards.add(s, "helps", 1.0)
+		heal_fx(at)
+		heal_ring_fx(at)
+		net.event("d_heal_ring", [at])
+		main.sound_at("heal", at, -4.0, 1.2)
 
 
 # --- Traps, switches, doors --------------------------------------------------------------------------
@@ -2891,7 +3079,7 @@ func _sync_hero_looks() -> void:
 		var want := {"hat": String(hats.get(int(s), "")) if String(hats.get(int(s), "none")) != "none" else ""}
 		var cid := String(sd.get("cls", ""))
 		if Classes.valid(cid):
-			want["class"] = "knight" if cid == "knight" else ("archer" if cid == "archer" else "mage")
+			want["class"] = Classes.look_class(cid)
 			for k in Classes.info(cid)["look"]:
 				want[k] = Classes.info(cid)["look"][k]
 		var abil := String(sd.get("abil", ""))
@@ -3155,6 +3343,8 @@ func apply_event(k: String, args: Array) -> void:
 			main.show_headline(String(args[0]), 2.5)
 		"d_floor":
 			_floor_banner(int(args[0]), int(args[1]), String(args[2]))
+		"d_heal_ring":
+			heal_ring_fx(args[0])
 		"d_fall":
 			if not f.is_empty():
 				_fall_fx(args[0], float(args[1]), Rumble.look(f))
@@ -3548,7 +3738,7 @@ func _sync_lobby_looks() -> void:
 			continue
 		var h: Hero = main.heroes[s]
 		var want := {"hat": String(hats.get(int(s), "")) if String(hats.get(int(s), "none")) != "none" else "",
-			"class": "knight" if cid == "knight" else ("archer" if cid == "archer" else "mage")}
+			"class": Classes.look_class(cid)}
 		for k in Classes.info(cid)["look"]:
 			want[k] = Classes.info(cid)["look"][k]
 		h.set_look(want)
