@@ -736,8 +736,7 @@ class Arrow extends Node3D:
 		var m := StandardMaterial3D.new()
 		m.shading_mode = BaseMaterial3D.SHADING_MODE_UNSHADED
 		m.albedo_color = Color(1.0, 0.82, 0.2)
-		m.no_depth_test = true
-		m.render_priority = UiKit.VR_PRIO_PANEL - 1  # under VR cards and their words (Marble Maze: it hid the card's text)
+		# (depth-tested like any solid thing: no_depth_test breaks VR depth, docs/GAME_DEV_GUIDE.md; it hid VR card text too)
 		mesh.material_override = m
 		mesh.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		add_child(mesh)
