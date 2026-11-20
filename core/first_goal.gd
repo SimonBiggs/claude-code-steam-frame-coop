@@ -71,6 +71,8 @@ const ATTRIBUTE := 1.5
 const ACTIVE_WINDOW := 3.0
 ## Awards stats that are not wins.
 const NOT_WINS := ["deaths", "damage_taken", "drops", "falls", "slot", "revived", "best_time", "fastest_answer", "bonks"]
+## Seconds of play VR story cards may hold the prompt back (time to read them); then it shows and steps aside.
+const STORY_READ := 6.0
 ## Bands tried in turn: low (under the action), a little higher, then up under the top HUD.
 const BANDS := [0.82, 0.66, 0.3]
 
@@ -123,6 +125,8 @@ var _failed := {}  # text -> true (reported once)
 var _layer: CanvasLayer = null
 var _ui: Control = null
 var _cur: Seat = null  ## the seat expressions are evaluated for
+var _story_wait := 0.0  ## game seconds play waited for VR story cards
+var _story_hit := false  ## the last _blocked() was a VR story card
 
 
 func _ready() -> void:
@@ -388,6 +392,8 @@ func _step_seat(s: Seat, dt: float, blocked: bool, client: bool, host_fg: Dictio
 	match s.state:
 		"wait":
 			var started := _truthy("start", true) or (client and bool(host_fg.get("go", false)))
+			if started and blocked and _story_hit:
+				_story_wait += dt
 			if (blocked and s.local) or not started:
 				s.settle = 0.0
 				return
@@ -662,8 +668,12 @@ func _blocked() -> bool:
 	for h in tree.get_nodes_in_group("hints"):  # core/hints.gd how-to cards
 		if h.has_method("intro_showing") and bool(h.call("intro_showing")):
 			return true
-	if not tree.get_nodes_in_group("story_card_vr").is_empty():
-		return true
+	_story_hit = false
+	if _story_wait < STORY_READ:  # VR story cards being read hold it back a little (Whack-a-Mole solo VR tells one after
+		for c in tree.get_nodes_in_group("story_card_vr"):  # another all round 1); then it shows and steps aside
+			if c is Node3D and (c as Node3D).is_visible_in_tree() and not c.is_queued_for_deletion():
+				_story_hit = true
+				return true
 	for n in tree.get_nodes_in_group("pick_orb"):  # pick orbs showing (core/pick_orbs.gd PICK_GROUP)
 		if n is Node3D and (n as Node3D).is_visible_in_tree():
 			return true
@@ -1277,3 +1287,4 @@ func _reset() -> void:
 	_exprs.clear()
 	_failed.clear()
 	_cur = null
+	_story_wait = 0.0
