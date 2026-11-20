@@ -13,4 +13,13 @@ export SAVE_TEST=1
 # player slot and its LAN beacon pulls real Decks into the test (2026-10-24: kids couldn't all join). Runs that
 # pair a host and a joiner already pass the same DUO_PORT to both.
 [ -n "$DUO_PORT" ] || export DUO_PORT=$((20000 + RANDOM % 10000))
-exec bwrap "${args[@]}" godot "$@"
+# Its own log file: test runs used to write user://logs of the project "Duo Arena" - the SAME folder as the TV's
+# real game, which keeps only 5 logs - so a few bot runs rotated the family's real session logs away (2026-11-19:
+# the evening's VR Kitchen Rush / Rhythm Band logs were gone by 00:45). A --log-file the caller passes wins.
+logs=()
+if [[ " $* " != *" --log-file "* ]]; then
+  ld="${XDG_RUNTIME_DIR:-/tmp}/godot-test-logs"
+  mkdir -p "$ld" && find "$ld" -name '*.log' -mmin +720 -delete 2>/dev/null
+  logs=(--log-file "$ld/$(date +%H%M%S)-$$.log")
+fi
+exec bwrap "${args[@]}" godot "${logs[@]}" "$@"
