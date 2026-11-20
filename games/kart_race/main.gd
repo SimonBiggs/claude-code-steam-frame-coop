@@ -2149,10 +2149,14 @@ func _race_telemetry(how: String, order: Array) -> void:
 	var air := 0
 	var short := 0
 	var items := 0
+	var rescue_peak := 0.0
+	var rescue_secs := 0.0
 	for k in karts:
 		if not k.active or k.cpu:
 			continue
 		humans += 1
+		rescue_peak = maxf(rescue_peak, float(k.rescue.peak))
+		rescue_secs = maxf(rescue_secs, float(k.rescue.helped_t))
 		best_place = mini(best_place, k.place)
 		walls += k.st_walls
 		air += k.st_air
@@ -2187,7 +2191,7 @@ func _race_telemetry(how: String, order: Array) -> void:
 		"net": net.mode, "solo": humans == 1, "end": how, "season": season, "gifts": ",".join(PackedStringArray(gifts.values())),
 		"sp_kind": surprise_kind, "sp_spots": track.surprises.size(), "sp_tells": int(surprises.st.tells), "sp_hits": int(surprises.st.hits),
 		"sp_saved": int(surprises.st.saved), "hz_tells": int(surprises.st.hz_tells), "town": Deep.town_size(town_races).x}.merged(
-		cockpit.steer_stats() if cockpit != null else {}))
+		cockpit.steer_stats() if cockpit != null else {}).merged({"rescue_peak": snappedf(rescue_peak, 0.01), "rescue_secs": snappedf(rescue_secs, 0.1)}))
 
 
 ## Today's ghost: a see-through kart that drives the day's best run (path sampled 5 times a second).

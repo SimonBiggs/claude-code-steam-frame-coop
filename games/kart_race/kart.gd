@@ -31,6 +31,12 @@ const KEYS_BOTH := 2  # the TV machine's P2
 const DRIFT_LEVELS: Array[float] = [0.7, 1.5, 2.4]  # seconds of drifting for blue / orange / pink sparks
 const TURBO_TIME: Array[float] = [0.55, 0.9, 1.3]
 const SPARK_COLORS: Array[Color] = [Color(0.9, 0.9, 0.9), Color(0.3, 0.7, 1.0), Color(1.0, 0.6, 0.15), Color(1.0, 0.35, 0.9)]
+const Rescue := preload("res://core/rescue.gd")
+## RESCUE (core/rescue.gd): a driver bonking the walls gets a gentle hand on the wheel and a little less top speed
+## until they're driving clean (2026-11-19, Steam Frame guest on ZOOM: 34 wall hits in a 62 s race, quit race 2).
+const RESCUE_STEER := 0.5   # share of the steering the assist does at full help
+const RESCUE_SLOW := 0.2    # top speed this much lower at full help
+const RESCUE_CLEAN := 4.0   # seconds of driving without a wall = one good result
 const VR_DECEL := 15.0  # m/s/s: the most the VR kart's speed may drop per second
 const VR_ACCEL := 11.0
 
@@ -80,6 +86,8 @@ var road_h := 0.0
 var tangent := Vector3.FORWARD
 var total := 0.0  # distance raced since the start line (negative on the grid)
 var finished := false
+var rescue = Rescue.new()  # this machine's human driver (not CPUs / bots)
+var clean_t := 0.0
 var finish_time := 0.0
 var place := 1
 var grid_slot := 0
@@ -526,6 +534,9 @@ func read_input(delta: float) -> void:
 	throttle = clampf(throttle, 0.0, 1.0)
 	brake = clampf(brake, 0.0, 1.0)
 	steer = clampf(steer, -1.0, 1.0)
+	var help: float = rescue.level()
+	if help > 0.0 and main.state == "race":
+		steer = clampf(lerpf(steer, _assist_steer(), RESCUE_STEER * help), -1.0, 1.0)
 	want_item = item_now and not item_was
 	want_boost = boost_now and not boost_was
 	item_was = item_now
@@ -556,6 +567,25 @@ func _auto_drive(delta: float) -> void:
 				item_hold_t = 0.0
 		if charge >= 1.0 and absf(steer) < 0.3:
 			want_boost = true
+
+
+## RESCUE: the steering that would follow the clear racing line ahead (no side effects, unlike auto_inputs).
+func _assist_steer() -> float:
+	var ahead := 9.0 + absf(speed) * 0.5
+	var p: Array = main.track.point_at(s + ahead, main.track.cpu_lat(s + ahead, 0.0, 0.0, false))
+	var to: Vector3 = (p[0] as Vector3) - position
+	return clampf(-wrapf(atan2(-to.x, -to.z) - yaw, -PI, PI) * 2.2, -1.0, 1.0)
+
+
+## Human drivers: walls are misses, clean driving stretches are hits.
+func _tick_rescue(delta: float) -> void:
+	if cpu or bot or finished or main.state != "race":
+		return
+	clean_t += delta
+	if clean_t >= RESCUE_CLEAN:
+		clean_t = 0.0
+		rescue.note(true)
+	rescue.tick(delta)
 
 
 ## Steer towards a point a little way ahead on the track (shared with the fake-VR test).
@@ -611,6 +641,9 @@ func _hit_side(rt: Vector3, o: float, fwd: Vector3, delta: float) -> void:
 	if impact > 3.0 and wall_cd <= 0.0:
 		wall_cd = 0.4
 		st_walls += 1
+		if not cpu:
+			rescue.note(false)
+			clean_t = 0.0
 		main.on_wall(self, impact)
 
 
@@ -658,7 +691,8 @@ func sim(delta: float) -> void:
 		main.on_boost(self, "BOOST!")
 	var kc: Dictionary = Cups.kart(kart_class)
 	var md: Dictionary = main.mode_info()
-	var top: float = MAX_SPEED * float(main.rubber(self)) * float(kc.top) * float(md.speed)
+	_tick_rescue(delta)
+	var top: float = MAX_SPEED * float(main.rubber(self)) * float(kc.top) * float(md.speed) * (1.0 - RESCUE_SLOW * rescue.level())
 	if boost_t > 0.0:
 		top *= 1.0 + BOOST_GAIN
 	if star_t > 0.0:
