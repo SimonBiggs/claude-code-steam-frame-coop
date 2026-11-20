@@ -122,6 +122,8 @@ var _want_ui: Control
 var _want_title: Label
 var _want_body: Label
 var _gave_up_t := -1.0
+var _audio_t := 0.0
+var _audio_moved := false  # this run moved its sound off the headset (core/room_audio.gd); put back when VR is live
 
 
 func _ready() -> void:
@@ -168,7 +170,7 @@ func _handoff() -> Dictionary:
 	return {"started_at": started_at, "lost_at": lost_at, "lost_reason": lost_reason, "servers": servers,
 		"armed_for": armed_for, "launch_flat": launch_flat, "vsync_saved": _vsync_saved, "max_fps_saved": _max_fps_saved,
 		"asleep_since": asleep_since, "asleep_flat": asleep_flat, "steamvr_asked_at": _steamvr_asked_at,
-		"server_seen_at": _server_seen_at}
+		"server_seen_at": _server_seen_at, "audio_moved": _audio_moved}
 
 
 func _adopt(s: Dictionary) -> void:
@@ -184,6 +186,7 @@ func _adopt(s: Dictionary) -> void:
 	asleep_flat = bool(s.get("asleep_flat", false))
 	_steamvr_asked_at = float(s.get("steamvr_asked_at", -1.0e9))
 	_server_seen_at = float(s.get("server_seen_at", 0.0))
+	_audio_moved = bool(s.get("audio_moved", false)) or AudioServer.output_device != "Default"
 
 
 func _process(delta: float) -> void:
@@ -200,6 +203,7 @@ func _process(delta: float) -> void:
 	_asleep_check(now_live)
 	if _gone:
 		return
+	_room_audio(now_live)
 	if now_live:
 		_connect_signals()
 		if not live:
@@ -698,6 +702,25 @@ func want_text() -> String:
 func _write_status(stage: String, title: String, body: String) -> void:
 	_write_file(_proj_path(STATUS_FILE), "%d\t%s\t%s\t%s\n" % [int(Time.get_unix_time_from_system()), stage, title,
 		body.replace("\n", " ")])
+
+
+## Flat while SteamVR still holds the default sink (vrlink-sink: the headset), e.g. after the headset fell asleep: the
+## TV players' game sound goes to the TV instead (core/room_audio.gd, logged). Back to "Default" once VR is live.
+func _room_audio(now_live: bool) -> void:
+	if now_live:
+		if _audio_moved:
+			AudioServer.output_device = "Default"
+			_audio_moved = false
+			print("VrWatch: VR live: sound back on the default output (the headset)")
+		return
+	_audio_t -= POLL
+	if _audio_t > 0.0 or DisplayServer.get_name() == "headless" or Machine.kind() == "deck" or Machine.tv_seat_client():
+		return  # (the TV screen copy picks its own: core/tv_seat.gd)
+	_audio_t = 10.0
+	var before := AudioServer.output_device
+	var now_dev := preload("res://core/room_audio.gd").use_room_output("flat arcade")
+	if now_dev != "" and now_dev != before:
+		_audio_moved = true
 
 
 # --- Headset asleep ------------------------------------------------------------------------------------------------
