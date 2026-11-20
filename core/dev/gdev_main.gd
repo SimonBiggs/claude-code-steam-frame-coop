@@ -43,6 +43,9 @@ var caption: Node  # "Claude:" captions (addons/gdev/caption.gd), created lazily
 # Offscreen test run (godot.ts / gdev-offscreen): a control server instead of the cmd file, no recording,
 # stream or captions, so it never touches the live game sharing this project folder.
 var offscreen := OS.has_environment("GDEV_CONTROL_PORT")
+# The TV screen core/tv_seat.gd starts next to a streamed VR host shares this project folder: it leaves .dev/cmd, the
+# .dev/frames recording and the :8090 stream to the VR host (gdev commands and recordings mean the host).
+var tv_screen := OS.get_environment("DUO_TV_CLIENT") == "1"
 var adopted := false  # took over from an older copy of this script (no first scan, keep its servers)
 var reload_stats := {"reloaded": 0, "refused": 0}
 
@@ -106,7 +109,7 @@ func _ready() -> void:
 	_scan_files(true)
 	if offscreen and ResourceLoader.exists("res://addons/gdev/control.gd"):
 		add_child((load("res://addons/gdev/control.gd") as GDScript).new())
-	if DisplayServer.get_name() != "headless" and not offscreen:
+	if DisplayServer.get_name() != "headless" and not offscreen and not tv_screen:
 		stream_server = TCPServer.new()
 		if stream_server.listen(STREAM_PORT) == OK:
 			_log("live view: http://%s:%d/" % [OS.get_environment("HOSTNAME") if OS.has_environment("HOSTNAME") else "localhost", STREAM_PORT])
@@ -115,9 +118,9 @@ func _ready() -> void:
 	rd = RenderingServer.get_rendering_device()
 	if OS.has_environment("GDEV_FRAME_INTERVAL"):
 		frame_interval = float(OS.get_environment("GDEV_FRAME_INTERVAL"))
-	if DisplayServer.get_name() == "headless" or offscreen:
+	if DisplayServer.get_name() == "headless" or offscreen or tv_screen:
 		recording = false  # nothing is rendered, so there is nothing to record
-	_log("bridge ready (pid %d)" % OS.get_process_id())
+	_log("bridge ready (pid %d)%s" % [OS.get_process_id(), " as the TV screen: no commands, recording or stream (the VR host's)" if tv_screen else ""])
 
 
 func _process(delta: float) -> void:
@@ -128,7 +131,7 @@ func _process(delta: float) -> void:
 	if poll_t >= 0.25:
 		poll_t = 0.0
 		_scan_files(false)
-		if not offscreen:
+		if not offscreen and not tv_screen:
 			_poll_commands()
 	_reap_tasks()
 	_update_stream(delta)

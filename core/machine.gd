@@ -20,6 +20,35 @@ static func kind() -> String:
 	return "tv"
 
 
+## The Steam Machine hosting VR for a Steam Frame that STREAMS it (SteamVR + vrlink, since 2026-11): OpenXR is live but
+## this is an x86_64 box with the family TV on its window (the XR mirror). A Frame running the arcade natively is arm64.
+## Such a host has no TV players of its own (core/party.gd), so core/tv_seat.gd starts a TV screen (a second, flat copy
+## of the arcade joining this one) when a pad at the TV presses A. DUO_FAKE_STREAMED_VR=1/0 overrides (tests).
+static func streamed_vr_host() -> bool:
+	if OS.has_environment("DUO_FAKE_STREAMED_VR"):
+		return OS.get_environment("DUO_FAKE_STREAMED_VR") == "1"
+	if Engine.get_architecture_name().begins_with("arm"):
+		return false
+	var xr := XRServer.find_interface("OpenXR")
+	return xr != null and xr.is_initialized()
+
+
+## This run is the TV screen core/tv_seat.gd started for a streamed VR host on the same machine.
+static func tv_seat_client() -> bool:
+	return OS.get_environment("DUO_TV_CLIENT") == "1"
+
+
+## The VR player's own hands showing up as a joypad: while the Frame streams, SteamVR exposes its controllers to
+## every program on the Steam Machine as "Steam Frame Controllers" (game.log 2026-11-19: joypad 2 next to two PS4
+## pads). On the VR host or its TV screen that pad is never a TV player.
+static func headset_pad_name(pad_name: String) -> bool:
+	return pad_name.to_lower().contains("steam frame")
+
+
+static func headset_pad(device: int) -> bool:
+	return device >= 0 and (streamed_vr_host() or tv_seat_client()) and headset_pad_name(Input.get_joy_name(device))
+
+
 ## One player per screen (Simon: "when I play on the deck I normally just have one player per deck"): a handheld
 ## starts local play with ONE player on its own controls, full screen; more pads drop in with A (split screen).
 ## Party games: core/party.gd (no keyboard player). Classic games: core/classic_seats.gd deck_solo().

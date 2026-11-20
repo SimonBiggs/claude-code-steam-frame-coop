@@ -16,6 +16,7 @@ extends RefCounted
 ## also hears controllers that Input.get_connected_joypads() doesn't list (bots' fake pads).
 
 const Me := preload("res://core/ui_input.gd")
+const Machine := preload("res://core/machine.gd")  # headset_pad: the VR player's hands are never a TV pad
 
 const PAD_NONE := -1   ## no controller
 const PAD_ANY := -2    ## any controller
@@ -125,6 +126,7 @@ func state() -> Dictionary:
 					if Input.is_physical_key_pressed(k):
 						s[a] = true
 	var real: Array[int] = Input.get_connected_joypads()
+	real.assign(real.filter(func(d: int) -> bool: return not Machine.headset_pad(d)))  # the VR player's hands, not a TV pad
 	var tv_busy := preload("res://core/tv_share.gd").pads_off()  # the TV's pads belong to another game (core/tv_share.gd)
 	if device >= 0:
 		if not (tv_busy and real.has(device)):
@@ -132,7 +134,7 @@ func state() -> Dictionary:
 	elif device == PAD_ANY:
 		var pads: Array[int] = [] if tv_busy else real.duplicate()
 		for d in _seen_pads:
-			if not pads.has(int(d)) and not (tv_busy and real.has(int(d))):
+			if not pads.has(int(d)) and not (tv_busy and real.has(int(d))) and not Machine.headset_pad(int(d)):
 				pads.append(int(d))
 		for d in pads:
 			_pad_state(d, s)
