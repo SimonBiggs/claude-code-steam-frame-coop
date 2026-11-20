@@ -339,7 +339,7 @@ func _host_tick(delta: float) -> void:
 			if client_joined:
 				print("TvSeat: the TV screen closed (pid %d, exit %d): the TV shows the VR view again" % [client_pid, code])
 			else:
-				print("TvSeat: the TV screen FAILED: it closed before joining (pid %d, exit %d); its output: res://.dev/tv-seat.log" % [client_pid, code])
+				print("TvSeat: the TV screen did not work: it closed before joining (pid %d, exit %d); its output: res://.dev/tv-seat.log" % [client_pid, code])
 				_fail("it closed before joining")
 			client_pid = -1
 		else:
@@ -353,7 +353,7 @@ func _host_tick(delta: float) -> void:
 				why = "another game has the TV (core/tv_share.gd)"
 			elif not client_joined and Time.get_ticks_msec() - client_started_ms > CONNECT_WAIT_MS:
 				why = "it didn't join within %d s" % (CONNECT_WAIT_MS / 1000)
-				print("TvSeat: the TV screen FAILED: %s; its output: res://.dev/tv-seat.log" % why)
+				print("TvSeat: the TV screen did not work: %s; its output: res://.dev/tv-seat.log" % why)
 				_fail(why)
 			if why != "":
 				_kill_client(why)
