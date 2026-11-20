@@ -681,3 +681,61 @@ static func core_prompt(n: Node) -> bool:
 			return true
 		x = x.get_parent()
 	return false
+
+
+## core/first_goal.gd, every player their own (2026-11-20): call in a bot's end checks on EVERY machine.
+## - every player seated here has a seat with their own prompt shown (or already done);
+## - split screen: each player's card sits in their own view (never one card for the whole window);
+## - every player here who won saw their own "Nice one!" (VR: on their headset card);
+## - TV machines: every local player the HOST says won is marked done here (host-authoritative sync);
+## - at least `min_wins` players here won (bots that score: 1).
+func check_first_goals(min_wins: int = 1) -> void:
+	var fg: Node = get_tree().root.get_node_or_null("FirstGoal")
+	if not assert_true(fg != null and fg.has_method("seats_info"), "first goal: the FirstGoal service runs"):
+		return
+	var mode := String(main.net.mode) if main != null and main.get("net") != null else "local"
+	var seats: Array = fg.call("seats_info")
+	var mine: Array = seats.filter(func(x: Dictionary) -> bool: return bool(x.local))
+	var party: Variant = main.get("party") if main != null else null
+	if party is Object and (party as Object).has_method("local_slots"):
+		for slot in (party as Object).call("local_slots"):
+			assert_true(mine.any(func(x: Dictionary) -> bool: return int(x.slot) == int(slot)),
+				"first goal (%s): local player P%d has their own first goal (%s)" % [mode, int(slot) + 1, str(_fg_brief(seats))])
+	var split: Variant = main.get("split") if main != null else null
+	var per_view: bool = split is Object and is_instance_valid(split) and not bool((split as Object).call("showing_shared")) \
+		and int((split as Object).call("view_count")) >= 2
+	var cards := {}
+	var won := 0
+	var split_cards := 0
+	for x: Dictionary in mine:
+		assert_true(String(x.state) != "wait", "first goal (%s): P%d's prompt came up (%s)" % [mode, int(x.slot) + 1, str(_fg_brief(seats))])
+		if String(x.state) == "done":
+			won += 1
+			assert_true(bool(x.nice), "first goal (%s): P%d saw their own \"Nice one!\"" % [mode, int(x.slot) + 1])
+		var c: Variant = x.card
+		if c != null:
+			assert_true(not cards.has(c), "first goal (%s): P%d has a card of their own" % [mode, int(x.slot) + 1])
+			cards[c] = true
+		if bool(x.get("split_view", false)) and split is Object:
+			assert_true(x.shown_in != null and x.shown_in == (split as Object).call("viewport", int(x.slot)),
+				"first goal (%s): split screen: P%d's card came up in their own view" % [mode, int(x.slot) + 1])
+			split_cards += 1
+	if per_view:
+		assert_true(split_cards >= 2, "first goal (%s): split screen: the players' cards came up in their own views (%d)" % [mode, split_cards])
+	if mode == "client":
+		var hf: Variant = main.net.state_get("_fg", {})
+		var hw: Dictionary = (hf as Dictionary).get("won", {}) if hf is Dictionary else {}
+		for x: Dictionary in mine:
+			if hw.has(str(x.slot)):
+				assert_true(String(x.state) == "done", "first goal (client): the host said P%d won; this machine marked it done" % (int(x.slot) + 1))
+	min_wins = mini(min_wins, mine.size())  # (a VR host with no headset here plays nobody)
+	assert_true(won >= min_wins, "first goal (%s): %d of %d players here got their first win (want %d) %s" % [mode, won, mine.size(), min_wins, str(_fg_brief(seats))])
+	info("first goal (%s): %s" % [mode, str(_fg_brief(seats))])
+
+
+func _fg_brief(seats: Array) -> Array:
+	var out: Array = []
+	for x: Dictionary in seats:
+		out.append("P%d %s%s %s%s" % [int(x.slot) + 1, String(x.device), "" if bool(x.local) else "(remote)", String(x.state),
+			" nice" if bool(x.nice) else ""])
+	return out
