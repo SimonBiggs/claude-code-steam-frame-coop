@@ -7,8 +7,8 @@ extends Node3D
 ##  - HEROES (classes.gd): bonk a statue in the practice room to be a KNIGHT, ARCHER, HEALER or WIZARD (co-op roles:
 ##    the VR knight up front with his real sword, the HEALER's green ring keeping friends going, archers and wizards
 ##    hitting from afar; each statue says what its hero is for).
-##  - STORY (story.gd): Smudge took Cinder's treasure and friends; cards at the start of a run, in each new biome and
-##    when a boss falls; the last boss is THE ENDING (saved: Smudge sits with Cinder in the practice room and camp).
+##  - STORY (story.gd): Soot took Cinder's treasure and friends; cards at the start of a run, in each new biome and
+##    when a boss falls; the last boss is THE ENDING (saved: Soot sits with Cinder in the practice room and camp).
 ##  - ONE MORE GO: the results show what the hoard opens next and TODAY'S streak (days in a row, on the DAILY pad).
 ##  - CINDER'S HOARD: every coin you pick up goes into Cinder's hoard for good (bosses add a pile); a big
 ##    enough hoard unlocks new heroes and new relics (the gold pile in the practice room shows it).
@@ -143,7 +143,7 @@ var _poke_cd := {}
 var _touch_prev := {}
 var story_zones := {}  ## Host: biomes whose story beat this run has told (story.gd)
 var cinder_node: Node3D  ## the lobby's little dragons (story.gd)
-var smudge_node: Node3D
+var soot_node: Node3D
 var heal_t := {}  ## Host: slot -> seconds since a HEALER's last heal ring
 var _gold := 0
 var _keys := 0
@@ -359,17 +359,17 @@ func _build_hoard() -> void:
 	hoard_sub.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y
 	hoard_sub.position = HOARD_SPOT + Vector3(0.0, 1.2, 0.0)
 	lobby.add_child(hoard_sub)
-	# Cinder sits by her hoard; after the story's ending Smudge sits with her (story.gd).
+	# Cinder sits by her hoard; after the story's ending Soot sits with her (story.gd).
 	cinder_node = MeshKit.instance(Story.cinder_mesh(), false)
 	cinder_node.position = HOARD_SPOT + Vector3(0.45, 0.0, 0.35)  # (in front of the pile: the hoard's label floats over the pile, not her)
 	cinder_node.rotation.y = 0.5
 	lobby.add_child(cinder_node)
-	smudge_node = MeshKit.instance(Story.smudge_mesh(), false)
-	smudge_node.position = HOARD_SPOT + Vector3(-0.4, 0.0, 0.5)
-	smudge_node.rotation.y = 1.2
-	smudge_node.scale = Vector3.ONE * 1.25
-	smudge_node.visible = false
-	lobby.add_child(smudge_node)
+	soot_node = MeshKit.instance(Story.soot_mesh(), false)
+	soot_node.position = HOARD_SPOT + Vector3(-0.4, 0.0, 0.5)
+	soot_node.rotation.y = 1.2
+	soot_node.scale = Vector3.ONE * 1.25
+	soot_node.visible = false
+	lobby.add_child(soot_node)
 	_hoard_shown = -1
 
 
@@ -430,8 +430,8 @@ func _animate_lobby(delta: float) -> void:
 	if cinder_node != null:
 		var tt := Time.get_ticks_msec() * 0.001
 		cinder_node.position.y = absf(sin(tt * 2.2)) * 0.08
-		smudge_node.visible = bool(net.state_get("d_smudge", false))
-		smudge_node.position.y = absf(sin(tt * 2.2 + 1.3)) * 0.08
+		soot_node.visible = bool(net.state_get("d_soot", false))
+		soot_node.position.y = absf(sin(tt * 2.2 + 1.3)) * 0.08
 	if not active:
 		_sync_lobby_looks()
 	var fills: Array = net.state_get("d_pads", [0.0, 0.0])
@@ -471,8 +471,8 @@ func lobby_step(delta: float) -> void:
 		net.state_set("d_heroic_ok", heroic_unlocked())
 	if main.save != null and int(net.state_get("d_hoard", -1)) != hoard():
 		net.state_set("d_hoard", hoard())
-	if main.save != null and bool(net.state_get("d_smudge", false)) != ending_seen():
-		net.state_set("d_smudge", ending_seen())
+	if main.save != null and bool(net.state_get("d_soot", false)) != ending_seen():
+		net.state_set("d_soot", ending_seen())
 	if main.save != null and net.state_get("d_streak", null) != _streak_now():
 		net.state_set("d_streak", _streak_now())
 	if main.save != null and not net.state_has("d_cls"):
@@ -643,7 +643,7 @@ func progress() -> Dictionary:
 	if not pd.has("friends") or typeof(pd["friends"]) != TYPE_ARRAY:
 		pd["friends"] = []  ## Cinder's friends freed from cages, ever (friends.gd ids): they live at her camp
 	if not pd.has("ending"):
-		pd["ending"] = false  ## the story's ending was seen (story.gd): Smudge is a friend now
+		pd["ending"] = false  ## the story's ending was seen (story.gd): Soot is a friend now
 	if not pd.has("streak") or typeof(pd["streak"]) != TYPE_DICTIONARY:
 		pd["streak"] = {"day": "", "n": 0}  ## TODAY'S DUNGEON days in a row (the DAILY pad shows it)
 	return pd
@@ -1291,14 +1291,14 @@ func _build_shop_props() -> void:
 		Creatures.face_now(pet, (fn.position if i < 6 else c) - pet.position)
 		pet.set_meta("camp_friend", String(fr["id"]))
 		shop_nodes.append(pet)
-	# Cinder at her camp (and Smudge, once the story's ending has been seen), by the back wall.
+	# Cinder at her camp (and Soot, once the story's ending has been seen), by the back wall.
 	var cin := MeshKit.instance(Story.cinder_mesh(), false)
 	cin.position = FloorGen.to_world(f, 0, Vector2(-3.4, -4.2))
 	cin.rotation.y = 0.4
 	add_child(cin)
 	shop_nodes.append(cin)
-	if bool(net.state_get("d_smudge", false)):
-		var smu := MeshKit.instance(Story.smudge_mesh(), false)
+	if bool(net.state_get("d_soot", false)):
+		var smu := MeshKit.instance(Story.soot_mesh(), false)
 		smu.position = FloorGen.to_world(f, 0, Vector2(-2.2, -4.4))
 		smu.rotation.y = -0.3
 		smu.scale = Vector3.ONE * 1.25
@@ -1767,13 +1767,13 @@ func _boss_down(kind: int, at: Vector3) -> void:
 		main.save.mark_dirty()
 		net.event("d_banner", ["YOU BEAT THE DUNGEON!", "victory"])
 		main.show_headline("YOU WON! KEEP GOING?", 5.0)
-	# The story (story.gd): Smudge grumbles; the last boss starts THE ENDING (saved: Smudge is a friend from now on).
+	# The story (story.gd): Soot grumbles; the last boss starts THE ENDING (saved: Soot is a friend from now on).
 	var ending_now := zone == FloorGen.ZONE_COUNT - 1 and not ending_seen()
 	tell_story(Story.boss_beats(zone, ending_seen()), 2.0)
 	if ending_now:
 		progress()["ending"] = true
 		main.save.mark_dirty()
-		net.state_set("d_smudge", true)
+		net.state_set("d_soot", true)
 		runrec["ending"] = true
 		get_tree().create_timer(2.0 + Story.ENDING.size() * Story.GAP).timeout.connect(func() -> void:
 			if is_instance_valid(self) and active:
