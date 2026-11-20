@@ -26,11 +26,19 @@ static func limit() -> int:
 ## An engine option's int value from this process's command line ("--x N" or "--x=N"), or -1 when not passed.
 ## (Also --fixed-fps for tests/bot_end.gd run_length.)
 static func arg_int(flag: String) -> int:
+	var v := engine_arg(flag)
+	return int(v) if v != "" else -1
+
+
+## An engine option's value from this process's own command line ("--x V" or "--x=V"), "" when not passed. The one
+## place that reads engine options (--quit-after, --fixed-fps, --xr-mode: core/vr_watch.gd): OS.get_cmdline_args()
+## leaves them out (2026-11-20: VrWatch looked for --xr-mode there, never found it and restarted in a loop).
+static func engine_arg(flag: String) -> String:
 	var args := PackedStringArray()
 	var f := FileAccess.open("/proc/self/cmdline", FileAccess.READ)
 	if f != null:
 		var cur := PackedByteArray()
-		for byte in f.get_buffer(65536):
+		for byte in f.get_buffer(65536):  # (/proc files read as length 0: ask for a block)
 			if byte == 0:
 				args.append(cur.get_string_from_utf8())
 				cur.clear()
@@ -39,10 +47,10 @@ static func arg_int(flag: String) -> int:
 	for i in args.size():
 		var a := str(args[i])
 		if a == flag and i + 1 < args.size():
-			return int(args[i + 1])
+			return str(args[i + 1])
 		if a.begins_with(flag + "="):
-			return int(a.get_slice("=", 1))
-	return -1
+			return a.get_slice("=", 1)
+	return ""
 
 
 func _process(_delta: float) -> void:
