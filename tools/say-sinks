@@ -1,0 +1,37 @@
+#!/bin/bash
+# say-sinks [room|headset|all]: which PipeWire sinks Claude's voice (claude-say, frame-say) should play on, one per line.
+# Why (2026-11-19): while the Steam Frame streams from this machine, SteamVR makes "vrlink-sink" the DEFAULT sink, so
+# claude-say (plain pw-play = default sink) spoke only inside the headset and the room couldn't hear the kids' answers.
+#   room     the TV / room speakers: the HDMI output (any other real ALSA output if there's no HDMI one)
+#   headset  the Steam Frame (vrlink-sink) while it streams
+#   all      room + headset (default): the room hears it AND the VR player does
+# Never silent: when the room speakers are missing (TV off / HDMI asleep), it says so on stderr, in
+# ~/.claude/say-audio.log and on the brepl channel (at most once per 10 minutes), and prints nothing for "room".
+# SAY_SINKS_FAKE=<file>: read `pactl list short sinks` output from that file (tests).
+set -u
+want="${1:-all}"
+LOG="$HOME/.claude/say-audio.log"
+STAMP="$HOME/.cache/say-sinks.warned"
+list() { if [ -n "${SAY_SINKS_FAKE:-}" ]; then cat "$SAY_SINKS_FAKE"; else pactl list short sinks 2>/dev/null; fi; }
+names=$(list | awk '{print $2}')
+room=$(printf '%s\n' "$names" | grep -E '^alsa_output\..*hdmi' | head -1)
+[ -n "$room" ] || room=$(printf '%s\n' "$names" | grep -E '^alsa_output\.' | head -1)
+headset=$(printf '%s\n' "$names" | grep -x 'vrlink-sink' | head -1)
+warn() {
+	echo "say-sinks: $1" >&2
+	printf '%s %s\n' "$(date '+%F %T')" "$1" >> "$LOG"
+	[ -n "${SAY_SINKS_FAKE:-}" ] && return
+	if [ -z "$(find "$STAMP" -mmin -10 2>/dev/null)" ]; then
+		touch "$STAMP"
+		echo "⚠ say-sinks: $1" | "$HOME/.local/bin/brepl" --pipe claude-say >/dev/null 2>&1 || true
+	fi
+}
+case "$want" in
+	room|all)
+		if [ -n "$room" ]; then echo "$room"
+		else warn "no TV/room speakers (no HDMI or other ALSA output; TV off?): the room won't hear Claude${headset:+ (headset only)}"; fi ;;
+esac
+case "$want" in
+	headset|all) [ -n "$headset" ] && echo "$headset" ;;
+esac
+exit 0

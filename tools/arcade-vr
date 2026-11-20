@@ -1,0 +1,53 @@
+#!/bin/bash
+# arcade-vr: "open the arcade on the Steam Frame" in ONE step (2026-11-20; 11-19 the arcade was launched while SteamVR
+# wasn't running and came up flat, then starting SteamVR crashed it).
+#   arcade-vr            ask for VR and follow the steps here (the TV shows them too) until VR runs (or it gives up)
+#   arcade-vr --no-wait  ask and return at once
+#   arcade-vr --status   what the arcade says now (.dev/vr_status)
+# How: writes the wish (.dev/vr_want, unix time). A running arcade (core/vr_watch.gd) picks it up within a second:
+# starts SteamVR if it isn't running, shows "Put the Frame on and choose Steam Machine" on the TV, restarts into VR
+# from the arcade menu when the headset is there, and writes each step to .dev/vr_status. No arcade running: it is
+# started through Steam (the Duo Arena shortcut, so Steam Input works), and does the same. Never silent: every step
+# and every problem is printed.
+set -u
+P="$HOME/GodotProjects/duo-arena"
+WANT="$P/.dev/vr_want"
+STATUS="$P/.dev/vr_status"
+ARCADE_APPID=10492832054528442368
+status_line() { [ -f "$STATUS" ] && awk -F'\t' '{printf "%s: %s %s\n", $2, $3, $4}' "$STATUS"; }
+running() { local pid; pid=$(cat "$P/.dev/pid" 2>/dev/null); [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; }
+vr_live() { [ -f "$STATUS" ] && [ "$(cut -f2 "$STATUS")" = live ] && running && pgrep -x vrserver >/dev/null; }
+
+if [ "${1:-}" = --status ]; then
+	running && echo "arcade: running" || echo "arcade: not running"
+	pgrep -x vrserver >/dev/null && echo "SteamVR: running" || echo "SteamVR: not running"
+	[ -f "$WANT" ] && echo "VR wanted since $(date -d @"$(cut -d. -f1 "$WANT")" +%T)"
+	status_line
+	exit 0
+fi
+if vr_live && [ ! -f "$WANT" ]; then echo "VR is already running in the arcade."; exit 0; fi
+mkdir -p "$P/.dev"
+date +%s > "$WANT"
+echo "VR wanted: the arcade will start SteamVR if needed and wait for the headset (steps on the TV too)."
+if ! running; then
+	if ! pgrep -x steam >/dev/null; then
+		echo "Steam isn't running: starting Steam with the arcade (VR needs Steam)."
+	fi
+	echo "Starting the arcade through Steam (Duo Arena shortcut)..."
+	setsid steam "steam://rungameid/$ARCADE_APPID" >/dev/null 2>&1 < /dev/null &
+fi
+[ "${1:-}" = --no-wait ] && exit 0
+last=""
+for _ in $(seq 1 660); do  # ~11 minutes (the arcade gives up after 15)
+	cur=$(status_line)
+	if [ -n "$cur" ] && [ "$cur" != "$last" ] && [ "$(stat -c %Y "$STATUS" 2>/dev/null || echo 0)" -ge "$(cut -d. -f1 "$WANT" 2>/dev/null || echo 0)" ]; then
+		echo "$(date +%T) $cur"; last="$cur"
+	fi
+	case "$cur" in
+		live:*) echo "VR is running."; exit 0 ;;
+		gave_up:*) echo "VR didn't start (the arcade gave up)."; exit 1 ;;
+	esac
+	sleep 1
+done
+echo "Still not in VR after 11 minutes: $(status_line)"
+exit 1

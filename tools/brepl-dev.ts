@@ -15,7 +15,7 @@ const STAGE = join(GP, ".duo-arena-stage");
 const BIN = join(HOME, ".local/bin");
 const DEPLOYED = ["core", "games", "arcade", "tests"];  // what duo-deploy copies stage -> live
 // root files + docs/ staging keeps in step with live (dev.land copies them; dev.debt "stage-root" checks). 2026-11-20: staging's launch.sh still pinned DUO_JOIN=frame, docs a month old.
-const STAGE_ROOT_FILES = ["launch.sh", "openxr_action_map.tres", "README.md", ".gitignore", ".gitattributes"];
+const STAGE_ROOT_FILES = ["launch.sh", "launch-vr.sh", "openxr_action_map.tres", "README.md", ".gitignore", ".gitattributes"];
 const TOOL_COPIES: Record<string, string> = {  // installed file -> repo copy (keep in sync)
   [join(BIN, "gdev")]: "tools/gdev", [join(HOME, ".local/share/gdev/bridge.gd")]: "tools/gdev-bridge.gd",
   [join(HOME, ".local/share/gdev/control.gd")]: "tools/control.gd",

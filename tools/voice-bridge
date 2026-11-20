@@ -424,6 +424,103 @@ def reader(proc, frames: list, cv) -> None:
             return
 
 
+class MicSources:
+    """Which mic voice-bridge hears, best first, and ONE visible line whenever that changes (Simon: no silent
+    fallbacks; 2026-11-19 the Frame slept, the bridge "kept retrying quietly" and nobody knew the room was unheard).
+      1 the Steam Frame mic over SSH (VOICE_SOURCE=frame, the default): the echo-cancelled headset mic
+      2 a real mic plugged into this machine (not a sink's .monitor, not vrlink-source: that is the same headset mic
+        through SteamVR and goes silent when the Frame sleeps)
+      3 nothing here: Samuel's Deck (deck-voice@samuel-deck -> .dev/deck-voice/samuel-deck.log) is the room mic
+    VOICE_SOURCE=local starts at 2. While on 2 or 3 it keeps checking for the Frame and switches back by itself.
+    A change is written into voice.log as "[time] (mic) ..." (Claude's voice monitor reads it), printed to the journal
+    and posted to the brepl channel ("voice-source"). A loss is only announced after GRACE seconds (the Frame naps)."""
+    GRACE = 20.0
+    BETTER_EVERY = 30.0
+    FRAME = "the Steam Frame mic"
+
+    def __init__(self, record: str):
+        self.record = record
+        self.prefer_local = os.environ.get("VOICE_SOURCE", "frame") == "local"
+        self.announced = ""  # the mic last announced ("" = none yet, None = nothing here)
+        self.down_since = 0.0
+
+    def frame_ok(self) -> bool:
+        if self.prefer_local:
+            return False
+        return subprocess.run(["ssh", "-i", KEY, "-o", "BatchMode=yes", "-o", "ConnectTimeout=3", HOST, "true"],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode == 0
+
+    @staticmethod
+    def local_mic() -> str:
+        try:
+            out = subprocess.run(["pactl", "list", "short", "sources"], capture_output=True, text=True, timeout=5).stdout
+        except Exception:
+            return ""
+        for line in out.splitlines():
+            p = line.split("\t")
+            if len(p) > 1 and not p[1].endswith(".monitor") and not p[1].startswith("vrlink"):
+                return p[1]
+        return ""
+
+    def pick(self):
+        if self.frame_ok():
+            label, cmd = self.FRAME, ["ssh", "-i", KEY, "-o", "BatchMode=yes", "-o", "ServerAliveInterval=5", HOST,
+                # Prefer the echo-cancelled mic; it disappears after the Frame sleeps, so fall back to
+                # the default source rather than recording silence.
+                "export XDG_RUNTIME_DIR=/run/user/1000; "
+                "src=$(pactl list short sources | grep -q echo_cancel_source && echo echo_cancel_source "
+                "|| pactl get-default-source); " + self.record]
+        else:
+            m = self.local_mic()
+            label, cmd = (f"the Steam Machine mic ({m})", ["sh", "-c", f"src='{m}'; " + self.record]) if m else (None, None)
+        self.note(label)
+        return label, cmd
+
+    def stopped(self, label) -> None:
+        if label == self.announced and self.down_since == 0.0:
+            self.down_since = time.time()
+
+    def watch_better(self, proc, label) -> None:
+        """While on a lesser mic: if the Frame comes back, end this recording so pick() switches to it."""
+        if label == self.FRAME or self.prefer_local:
+            return
+        while proc.poll() is None:
+            time.sleep(self.BETTER_EVERY)
+            if proc.poll() is None and self.frame_ok():
+                print("the Steam Frame is back: switching to its mic", flush=True)
+                proc.kill()
+                return
+
+    def note(self, label) -> None:
+        now = time.time()
+        if label == self.announced:
+            self.down_since = 0.0
+            return
+        if label is None:
+            if self.announced and self.down_since == 0.0:
+                self.down_since = now
+            if self.announced and now - self.down_since < self.GRACE:
+                return  # a nap or a Wi-Fi blip: wait before telling anyone
+            deck = subprocess.run(["systemctl", "--user", "is-active", "-q", "deck-voice@samuel-deck"]).returncode == 0
+            why = "the Steam Frame mic is off (headset asleep or away) and this machine has no mic"
+            text = (f"{why}: Samuel's Deck is the room mic now (.dev/deck-voice/samuel-deck.log)" if deck else
+                    f"NO ROOM MIC: {why}, and Samuel's Deck voice (deck-voice@samuel-deck) isn't running")
+        elif self.announced == "":
+            print(f"listening to {label}", flush=True)  # the normal start: nothing to tell
+            self.announced, self.down_since = label, 0.0
+            return
+        else:
+            text = f"listening to {label} now" + (" (the Steam Frame mic is off: headset asleep or away)"
+                                                   if label != self.FRAME else " again")
+        self.announced, self.down_since = label, 0.0
+        log(f"(mic) {text}")
+        try:
+            subprocess.run([str(Path.home() / ".local/bin/brepl"), "--pipe", "voice-source"], input=f"⚠ voice: {text}\n",
+                           text=True, timeout=10, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+
 def main() -> None:
     LOG.parent.mkdir(parents=True, exist_ok=True)
     one = FAST == "none"
@@ -439,20 +536,17 @@ def main() -> None:
         fixer = Fixer(speakers)
         fixer.start()
     record = f"exec pw-record --target \"$src\" --rate {RATE} --channels 1 --format s16 -"
-    # VOICE_SOURCE=local listens to a mic plugged into this machine (its default input) instead of the Frame.
-    local = os.environ.get("VOICE_SOURCE", "frame") == "local"
-    mic = "the Steam Machine mic" if local else "the Steam Frame mic"
-    cmd = ["sh", "-c", "src=$(pactl get-default-source); " + record] if local else \
-          ["ssh", "-i", KEY, "-o", "BatchMode=yes", "-o", "ServerAliveInterval=5", HOST,
-           # Prefer the echo-cancelled mic; it disappears after the Frame sleeps, so fall back to
-           # the default source rather than recording silence.
-           "export XDG_RUNTIME_DIR=/run/user/1000; "
-           "src=$(pactl list short sources | grep -q echo_cancel_source && echo echo_cancel_source "
-           "|| pactl get-default-source); " + record]
+    sources = MicSources(record)
     backoff = 3
     was_listening = False
     while True:
+        mic, cmd = sources.pick()
+        if cmd is None:  # no mic here at all: the notice (MicSources) says where the room is heard instead
+            time.sleep(backoff)
+            backoff = min(backoff * 2, 20)
+            continue
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        threading.Thread(target=sources.watch_better, args=(proc, mic), daemon=True).start()
         frames: list = []
         cv = threading.Condition()
         threading.Thread(target=reader, args=(proc, frames, cv), daemon=True).start()
@@ -526,11 +620,12 @@ def main() -> None:
                        f"transcribe {time.time() - t_tx:.2f}s" + (f" overlap-split {len(turns)}" if streams else "")
                        + f" {'single' if one else 'fast'} logged {time.time():.2f} | {text[:40]}")
         proc.kill()
-        if was_listening and not got_audio or was_listening:
-            print(f"{mic} offline - will keep retrying quietly", flush=True)
+        if was_listening:
+            print(f"{mic} stopped - picking the best mic again", flush=True)
             was_listening = False
+        sources.stopped(mic)
         time.sleep(backoff)
-        backoff = min(backoff * 2, 30)  # retry less often while the headset is off
+        backoff = min(backoff * 2, 20)  # retry less often while the headset is off
 
 
 if __name__ == "__main__":
