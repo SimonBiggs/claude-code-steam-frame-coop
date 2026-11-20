@@ -62,8 +62,8 @@ func _check_story() -> void:
 		if Story.zone_beats(z, false).is_empty():
 			_fail("biome %d has no arrival beat" % z)
 		for b in Story.zone_beats(z, true):
-			if String((b as Dictionary)["who"]) == "SMUDGE":
-				_fail("biome %d: after the ending Smudge is a friend, he shouldn't tease" % z)
+			if String((b as Dictionary)["who"]) == "SOOT":
+				_fail("biome %d: after the ending Soot is a friend, he shouldn't tease" % z)
 	if Story.zone_beats(FloorGen.ZONE_COUNT, true).is_empty():
 		_fail("the endless depths have no arrival beat")
 	if not Story.zone_beats(FloorGen.ZONE_COUNT + 3, true).is_empty():
@@ -74,13 +74,13 @@ func _check_story() -> void:
 	var ending: Array = Story.boss_beats(FloorGen.ZONE_COUNT - 1, false)
 	if ending.size() < 3:
 		_fail("the last boss should start THE ENDING (3+ cards), got %d" % ending.size())
-	if String((ending.back() as Dictionary)["pic"]) != "smudge_happy":
-		_fail("the ending should finish with a happy Smudge")
+	if String((ending.back() as Dictionary)["pic"]) != "soot_happy":
+		_fail("the ending should finish with a happy Soot")
 	if Story.boss_beats(FloorGen.ZONE_COUNT - 1, true).size() >= ending.size():
 		_fail("a second win should get a shorter beat than the first ending")
 	if not Story.boss_beats(FloorGen.ZONE_COUNT + 1, true).is_empty():
 		_fail("endless-depth bosses shouldn't replay story beats")
-	for k in ["smudge", "smudge_happy", "cinder"]:
+	for k in ["soot", "soot_happy", "cinder"]:
 		if not StoryCard.has_picture(k):
 			_fail("picture %s missing" % k)
 
