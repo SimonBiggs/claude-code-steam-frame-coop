@@ -314,10 +314,14 @@ export async function debt() {
     if (m && m <= v.at) issues.push({ kind: "slow-landing-test", what: `${t} took ${v.secs} s in a landing (${v.branch}, ${v.at})`, fix: `give it a quick mode: Seeded.test_count(n) / Seeded.sampled(i) (core/seeded.gd, GEN_QUICK=1 in landings); the nightly full sweep keeps every seed. Then delete its entry in ~/.cache/duo-arena/slow-tests.json` });
   }
   const nl = JSON.parse(await readFile(NIGHTLY, "utf8").catch(() => "null"));
+  const nightlyPartial = JSON.parse(await readFile(NIGHTLY.replace("latest.json", "partial.json"), "utf8").catch(() => "null"));
   if (!nl || Date.now() - Date.parse(nl.date) > 36 * 3600e3)
     issues.push({ kind: "nightly-missing", what: nl ? `the last full test sweep was ${nl.date}` : "no full test sweep has run yet", fix: "systemctl --user status duo-nightly-tests.timer; run one: bg('x', () => dev.nightly())" });
-  else for (const [t, r] of Object.entries(nl.tests) as [string, any][])
-    if (!r.pass) issues.push({ kind: "nightly-fail", what: `${t} failed the full sweep (${nl.date} @${nl.commit}): ${String(r.tail).split("\n").pop()}`, fix: `GEN_QUICK only samples: fix the seed/date in ~/.cache/duo-arena/nightly/logs/${t}.log, then dev.nightly(["${t}"])` });
+  else for (const [t, r] of Object.entries(nl.tests) as [string, any][]) {
+    // A later re-run of just that test (dev.nightly([t]) -> partial.json) that passed clears it (2026-11-20).
+    const pr = (nightlyPartial && nightlyPartial.date > nl.date) ? nightlyPartial.tests?.[t] : null;
+    if (!r.pass && !(pr && pr.pass)) issues.push({ kind: "nightly-fail", what: `${t} failed the full sweep (${nl.date} @${nl.commit}): ${String(r.tail).split("\n").pop()}`, fix: `GEN_QUICK only samples: fix the seed/date in ~/.cache/duo-arena/nightly/logs/${t}.log, then dev.nightly(["${t}"])` });
+  }
   // Voice echo (2026-11-11): every TTS player must log to ~/.claude/said.log, or the room/Deck mics feed Claude's own words back.
   for (const f of (await sh(`grep -lIE "say\\.py|piper |\\bespeak\\b" ~/.local/bin/* 2>/dev/null | grep -v '\\.bak' | xargs -r grep -L said.log`, LIVE)).out.split("\n").filter(Boolean))
     issues.push({ kind: "tts-no-said-log", what: f, fix: "append 'ts<TAB>text' to ~/.claude/said.log at start and end of playback (saidecho.py drops echoes)" });
