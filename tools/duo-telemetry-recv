@@ -4,7 +4,8 @@
 // this machine on the home network, sends them here. Nothing is pulled from devices (no ssh).
 //   UDP  :PORT  "DUO_TELEMETRY_HELLO <nonce>"  ->  "DUO_TELEMETRY_HERE <port> <nonce>"   (finding us, broadcast ok)
 //   HTTP :PORT  POST /runs {device, dropped, test, runs: [{id, line}]}  ->  {acked: [ids], new, dup}
-//               (+ checkin: true on an arcade start with nothing to send, build: its LAN update version, waiting)
+//               (+ checkin: true on an arcade start with nothing to send, build: its LAN update version, waiting;
+//                app: a standalone game's slug, tools/play_report.gd: its check-ins go to meta.apps[app])
 //               GET  /status  -> {device: {lines, last_seen, last_new, last_checkin, build, ip, dropped}}
 // Stored de-duplicated by (device, id) in DIR/<device>.jsonl, one {"id","device","recv","run"} per line, plus
 // DIR/<device>.meta.json {last_seen, lines, dropped (lines the device had to throw away while it couldn't reach us)}.
@@ -81,12 +82,22 @@ async function takeRuns(body: any, ip = "") {
   // Check-ins (an arcade start with nothing to send) still show the machine ran the arcade and can reach us.
   // Every check-in's time too (last 50): dev.debt warns when a machine starts the arcade again and again without a
   // RUN line arriving (launched but silent).
-  if (body.checkin) { meta.last_checkin = now; meta.checkins = [...(meta.checkins || []), now].slice(-50); }
-  if (typeof body.build === "string") meta.build = body.build.slice(0, 80);
+  // A standalone game (tools/play_report.gd) sends "app": its slug; its check-ins and lines are kept apart in
+  // meta.apps[app], so the arcade's own check-in checks (dev.debt telemetry-no-runs) don't count them.
+  const app = String(body?.app ?? "").toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, 40);
+  if (app) {
+    const a = (meta.apps ||= {})[app] ||= {};
+    a.last_seen = now;
+    if (body.checkin) { a.last_checkin = now; a.checkins = [...(a.checkins || []), now].slice(-50); }
+    if (fresh) a.last_new = now;
+  } else {
+    if (body.checkin) { meta.last_checkin = now; meta.checkins = [...(meta.checkins || []), now].slice(-50); }
+    if (typeof body.build === "string") meta.build = body.build.slice(0, 80);
+  }
   if (ip) meta.ip = ip.replace(/^::ffff:/, "");
   if (Number.isFinite(Number(body.waiting))) meta.waiting = Number(body.waiting);
   meta.lines = ids.size;
-  if (fresh) meta.last_new = now;
+  if (fresh && !app) meta.last_new = now;  // (the arcade's own lines only)
   if (dropped) {
     meta.dropped = (meta.dropped || 0) + dropped;
     meta.drops = [...(meta.drops || []), { t: now, n: dropped }].slice(-50);
@@ -94,7 +105,7 @@ async function takeRuns(body: any, ip = "") {
   }
   await writeFile(join(DIR, `${dev}.meta.json`), JSON.stringify(meta));
   if (fresh || dup || bad) log(`${dev}: ${fresh} new, ${dup} already here${bad ? `, ${bad} refused (bad line or id)` : ""} (from ${meta.ip ?? "?"})`);
-  else if (body.checkin) log(`${dev}: checked in from ${meta.ip ?? "?"} (build ${meta.build ?? "?"}, nothing to send)`);
+  else if (body.checkin) log(`${dev}: ${app ? `${app} (standalone game)` : "arcade"} checked in from ${meta.ip ?? "?"} (${app ? "" : `build ${meta.build ?? "?"}, `}nothing to send)`);
   return { status: 200, json: { acked, new: fresh, dup, bad } };
 }
 
@@ -106,7 +117,7 @@ async function status() {
     if (!dev || out[dev]) continue;
     const { ids, meta } = await deviceState(dev);
     out[dev] = { lines: ids.size, last_seen: meta.last_seen || 0, last_new: meta.last_new || 0, last_checkin: meta.last_checkin || 0,
-      build: meta.build || "", ip: meta.ip || "", dropped: meta.dropped || 0 };
+      build: meta.build || "", ip: meta.ip || "", dropped: meta.dropped || 0, apps: meta.apps || {} };
   }
   return out;
 }

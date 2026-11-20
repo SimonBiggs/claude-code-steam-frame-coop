@@ -210,7 +210,7 @@ const TELEMETRY_STORE = join(HOME, ".cache/duo-arena/telemetry");
 
 /** Every machine's real RUN lines, as the Steam Machine received them: [{device, recv, ...run}] (test lines never
  *  arrive; "push_test" is the receiver's own test game and is left out). */
-export async function playRuns(o: { since?: string; game?: string } = {}) {
+export async function playRuns(o: { since?: string; game?: string; standalone?: boolean } = {}) {
   const out: any[] = [];
   for (const f of await readdir(TELEMETRY_STORE).catch(() => [] as string[])) {
     if (!f.endsWith(".jsonl")) continue;
@@ -219,6 +219,7 @@ export async function playRuns(o: { since?: string; game?: string } = {}) {
       try {
         const e = JSON.parse(l), r = e.run || {};
         if (r.game === "push_test" || (o.game && r.game !== o.game) || (o.since && String(r.date) < o.since)) continue;
+        if (!!r.standalone !== !!o.standalone) continue;  // standalone games' PlayReport lines only with {standalone: true}
         out.push({ device: e.device, recv: e.recv, ...r });
       } catch {}
     }
@@ -517,6 +518,57 @@ export async function debt() {
         if ((m.checkins || []).filter((t: number) => now - t < 7 * 86400 && t > (m.last_new || 0)).length >= 3)
           issues.push({ kind: "telemetry-no-runs", what: `${f.slice(0, -10)} started the arcade 3+ times this week since its last RUN line (${m.last_new ? iso(m.last_new) : "never"})`,
             fix: "only menus, or rounds end without Telemetry.run / the push fails: ask, or run tools/telemetry-lan-test on that Deck while it's idle" });
+      }
+    }
+    // Every device, every game of ours (2026-11-20 audit): Steam says a device played the arcade or a standalone game
+    // (play-record's sessions.json: gameprocess_log of the TV and every Deck), so that device must have checked in
+    // with duo-telemetry-recv around then (arcade: core/telemetry_push.gd; standalone games: tools/play_report.gd,
+    // checks-ins under meta.apps[slug]). Receiver names are host names (samuel-steamdeck); play-record's are aliases.
+    {
+      const now = Date.now() / 1000, ARCADE_PUSH = Date.parse("2026-11-11T12:00:00") / 1000;
+      const alias = (h: string) => h === "steammachine" ? "tv" : h.endsWith("-steamdeck") ? h.slice(0, -10) + "-deck" : h;
+      const metas: Record<string, any> = {};
+      for (const f of await readdir(TELEMETRY_STORE).catch(() => [] as string[])) {
+        if (!f.endsWith(".meta.json") || f.startsWith("lan-test-")) continue;
+        metas[alias(f.slice(0, -10))] = JSON.parse(await readFile(join(TELEMETRY_STORE, f), "utf8").catch(() => "{}"));
+      }
+      const sessions: any[] = JSON.parse(await readFile(join(HOME, "GodotProjects/play-record/data/sessions.json"), "utf8").catch(() => "[]"));
+      const norm = (x: string) => x.toLowerCase().replace(/[^a-z0-9]/g, "");
+      const iso = (t: number) => new Date(t * 1000).toISOString().slice(0, 16).replace("T", " ");
+      const flagged = new Set<string>();
+      for (const s of sessions) {
+        const cmd = String(s.cmd || ""), a = Number(s.start), b = Number(s.end) || now;
+        if (b - a < 120 || now - b < 600 || now - a > 14 * 86400) continue;
+        const st = cmd.match(/\/Games\/([A-Za-z0-9]+)\/run\.sh/);
+        const arcade = /DuoArena\/run\.sh|duo-arena\/launch\.sh/.test(cmd);
+        if (!arcade && !st) continue;
+        let since = ARCADE_PUSH, ins: number[] = [], what = "the arcade";
+        const m = metas[s.device] || {};
+        if (arcade) ins = [...(m.checkins || []), m.last_checkin || 0, m.last_new || 0];
+        else {
+          // only once this device has a build with PlayReport (game-deploy-deck marks the first such deploy)
+          const mk = await stat(join(HOME, ".cache/game-deployed", `${st![1]}.${s.device}.play-report`)).catch(() => null);
+          if (!mk) continue;
+          since = mk.mtimeMs / 1000; what = st![1];
+          const ap = Object.entries(m.apps || {}).find(([k]) => norm(k) === norm(st![1]))?.[1] as any || {};
+          ins = [...(ap.checkins || []), ap.last_checkin || 0, ap.last_new || 0];
+        }
+        if (a < since || ins.some(t => t >= a - 120 && t <= b + 600)) continue;
+        const key = `${s.device}|${what}`;
+        if (flagged.has(key)) continue;
+        flagged.add(key);
+        issues.push({ kind: "telemetry-device-silent", what: `${s.device} played ${what} for ${Math.round((b - a) / 60)} min from ${iso(a)} (Steam) but never checked in with duo-telemetry-recv: its play is invisible to the play record`,
+          fix: arcade ? `while ${s.device} is idle: tools/telemetry-lan-test ${s.device}; on the device grep 'TELEMETRY PUSH' ~/DuoArena/game/.dev/game.log (is the build current? DUO_TELEMETRY_PUSH=0 in its launcher?)`
+            : `on ${s.device}: grep 'PLAY REPORT' ~/Games/${what}/game/.dev/game.log; is addons/play_report there and its autoload on (play-report-install --check)? redeploy with game-deploy-deck` });
+      }
+      // Every standalone Godot game carries the current shared PlayReport (one source: duo-arena/tools/play_report.gd).
+      for (const d of await readdir(join(HOME, "GodotProjects")).catch(() => [] as string[])) {
+        if (/^(duo-arena|wt-|smoke-test|play-record|\.)|-backup$|-build$/.test(d)) continue;
+        const P = join(HOME, "GodotProjects", d);
+        if (!(await stat(join(P, "project.godot")).catch(() => null)) || !(await stat(join(P, ".git")).catch(() => null))) continue;
+        const r = await sh(`${HOME}/.local/bin/play-report-install --check ${JSON.stringify(P)}`);
+        if (r.code !== 0) issues.push({ kind: "play-report-missing", what: `${d} has no (or an old) PlayReport: its play never reaches the Steam Machine`,
+          fix: `play-report-install ${P} && commit (game-deploy-deck also does it on the next deploy)` });
       }
     }
     const seen = checkins.length ? `; machines that started the arcade and reached the Steam Machine this week: ${checkins.join(", ")} (so they can send; no rounds finished)` : "; no machine has started the arcade and checked in this week either";

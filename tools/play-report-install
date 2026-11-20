@@ -1,0 +1,31 @@
+#!/bin/bash
+# play-report-install PROJECT_DIR...: put the shared PlayReport autoload (tools/play_report.gd, the ONE source) into
+# a standalone Godot game as addons/play_report/play_report.gd + an autoload line, so the game tells the Steam
+# Machine when it is played (duo-telemetry-recv). Idempotent; prints what changed. game-deploy-deck runs it on every
+# deploy, so a deployed game can't be silent. dev.debt "play-report-missing"/"play-report-stale" checks the repos.
+#   play-report-install ~/GodotProjects/jump-platformer        play-report-install --check DIR  (exit 1 if not current)
+set -u
+SRC="$(dirname "$(readlink -f "$0")")/play_report.gd"
+[ -f "$SRC" ] || SRC=~/GodotProjects/duo-arena/tools/play_report.gd
+check=0; [ "${1:-}" = --check ] && { check=1; shift; }
+rc=0
+for P in "$@"; do
+  P=$(realpath "$P"); pg="$P/project.godot"
+  [ -f "$pg" ] || { echo "⚠ play-report-install: $P has no project.godot" >&2; rc=1; continue; }
+  case "$P" in */duo-arena|*/wt-*|*/.duo-arena-stage) echo "play-report-install: $P is the arcade (it has core/telemetry_push.gd): skipped"; continue ;; esac
+  dst="$P/addons/play_report/play_report.gd"
+  if [ $check = 1 ]; then
+    cmp -s "$SRC" "$dst" && grep -q '^PlayReport="\*res://addons/play_report/play_report.gd"' "$pg" || { echo "$P: PlayReport missing or stale"; rc=1; }
+    continue
+  fi
+  if ! cmp -s "$SRC" "$dst"; then mkdir -p "$(dirname "$dst")"; cp "$SRC" "$dst"; echo "$P: play_report.gd updated"; fi
+  if ! grep -q '^PlayReport=' "$pg"; then
+    if grep -q '^\[autoload\]' "$pg"; then
+      sed -i 's|^\[autoload\]$|[autoload]\n\nPlayReport="*res://addons/play_report/play_report.gd"|' "$pg"
+    else
+      printf '\n[autoload]\n\nPlayReport="*res://addons/play_report/play_report.gd"\n' >> "$pg"
+    fi
+    echo "$P: PlayReport autoload added"
+  fi
+done
+exit $rc
