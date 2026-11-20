@@ -829,6 +829,8 @@ func _scan_text() -> String:
 			continue
 		if String(main.get_path_to(n)).contains("WristMenu"):
 			continue  # core/vr_rig.gd's wrist MENU button (the button's name, like PAUSED)
+		if BotKit.core_prompt(n):
+			continue  # shared core prompts: core/first_goal.gd's first goal, core/pick_orbs.gd's VR "how do I choose" line
 		if not (n as Node).call("is_visible_in_tree"):
 			continue
 		var in_cue := false
@@ -892,3 +894,4 @@ func _cue_checks(mode: String) -> void:
 		kit.assert_true(unplug_slot < 0 or cues.has("cue_plug"), "SIMPLE: the bolt showed for an unplugged pad")
 		kit.assert_true(main.hud.join_cue == null or cues.has("join_cue"), "SIMPLE: the join cue showed for a spare pad")
 	kit.assert_true(bad_text.is_empty(), "%s: SIMPLE: no how-to text on this machine" % mode)
+

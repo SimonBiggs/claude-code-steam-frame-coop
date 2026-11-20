@@ -294,6 +294,8 @@ func _scan_text() -> String:
 			continue
 		if main.vr_rig != null and String(main.get_path_to(n)).contains("WristMenu"):
 			continue  # the core wrist menu button (not the game's text)
+		if BotKit.core_prompt(n):
+			continue  # shared core prompts: core/first_goal.gd's first goal, core/pick_orbs.gd's VR "how do I choose" line
 		if not (n as Node).call("is_visible_in_tree"):
 			continue
 		if n is Control and (n as Control).modulate.a < 0.05:
@@ -871,3 +873,4 @@ func _simple_checks() -> void:
 				kit.assert_true(main.toys.touched.has(toy), "the cockpit %s reacted to a touch" % toy)
 	else:
 		kit.assert_true(main.toys.trees_thrown > 0 and main.toys.wobbles_seen > 0, "client: the thrown tree and the wobble were mirrored")
+

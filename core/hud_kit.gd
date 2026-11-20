@@ -1524,7 +1524,9 @@ class VrCard extends Node3D:
 		# (cards made in the same frame are still fading in: count every placed, visible panel that isn't leaving)
 		var others: Array[Node3D] = []
 		for o in get_tree().root.find_children("*", "Node3D", true, false):
-			if o != self and o.has_meta("vr_placed") and (o as Node3D).is_visible_in_tree() and not is_ancestor_of(o) \
+			# (a card with meta "vr_yields", core/first_goal.gd's prompt, gets out of the way itself: nobody steps aside
+			# for it, else a game's card stepped up onto the pick orbs, Paint and Guess 2026-11-20)
+			if o != self and o.has_meta("vr_placed") and not o.has_meta("vr_yields") and (o as Node3D).is_visible_in_tree() and not is_ancestor_of(o) \
 					and not (o is VrCard and (o as VrCard)._hiding) \
 					and not (o is Label3D and ((o as Label3D).text.strip_edges() == "" or (o as Label3D).modulate.a < 0.1)):
 				others.append(o as Node3D)

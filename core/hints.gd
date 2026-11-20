@@ -57,6 +57,7 @@ func _enter_tree() -> void:
 	# After core/party.gd samples input (-100), before the game's _process (0): when a button closes the
 	# intro, dismiss_intro() guards it before the game can read it as a press.
 	process_priority = -50
+	add_to_group("hints")  # core/first_goal.gd waits while an intro card is up
 
 
 ## Register a TV view: `root` is that view's UiKit.ui_root; slot = the player index it belongs to
@@ -432,6 +433,7 @@ class HintPill extends Control:
 	var _s := 1.0
 
 	func _ready() -> void:
+		add_to_group("hint_pill")  # core/first_goal.gd steps back while a game's own hint shows
 		mouse_filter = Control.MOUSE_FILTER_IGNORE
 		set_anchors_and_offsets_preset(Control.PRESET_FULL_RECT)
 		_s = UiKit.scale_of(self)
@@ -453,7 +455,8 @@ class HintPill extends Control:
 		var tw := UiKit.font(false).get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, UiKit.font_size("body", _s)).x
 		# (the label's own font can be wider than UiKit.font's measure: one word never wraps, longer text
 		# gets a little room, so "DIG!" doesn't break into "DI / G!")
-		if not text.strip_edges().contains(" "):
+		# (a short hint never wraps either: "A = JUMP" broke into "A = / JUMP" in Balloon Pop, 2026-11-20)
+		if not text.strip_edges().contains(" ") or text.strip_edges().length() <= 24:
 			l.autowrap_mode = TextServer.AUTOWRAP_OFF
 		l.custom_minimum_size.x = minf(tw * 1.1 + 8.0 * _s, max_w)
 		h.add_child(l)

@@ -663,3 +663,21 @@ var started_unix := Time.get_unix_time_from_system()
 func my_runs(game_id: String) -> Array:
 	var runs: Array = load("res://core/telemetry.gd").read(game_id)
 	return runs.filter(func(e: Variant) -> bool: return e is Dictionary and float((e as Dictionary).get("t", 0)) >= started_unix - 2.0)
+
+
+## Is this text part of a shared CORE prompt rather than the game's own words? core/first_goal.gd's card (meta
+## "first_goal"), the pick orbs' VR "how do I choose" line (core/pick_orbs.gd "PickHint"), the pause menu / VR menu /
+## wrist menu (core/pause_menu.gd, core/vr_menu.gd). SIMPLE_MODE bots ("no how-to text") skip these: one list for every
+## such bot (Mech Titans, Party Board and Tiny Town each had their own, 2026-11-20).
+static func core_prompt(n: Node) -> bool:
+	if n.name == &"PickHint":
+		return true
+	var x := n
+	while x != null:
+		if x.has_meta("first_goal") or String(x.name).contains("WristMenu") or x.is_in_group("pause_menu"):
+			return true
+		var sc: Script = x.get_script()
+		if sc != null and sc.resource_path in ["res://core/vr_menu.gd", "res://core/pause_menu.gd", "res://core/first_goal.gd"]:
+			return true
+		x = x.get_parent()
+	return false

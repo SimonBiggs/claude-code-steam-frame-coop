@@ -22,6 +22,7 @@ const SERVICES := [
 	{"name": "VrWatch", "path": "res://core/vr_watch.gd"},  # the arcade survives SteamVR crashing (back flat, rejoins)
 	{"name": "TvShare", "path": "res://core/tv_share.gd"},  # a VR launch never takes the TV off another game
 	{"name": "TvSeat", "path": "res://core/tv_seat.gd"},  # pads at the TV join a streamed VR host (a local TV screen)
+	{"name": "FirstGoal", "path": "res://core/first_goal.gd"},  # every game: what you are + the one thing to do first
 	{"name": "VrViewWatch", "path": "res://core/vr_view_watch.gd", "needs": "res://tests/bot_end.gd"},
 	{"name": "QuitAfter", "path": "res://core/quit_after.gd", "needs": "res://tests/bot_end.gd"},
 ]

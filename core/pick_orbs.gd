@@ -33,6 +33,8 @@ const Seeded := preload("res://core/seeded.gd")
 ## Every orb is in this group while it shows: VR cards, banners and words move clear of it (UiKit.vr_dodge) and
 ## core/vr_view_check.gd fails a VR bot whose panel covers one. A game never lifts its orbs out of a card's way.
 const KEEP_CLEAR := preload("res://core/vr_view_check.gd").KEEP_CLEAR
+## Every pick orb while it shows (KEEP_CLEAR also holds games' own must-see things): core/first_goal.gd waits for a pick.
+const PICK_GROUP := "pick_orb"
 const FOR_OTHERS := preload("res://core/vr_view_check.gd").FOR_OTHERS_META
 const UiKit := preload("res://core/ui_kit.gd")
 
@@ -219,6 +221,7 @@ func show_orbs(new_stage: String, list: Array, origin: Vector3, gap: float = 2.6
 		o2.collision_layer = collision_layer
 		o2.collision_mask = 0
 		o2.add_to_group(KEEP_CLEAR)
+		o2.add_to_group(PICK_GROUP)
 		if bool(_o("for_others", false)):
 			o2.set_meta(FOR_OTHERS, true)
 		if String(_o("group", "")) != "":

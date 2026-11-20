@@ -48,6 +48,13 @@ static func run(game_id: String, data: Dictionary) -> Dictionary:
 			d["secs"] = snappedf((now - from) / 1000.0, 0.1)
 			d["secs_auto"] = true
 	_last_ms[game_id] = now
+	var tree := Engine.get_main_loop() as SceneTree
+	var fg: Node = tree.root.get_node_or_null("FirstGoal") if tree != null and tree.root != null else null
+	if fg != null and fg.has_method("run_fields"):  # core/first_goal.gd: seconds to the first small win
+		var f: Dictionary = fg.call("run_fields", game_id)
+		for k in f:
+			if not d.has(k):
+				d[k] = f[k]
 	d["game"] = game_id
 	d["t"] = int(Time.get_unix_time_from_system())
 	d["date"] = Time.get_datetime_string_from_system()
