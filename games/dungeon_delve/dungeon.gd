@@ -37,6 +37,9 @@ var light: OmniLight3D
 var prac_ring: MeshInstance3D  ## glowing ring under the practice pot
 var dummy_ring: MeshInstance3D  ## glowing ring under the practice dummy
 var dummy_id := -1
+## The practice pot: right by where the heroes pop in, so the first thing a new player does (A) works at once
+## (it stood by the far wall under Cinder's hoard label: 2026-11-20).
+const PRAC_POT := Vector3(-1.5, 0.0, 2.3)
 var big_id := -1
 var _flare: Dictionary = {}  ## prop id -> seconds left
 var _wobble: Dictionary = {}  ## prop id -> seconds left
@@ -145,7 +148,7 @@ func _torch_spots(r: int) -> Array:
 func _pot_spots(r: int) -> Array:
 	var c := center(r)
 	if r == 0:
-		return [c + Vector3(-2.8, 0.0, 0.4), c + Vector3(3.4, 0.6, -3.4), c + Vector3(-3.4, 0.6, -3.4)]
+		return [c + PRAC_POT, c + Vector3(3.4, 0.6, -3.4), c + Vector3(-3.4, 0.6, -3.4)]
 	return [c + Vector3(-3.5, 0.6, -3.5), c + Vector3(3.5, 0.6, 3.3), c + Vector3(-3.5, 0.6, 2.4), c + Vector3(2.0, 0.6, -3.6)]
 
 
@@ -193,7 +196,7 @@ func _build_props() -> void:
 	# The practice pot (for the TV heroes) and the practice dummy (for the VR knight).
 	props[0]["prac"] = true
 	prac_ring = _ring(Color(0.4, 1.0, 0.8))
-	prac_ring.position = Vector3(-2.8, 0.03, 0.4)
+	prac_ring.position = PRAC_POT + Vector3(0.0, 0.03, 0.0)
 	var dummy := _make_dummy()
 	var did := _add(DUMMY, 0, Vector3(0.35, 0.0, 1.45), dummy, 0.36, Vector3(0, 0.95, 0))
 	props[did]["prac"] = true

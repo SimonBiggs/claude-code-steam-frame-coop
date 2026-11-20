@@ -4,7 +4,7 @@ extends RefCounted
 ## pic._p(x, y) / pic._circle(x, y, r, c) / pic._poly(pts, c) / pic._eye(x, y, r) / pic.draw_*(...), size = pic.size,
 ## t = the picture's clock, bob = its gentle bob, color = the card's colour.
 
-const NAMES: Array[String] = ["cinder", "hoard", "friend", "rumble"]
+const NAMES: Array[String] = ["cinder", "hoard", "friend", "rumble", "smudge", "smudge_happy"]
 
 
 static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
@@ -34,6 +34,35 @@ static func draw(pic, kind: String, t: float, bob: float, color: Color) -> void:
 				pic.draw_arc(pic._p(0.86 + f * 0.08, 0.36 - f * 0.28), (0.03 + f * 0.04) * size.x, 0.0, TAU, 16,
 					Color(0.85, 0.85, 0.9, 0.8 * (1.0 - f)), 0.014 * size.x)
 			pic._circle(0.2, 0.9, 0.04 + 0.01 * sin(t * 4.0), color.lightened(0.3))
+		"smudge", "smudge_happy":  # Smudge, Cinder's big purple cousin (story.gd): grumpy brows, or a big happy smile after the ending
+			var body := Color(0.55, 0.4, 0.85)
+			var belly := Color(0.85, 0.78, 1.0)
+			var happy := kind == "smudge_happy"
+			var flap := sin(t * (8.0 if happy else 4.0)) * 0.06
+			pic._poly([[0.36, 0.5 + bob], [0.08, 0.2 + bob - flap], [0.18, 0.44 + bob], [0.04, 0.48 + bob - flap * 0.5], [0.3, 0.62 + bob]], Color(0.35, 0.25, 0.6))
+			pic._poly([[0.3, 0.78 + bob], [0.06, 0.86 + bob], [0.02, 0.76 + bob], [0.26, 0.68 + bob]], body.darkened(0.15))
+			pic._circle(0.45, 0.66 + bob, 0.24, body)
+			pic._circle(0.5, 0.72 + bob, 0.14, belly)
+			pic._circle(0.64, 0.4 + bob, 0.2, body)
+			pic._circle(0.77, 0.47 + bob, 0.11, body.lightened(0.1))
+			pic._poly([[0.54, 0.25 + bob], [0.48, 0.08 + bob], [0.6, 0.22 + bob]], belly)
+			pic._poly([[0.67, 0.22 + bob], [0.7, 0.05 + bob], [0.75, 0.24 + bob]], belly)
+			pic._eye(0.66, 0.37 + bob, 0.065)
+			if happy:
+				pic.draw_arc(pic._p(0.74, 0.48 + bob), 0.07 * size.x, 0.2, 2.9, 12, Color(0.25, 0.12, 0.3), 0.016 * size.x)
+				pic._circle(0.6, 0.48 + bob, 0.035, Color(1.0, 0.55, 0.7, 0.75))
+				for k in 3:  # little hearts: he's got friends now
+					var f := fmod(t * 0.7 + k * 0.33, 1.0)
+					var hc := Color(1.0, 0.4, 0.6, 1.0 - f)
+					pic._circle(0.86 + 0.02 * k, 0.3 - 0.25 * f, 0.022, hc)
+			else:
+				pic.draw_line(pic._p(0.58, 0.29 + bob), pic._p(0.72, 0.33 + bob), Color(0.2, 0.1, 0.25), 0.025 * size.x)  # a cross brow
+				pic.draw_arc(pic._p(0.75, 0.54 + bob), 0.05 * size.x, 3.5, 5.9, 10, Color(0.25, 0.12, 0.3), 0.014 * size.x)  # a pout
+				for k in 2:  # grumpy smoke puffs
+					var f2 := fmod(t * 0.5 + k * 0.5, 1.0)
+					pic._circle(0.88 + f2 * 0.06, 0.4 - f2 * 0.3, 0.025 + f2 * 0.03, Color(0.5, 0.45, 0.55, 0.8 * (1.0 - f2)))
+			for x in [0.36, 0.54]:
+				pic._circle(x, 0.9 + bob * 0.5, 0.06, body.darkened(0.15))
 		"hoard":  # Cinder's hoard: a glittering heap of gold coins with gems, growing as the family plays
 			var gold := Color(1.0, 0.8, 0.28)
 			pic._poly([[0.1, 0.86], [0.5, 0.42 + bob * 0.3], [0.9, 0.86]], gold.darkened(0.2))
