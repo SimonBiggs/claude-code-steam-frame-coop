@@ -56,7 +56,7 @@ const LINES := {
 static func save_defaults() -> Dictionary:
 	return {"world": -1, "cleared": 0, "visits": [0, 0, 0, 0, 0, 0, 0], "sparks": 0, "gears": 0, "gear_isles": 0, "bolts": 0,
 		"best_bolts": 0, "crabs": 0, "kings": 0, "daily": "", "daily_done": "", "mode": "", "intro": false, "grown": 0,
-		"tiny": 0, "hats": {}, "ch2": false}
+		"tiny": 0, "hats": {}, "ch2": false, "heat": 0, "best_streak": 0}
 
 
 ## An older save's visits list grows to every island (an island added later starts at 0 visits).

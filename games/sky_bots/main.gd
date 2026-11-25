@@ -26,6 +26,7 @@ extends Node3D
 ## Modes as in games/engine_template: local (split screen), host (VR on the Steam Frame, simulates everything), client
 ## (a TV / Deck machine: its robots move locally and instantly, the rest is mirrored from snapshots).
 
+const HotStreak := preload("res://core/hot_streak.gd")
 const NetScript := preload("res://core/net.gd")
 const PauseMenuScript := preload("res://core/pause_menu.gd")
 const SfxScript := preload("res://core/sfx.gd")
@@ -110,6 +111,7 @@ var send_t := 0.0
 var hint_t := 0.0
 var asked := {}  ## TV machine: bolts already asked for
 var run := {}  ## host: this island's numbers (telemetry)
+var hot_streak := 0  ## host: clean islands (nobody fell) in a row this sitting (core/hot_streak.gd)
 var told := {}  ## host: feature hints told this session
 var mode := "brave"
 var season := "spring"
@@ -147,6 +149,9 @@ func _ready() -> void:
 		save.data.world = Seeded.fresh_seed()  # this family's own islands
 		save.mark_dirty()
 	if Story.fix_save(save.data):
+		save.mark_dirty()
+	if int(save.data.get("heat", 0)) > 0:
+		save.data.heat = HotStreak.session_start(int(save.data.heat))  # a new sitting warms up one step gentler
 		save.mark_dirty()
 	sfx = SfxScript.new()
 	add_child(sfx)
@@ -375,6 +380,9 @@ func _go_island(i: int) -> void:
 	else:
 		var visits: Array = save.data.visits
 		desc = {"i": i, "s": Seeded.derive(int(save.data.world), "island %d visit %d" % [i, int(visits[i])]), "m": mode}
+		var heat := mini(int(save.data.get("heat", 0)), HotStreak.cap(mode))
+		if heat > 0:
+			desc["h"] = heat  # HOT STREAK: the family's islands ramp (TODAY'S ISLAND stays the same for everyone)
 		visits[i] = int(visits[i]) + 1
 		save.data.visits = visits
 		if OS.has_environment("SKY_SEED") and not has_meta("seeded"):  # (bots, screenshots: replay one island)
@@ -1128,6 +1136,11 @@ func _island_cleared(by: int) -> void:
 	save.data.sparks = int(save.data.sparks) + 1
 	save.data.bolts = int(save.data.bolts) + int(run.get("bolts", 0))
 	save.data.best_bolts = maxi(int(save.data.best_bolts), int(run.get("bolts", 0)))
+	var hs := HotStreak.step(int(save.data.get("heat", 0)), hot_streak, int(run.get("falls", 0)), maxi(1, _people()), mode)
+	var heat_was := int(save.data.get("heat", 0))
+	hot_streak = int(hs[1])
+	save.data.heat = int(hs[0])
+	save.data.best_streak = maxi(int(save.data.get("best_streak", 0)), hot_streak)
 	save.mark_dirty()
 	_telemetry("clear")
 	if first_spark and _sparks_lit() == G.ISLANDS:
@@ -1138,6 +1151,14 @@ func _island_cleared(by: int) -> void:
 		save.data.ch2 = true
 	else:
 		_story("spark")
+	match int(hs[2]):
+		1:
+			_story_beat({"who": "HOT STREAK", "line": HotStreak.line(hot_streak), "pic": "grumble", "color": Color(1.0, 0.55, 0.2),
+				"duration": 3.5})
+		-1:
+			_story_beat({"who": "GRANNY GIZMO", "line": "Phew! A bit easier now.", "pic": "gizmo", "color": Story.COLOR, "duration": 3.5})
+	if int(hs[0]) != heat_was:
+		print("Hot streak: heat %d -> %d (streak %d, falls %d)" % [heat_was, int(hs[0]), hot_streak, int(run.get("falls", 0))])
 	if vr_rig != null:
 		vr_rig.pulse(VrRig.RIGHT, 0.6, 0.2)
 		vr_rig.pulse(VrRig.LEFT, 0.6, 0.2)
@@ -1160,7 +1181,8 @@ func _telemetry(end: String) -> void:
 		"cpu_warps": warps, "sparks": int(save.data.sparks), "gears": int(save.data.gears), "grown": Story.power(save.data),
 		"tiny_all": int(save.data.tiny), "hats": Hats.unlocked(int(save.data.tiny)) - 1, "boxes_all": (level.lv.get("boxes", []) as Array).size(),
 		"cp": int(net.state_get("cp", 0)), "jobs_giant_all": giant.jobs_done if giant != null else 0,
-		"job_moves_all": giant.job_moves if giant != null else 0}, true)
+		"job_moves_all": giant.job_moves if giant != null else 0, "heat": int((level.lv.desc as Dictionary).get("h", 0)),
+		"streak": hot_streak}, true)
 	Telemetry.run(GAME_ID, info)
 
 
