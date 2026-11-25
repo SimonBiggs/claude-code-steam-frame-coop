@@ -56,7 +56,7 @@ try {
   if (!(st["test-checkin"]?.last_checkin > 0) || st["test-checkin"]?.lines !== 0) fail(`test-checkin: not listed as checked in with 0 lines (${JSON.stringify(st["test-checkin"])})`);
   recv.kill(); real.kill();
   const log = await recvLog;
-  if (!/test-checkin: checked in from /.test(log)) fail("the receiver didn't log test-checkin's check-in");
+  if (!/test-checkin: (arcade )?checked in from /.test(log)) fail("the receiver didn't log test-checkin's check-in");
   for (const dev of ["test-host", "test-client"])
     if (!new RegExp(`${dev}: 1 new, 1 already here`).test(log)) fail(`${dev}: the receiver didn't count the resend as a duplicate`);
   console.log(log.trim());
