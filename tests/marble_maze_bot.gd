@@ -3,7 +3,9 @@ extends Node
 ## air and bumpers); the tilt bot (local / non-VR host) tilts the board the way the marbles want to go.
 ## BOT_PLAYERS=N: marbles to have (local split screen: up to 5, plus P1 tilting; TV machine: up to 6).
 ## BOT_LEVEL=n (local): start at level n.
-## BOT_CHAOS=1: random tilting and steering instead (exercises falls, bumpers, respawns and time-up).
+## BOT_CHAOS=1: random tilting and steering instead (exercises falls, bumpers, respawns and time-up). Random tilting
+## rarely finishes a maze (or TODAY'S RACE) in a 150 s run, so chaos checks what it exercises instead: marbles fall
+## AND come back (no fall lasts over CHAOS_FALL_MAX s), they roll about (CHAOS_MIN_CELLS cells), nothing freezes.
 ## Local mode also joins one marble by pressing A on a fake controller, and checks Start does NOT join.
 ## Teamwork: while a level's team gates are shut, marbles split up onto the pads (the BFS treats shut
 ## gates as walls and teleporters as links); marbles that are home steer their guide star to the
@@ -191,7 +193,19 @@ func _physics_process(delta: float) -> void:
 		_report(mode)
 
 
+const CHAOS_FALL_MAX := 3.0
+const CHAOS_MIN_CELLS := 6
+var chaos_fall_max := 0.0
+var chaos_cells := {}
+
+
 func _chaos(_delta: float) -> void:
+	for p in main.players:
+		if p.index > 0 and p.active and main.board != null:
+			if p.falling:
+				chaos_fall_max = maxf(chaos_fall_max, p.fall_t)
+			elif main.state == "play":
+				chaos_cells["%d:%s" % [main.level, main.board.cell_of(Vector2(p.lp.x, p.lp.z))]] = true
 	for p in main.players:
 		if p.index > 0 and p.is_local():
 			p.bot_steer = Vector2(sin(t * 1.3 + p.index), cos(t * 0.7 + p.index * 2.0))
@@ -853,7 +867,15 @@ func _exit_tree() -> void:
 	# The verdict (tests/bot_end.gd prints BOT RESULT from the counted checks, in local, host and joining runs).
 	if main != null and is_instance_valid(main) and not OS.has_environment("BOT_COUNT"):
 		# (A 60 s local run is still rolling through its first maze: there, the maze must be in play.)
-		BotEnd.check(cleared >= 1 or (t < 90.0 and main.state == "play"), "a maze was cleared, or a short run is playing one (mode %s, t=%.0f, level %d, state %s)" % [main.net.mode, t, main.level, main.state])
+		var chaos := OS.has_environment("BOT_CHAOS")
+		if chaos and main.net.mode != "client":
+			# Random tilting: finishing isn't the point (2026-11-25: TODAY'S maze uncleared after 150 s on some dates).
+			BotEnd.check(_falls() >= 1, "chaos tilting made a marble fall (falls %d)" % _falls())
+			BotEnd.check(chaos_fall_max <= CHAOS_FALL_MAX, "every fallen marble came back within %.0f s (longest %.1f s)" % [CHAOS_FALL_MAX, chaos_fall_max])
+			BotEnd.check(chaos_cells.size() >= CHAOS_MIN_CELLS, "chaos marbles rolled about (%d cells, want %d)" % [chaos_cells.size(), CHAOS_MIN_CELLS])
+			BotEnd.check(["play", "intro", "clear", "pick", "practice", "wait", "over"].has(main.state), "the game is still running (state %s)" % main.state)
+		if not chaos:
+			BotEnd.check(cleared >= 1 or (t < 90.0 and main.state == "play"), "a maze was cleared, or a short run is playing one (mode %s, t=%.0f, level %d, state %s)" % [main.net.mode, t, main.level, main.state])
 		BotEnd.check(main.state != "over" or not main.simple, "no game over in simple mode")
 		var b3: Dictionary = get_meta("deep3", {})
 		var ks3: Array = b3.keys()
@@ -864,7 +886,7 @@ func _exit_tree() -> void:
 		# A fresh save starts with TODAY'S RACE: a default local run long enough to finish it must have (cups and times
 		# are checked in _race_checks); a TV machine shows the race clock.
 		var fresh := not (OS.has_environment("BOT_LEVEL") or OS.has_environment("BOT_LESSONS") or OS.has_environment("BOT_STORY_I"))
-		if fresh and main.net.mode == "local" and t >= 115.0:
+		if fresh and main.net.mode == "local" and t >= 115.0 and not chaos:
 			BotEnd.check(b3.has("race_done"), "a fresh save's TODAY'S RACE finished in a %.0f s run (%s)" % [t, str(ks3)])
 		if fresh and t >= 40.0:
 			BotEnd.check(b3.has("clock3d") or b3.has("race_done"), "the race clock showed (%s, %s)" % [main.net.mode, str(ks3)])
