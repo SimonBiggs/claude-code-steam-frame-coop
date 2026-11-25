@@ -35,6 +35,7 @@ const MAX_PICS := 4  # pictures on a tile
 const ENTRIES := [
 	{"id": "sb-hot-streak", "date": "2026-11-25", "game": "sky_bots", "pic": "grumble", "line": "No falls? Trickier islands!"},
 	{"id": "mm-hot-streak", "date": "2026-11-25", "game": "marble_maze", "pic": "kaiju", "line": "No falls? Trickier mazes!"},
+	{"id": "delve-way", "date": "2026-11-25", "game": "dungeon_delve", "pic": "cinder", "line": "Follow the gold arrows!", "try": {"DD_TRY": "brave"}},
 	{"id": "rw-solo-pilot", "date": "2026-11-20", "game": "rocket_workshop", "pic": "engineer", "line": "One pad? You fly the rocket!"},
 	{"id": "pp-all-stars", "date": "2026-11-20", "game": "paper_planes", "pic": "star", "line": "Three stars? Next flight!"},
 	{"id": "mm-light-up", "date": "2026-11-20", "game": "marble_maze", "pic": "kaiju", "line": "Light up Bobo's town!"},

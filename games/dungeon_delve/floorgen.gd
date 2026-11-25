@@ -771,6 +771,100 @@ static func route(f: Dictionary, a: int, b: int, open_bits: int) -> Array:
 	return []
 
 
+## WHAT NOW? (deep.floor_goal, the gold chevrons + the pill): the way on from pos. st: "walk" (doors you can pass
+## now), "open" (doors open), "keys" (held), "seen" / "cleared" (room bits), "keys_at" (keys lying about, world),
+## "stairs" (world or INF), "portal" (world or null). Returns {"p": where to head now (the next doorway on the way, or
+## the thing itself in this room), "goal": the thing, "text": the line}, {} for nothing / outside the rooms. In order:
+## the portal, the stairs once they can be reached, the boss, a locked door when you hold a key, a key, the nearest
+## unseen room, a shut puzzle door's switch, a cracked wall. tests/dungeon_delve_floors_test.gd follows it alone
+## through every floor (it must reach the stairs / boss).
+static func way_on(f: Dictionary, pos: Vector3, st: Dictionary) -> Dictionary:
+	var room := room_at(f, pos)
+	if room < 0:
+		return {}
+	var walk := int(st.get("walk", 0))
+	var reach := {room: true}
+	var q: Array = [room]
+	while not q.is_empty():
+		var r: int = q.pop_front()
+		var ds: Dictionary = ((f["rooms"] as Array)[r] as Dictionary)["doors"]
+		for d in ds:
+			var di: int = ds[d]
+			if walk & (1 << di) == 0:
+				continue
+			var o: int = other_side((f["doors"] as Array)[di], r)
+			if not reach.has(o):
+				reach[o] = true
+				q.append(o)
+	var goal := Vector3.INF
+	var text := ""
+	var keys := int(st.get("keys", 0))
+	var portal: Variant = st.get("portal", null)
+	var stairs: Vector3 = st.get("stairs", Vector3.INF)
+	var boss := int(f.get("boss", -1))
+	if portal is Vector3 and reach.has(room_at(f, portal)):
+		goal = portal
+		text = "Jump in the portal!"
+	elif stairs != Vector3.INF and reach.has(room_at(f, stairs)):
+		goal = stairs
+		text = "Down the stairs!"
+	elif boss >= 0 and reach.has(boss) and int(st.get("cleared", 1)) & (1 << boss) == 0:
+		goal = room_center(f, boss)
+		text = "Beat the boss!"
+	var doors: Array = f["doors"]
+	var ob := int(st.get("open", 0))
+	if goal == Vector3.INF and keys > 0:
+		for di in doors.size():
+			var dd: Dictionary = doors[di]
+			if int(dd["type"]) in [LOCKED, BOSS] and ob & (1 << di) == 0:
+				for side in [int(dd["a"]), int(dd["b"])]:
+					if reach.has(side) and goal == Vector3.INF:
+						goal = door_inside(f, di, side, 0.8)
+						text = "Open the boss door!" if int(dd["type"]) == BOSS else "Open the gold door!"
+	if goal == Vector3.INF:
+		for kp in (st.get("keys_at", []) as Array):
+			if reach.has(room_at(f, kp)):
+				goal = Vector3((kp as Vector3).x, 0.0, (kp as Vector3).z)
+				text = "Grab the key!"
+				break
+	if goal == Vector3.INF:
+		var seen := int(st.get("seen", 1))
+		var bd := INF
+		for r2 in reach:
+			if seen & (1 << int(r2)) == 0:
+				var c := room_center(f, int(r2))
+				if pos.distance_to(c) < bd:
+					bd = pos.distance_to(c)
+					goal = c
+		if goal != Vector3.INF:
+			text = "Find the key!" if keys == 0 else "Explore!"
+	if goal == Vector3.INF:
+		for di2 in doors.size():
+			var dd2: Dictionary = doors[di2]
+			if ob & (1 << di2) != 0:
+				continue
+			if int(dd2["type"]) == PUZZLE and not (dd2["switches"] as Array).is_empty():
+				var sw: Dictionary = (f["switches"] as Array)[int((dd2["switches"] as Array)[0])]
+				if reach.has(int(sw["room"])):
+					goal = to_world(f, int(sw["room"]), sw["p"])
+					text = "Turn on both switches!"
+					break
+			elif int(dd2["type"]) == SECRET and (reach.has(int(dd2["a"])) or reach.has(int(dd2["b"]))):
+				var side2 := int(dd2["a"]) if reach.has(int(dd2["a"])) else int(dd2["b"])
+				goal = door_inside(f, di2, side2, 0.75)
+				text = "Bonk the cracked wall!"
+				break
+	if goal == Vector3.INF:
+		return {}
+	var at := goal
+	var gr := room_at(f, goal)
+	if gr >= 0 and gr != room:
+		var rt: Array = route(f, room, gr, walk)
+		if not rt.is_empty():
+			at = door_world(f, int(rt[0]))
+	return {"p": Vector3(at.x, 0.0, at.z), "goal": goal, "text": text}
+
+
 ## Logical solvability: starting with no keys, walking only through doors you can open (locked doors
 ## take a key found on the way, puzzle doors need their switches' room, secret walls get broken),
 ## which rooms can be reached? Returns the set (Dictionary room -> true).

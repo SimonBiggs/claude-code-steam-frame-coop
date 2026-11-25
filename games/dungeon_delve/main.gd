@@ -104,6 +104,7 @@ var shake := 0.0
 var _moved_pots := {}
 var guides := {}  ## local slot -> Node3D: the first-30-seconds guide (gold chevrons on the floor to what to do next)
 var guide_text := ""  ## what the guide says in the pill ("" = no guide)
+var _knight_goal := ""  ## the VR knight's last "what now?" headline (deep runs)
 
 # VR
 var headline: Label3D
@@ -704,7 +705,11 @@ func _process(delta: float) -> void:
 
 ## Where a local hero should go next in the practice room, and what the pill says: bonk the practice pot (right by
 ## where you pop in), then stand on BRAVE. [] = no guide (in a run, in the gentle rooms, on the results).
+## In a deep run: the way on (deep.floor_goal: the key, the gold door, the stairs...).
 func guide_goal(slot: int) -> Array:
+	if deep != null and deep.active and heroes.has(slot) and not results_showing():
+		var dg: Dictionary = deep.floor_goal((heroes[slot] as Hero).position)
+		return [] if dg.is_empty() else [dg["p"], String(dg["text"])]
 	if deep == null or deep.active or not heroes.has(slot) or results_showing():
 		return []
 	if int(net.state_get("room", 0)) != 0 or not String(net.state_get("phase", "")) in ["practice", "cleared"]:
@@ -750,6 +755,14 @@ func _guide(_delta: float) -> void:
 			c.rotation.y = atan2(dir.x, dir.z)
 			c.scale = Vector3.ONE * (0.6 + 0.4 * sin(k * PI))
 	guide_text = text
+	# The VR knight: the same "what now?" once on the far wall whenever it changes (not over a story card).
+	if vr_rig != null and deep != null and deep.active and net.mode != "client":
+		var kg: Dictionary = deep.floor_goal(deep._feet_of(0))
+		var kt := "" if kg.is_empty() else String(kg["text"])
+		if kt != _knight_goal and (kt == "" or get_tree().get_nodes_in_group(StoryCard.VR_GROUP).is_empty()):
+			_knight_goal = kt
+			if kt != "":
+				show_headline(kt.to_upper(), 2.5)
 
 
 func _make_guide() -> Node3D:
