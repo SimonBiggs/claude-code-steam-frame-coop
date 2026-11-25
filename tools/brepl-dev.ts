@@ -430,8 +430,8 @@ export async function debt() {
   const rootDrift = (await sh(`cd ${LIVE}; for f in ${STAGE_ROOT_FILES.join(" ")}; do [ -e $f ] && ! cmp -s $f ${STAGE}/$f && echo $f; done; diff -rq docs ${STAGE}/docs >/dev/null 2>&1 || echo docs/`)).out.trim();
   if (rootDrift) issues.push({ kind: "stage-root", what: `staging's root files differ from live: ${rootDrift.split("\n").join(", ")}`, fix: `cd ~/GodotProjects/duo-arena && rsync -a --delete docs/ ../.duo-arena-stage/docs/ && cp ${STAGE_ROOT_FILES.join(" ")} ../.duo-arena-stage/` });
   // Standalone games (game-deploy-deck): a commit to a game's repo after its last deploy to a Deck never reaches the
-  // Deck by itself (2026-11-20: Portal Explorer's launch.sh). Markers ~/.cache/game-deployed/<Slug>.<deck> = commit, dir, title.
-  const sb = (await sh(`for m in ~/.cache/game-deployed/*.*; do [ -f "$m" ] || continue; c=$(sed -n 1p "$m"); dir=$(sed -n 2p "$m"); t=$(sed -n 3p "$m"); [ -d "$dir/.git" ] || continue; git -C "$dir" diff --quiet "$c" HEAD -- . ':(exclude)tests' 2>/dev/null || echo "$(basename "$m")|$dir|$t"; done`)).out.trim();
+  // Deck by itself (2026-11-20: Portal Explorer's launch.sh). Notes (*.md, e.g. FEEDBACK.md) never change the game. Markers ~/.cache/game-deployed/<Slug>.<deck> = commit, dir, title.
+  const sb = (await sh(`for m in ~/.cache/game-deployed/*.*; do [ -f "$m" ] || continue; c=$(sed -n 1p "$m"); dir=$(sed -n 2p "$m"); t=$(sed -n 3p "$m"); [ -d "$dir/.git" ] || continue; git -C "$dir" diff --quiet "$c" HEAD -- . ':(exclude)tests' ':(exclude)*.md' 2>/dev/null || echo "$(basename "$m")|$dir|$t"; done`)).out.trim();
   for (const l of sb ? sb.split("\n") : []) { const [m, dir, title] = l.split("|"); const deck = m.slice(m.indexOf(".") + 1);
     issues.push({ kind: "standalone-behind", what: `${title} on ${deck} is behind its repo (${dir.replace(HOME, "~")})`, fix: `test it (tests/run.sh), then game-deploy-deck ${dir} "${title}" ${deck}` }); }
   // Staging must run like the TV: addons/boot (services) and project.godot (autoloads) match live (2026-10-31: no Boot in staging).
