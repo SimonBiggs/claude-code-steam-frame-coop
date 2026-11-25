@@ -30,6 +30,13 @@ const MEDALS := {"gold": Color(1.0, 0.8, 0.2), "silver": Color(0.8, 0.84, 0.9), 
 ## The old seven places' new spots in PLACES (progress.gd migrate_save: a save from before the third pass).
 const OLD_PLACES: Array[int] = [0, 1, 3, 5, 7, 9, 11]
 const BOBO_COLOR := Color(0.72, 0.5, 1.0)
+## HOT STREAK (2026-11-25): the family's one real run (TV, 11-15) cleared all nine mazes with ZERO falls, 4-23 s each,
+## so the story mazes now ramp with the team. Every second CLEAN maze in a row (no marble fell) heats the next story
+## mazes up one step (heat_spec: more holes, fewer loops, narrower doors); a maze with lots of falls cools them a step.
+## Heat is saved (save "heat") and capped by the picked mode; TODAY'S RACE never heats (the same race for everyone).
+## The validator (tests/marble_maze_deep_test.gd) proves every heat of every place still makes fair mazes.
+const HEAT_MAX := {"gentle": 1, "brave": 2, "hard": 3}
+const HEAT_EVERY := 2  # clean mazes in a row per step up
 
 ## place: shown name. pic: core/story_card.gd picture or core/ui_kit.gd icon. tile: the new thing this
 ## place brings (it sparkles in the first maze's intro). spec: core of the mazegen spec. styles: each of its three
@@ -96,7 +103,7 @@ static func place(i: int) -> Dictionary:
 static func save_defaults() -> Dictionary:
 	return {"lessons_done": false, "story_i": 0, "world": -1, "shinies": {}, "places": 0, "daily": {},
 		"mazes": 0, "falls": 0, "jar": [], "mode": "brave", "gift": "", "rack": [], "gifts": {}, "events": 0,
-		"race": {}, "race_best": [], "cups": [], "ghost": {}, "races": 0}
+		"race": {}, "race_best": [], "cups": [], "ghost": {}, "races": 0, "heat": 0, "best_streak": 0}
 
 
 ## Story maze index i -> [place index (0..), maze within it (0..2), lap (0 = the story, 1+ bonus)].
@@ -146,11 +153,52 @@ static func spec(i: int) -> Dictionary:
 
 ## Story maze i of the world `world` (a save's own seed), in a mode (worlds.gd MODES) on today's world (worlds.gd
 ## WORLDS: "" = none, the first pass's mazes).
-static func maze(world: int, i: int, mode: String = "", wd: String = "") -> Dictionary:
+static func maze(world: int, i: int, mode: String = "", wd: String = "", heat: int = 0) -> Dictionary:
 	var s := spec(i)
 	if mode != "" or wd != "":
 		s = Worlds.apply(s, mode if mode != "" else "brave", wd if wd != "" else "sunny")
+	if heat > 0:
+		s = heat_spec(s, heat)
 	return MazeGen.generate(Seeded.derive(world, "maze%d" % i), s)
+
+
+## The highest heat a mode allows.
+static func heat_cap(mode: String) -> int:
+	return int(HEAT_MAX.get(mode, HEAT_MAX["brave"]))
+
+
+## A story spec heated up `heat` steps: one more hole a step, a loop less from step 2, narrower doors.
+static func heat_spec(spec_in: Dictionary, heat: int) -> Dictionary:
+	var s := spec_in.duplicate()
+	var h := clampi(heat, 0, 3)
+	if h == 0:
+		return s
+	s["holes"] = int(s.get("holes", 0)) + h
+	if h >= 2:
+		s["loops"] = maxi(0, int(s.get("loops", 2)) - 1)
+	s["door"] = maxf(0.34, float(s.get("door", 0.5)) - 0.03 * h)
+	return s
+
+
+## After a cleared maze: [heat, streak, change]. falls: every marble's falls in that maze; marbles: how many rolled.
+## A clean maze (no falls) adds to the streak and every HEAT_EVERY-th one heats up (change +1, up to the mode's cap);
+## a fall ends the streak, and falls >= max(2, marbles) cool down a step (change -1).
+static func heat_after(heat: int, streak: int, falls: int, marbles: int, mode: String) -> Array:
+	var cap := heat_cap(mode)
+	var h := clampi(heat, 0, cap)
+	if falls <= 0:
+		streak += 1
+		if streak % HEAT_EVERY == 0 and h < cap:
+			return [h + 1, streak, 1]
+		return [h, streak, 0]
+	if falls >= maxi(2, marbles) and h > 0:
+		return [h - 1, 0, -1]
+	return [h, 0, 0]
+
+
+## The card line when the streak heats the mazes up (short: a story card).
+static func heat_line(streak: int) -> String:
+	return "%d clean in a row! Trickier now!" % streak
 
 
 ## TODAY'S RACE, leg 0..2: a mixed bag of things, the same on every machine (pass `date` in tests). Leg 0 is a rooms

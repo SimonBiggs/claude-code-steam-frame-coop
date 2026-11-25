@@ -136,9 +136,63 @@ func _initialize() -> void:
 		var last := int(Story.where(i)[1]) == Story.MAZES_PER_PLACE - 1
 		_expect((line == "") == last, "progress line after story maze %d: \"%s\"" % [i, line])
 		_expect(line.length() <= 40, "progress line short enough for a story card (%s)" % line)
+	checked += _hot_streak()
 	print("MARBLE DEEP: %d mazes + events checked in %d ms" % [checked, Time.get_ticks_msec() - t0])
 	print("MARBLE DEEP: %s" % ("PASS" if fails == 0 else "FAIL (%d)" % fails))
 	quit(1 if fails > 0 else 0)
+
+
+## HOT STREAK (story.gd heat_after / heat_spec): every heat a mode allows makes fair mazes in every place (story lap
+## and the first bonus lap, every board type), with fair told events; heat only ever adds holes; heat 0 is the very
+## maze from before; the streak rules. Returns the mazes checked.
+func _hot_streak() -> int:
+	var n := 0
+	var per := 2 if OS.has_environment("GEN_QUICK") else 4
+	for mode in PickOrbs.MODE_IDS:
+		var cap := Story.heat_cap(mode)
+		_expect(cap >= 1 and cap <= 3, "heat cap %s = %d" % [mode, cap])
+		for heat in range(1, cap + 1):
+			for lap in 2:
+				for pl in Story.PLACES.size():
+					for step in Story.MAZES_PER_PLACE:
+						var i := (lap * Story.PLACES.size() + pl) * Story.MAZES_PER_PLACE + step
+						for s in per:
+							var wd := str(Worlds.WORLDS[(s + pl) % Worlds.WORLDS.size()].id)
+							var w := 5000 + s * 37 + heat
+							var def := Story.maze(w, i, mode, wd, heat)
+							var why := MazeGen.check(def)
+							if def.has("fallback"):
+								why.append("fell back to the plain maze")
+							for x in Worlds.event_problems(def, Worlds.events(def, mode), mode):
+								why.append("events: " + str(x))
+							for x in why:
+								_fail("heat %d %s / %s / story %d (%s) world %d: %s" % [heat, mode, wd, i, def.get("name", ""), w, x])
+							n += 1
+		var base := Worlds.apply(Story.spec(4), mode, "sunny")
+		for heat in range(1, cap + 1):
+			var hs := Story.heat_spec(base, heat)
+			_expect(int(hs.holes) == int(base.holes) + heat, "heat %d adds %d holes (%s)" % [heat, heat, mode])
+			_expect(float(hs.door) <= float(base.door) and int(hs.get("loops", 2)) <= int(base.get("loops", 2)), "heat never opens a maze up")
+	_expect(var_to_str(Story.maze(7, 4, "brave", "snow", 0)) == var_to_str(Story.maze(7, 4, "brave", "snow")), "heat 0 = the maze from before")
+	# The streak: clean, clean -> up; a fall ends it; lots of falls -> down; never past the cap or below 0.
+	var r := Story.heat_after(0, 0, 0, 2, "brave")
+	_expect(var_to_str(r) == var_to_str([0, 1, 0]), "one clean maze: streak 1 (%s)" % str(r))
+	r = Story.heat_after(int(r[0]), int(r[1]), 0, 2, "brave")
+	_expect(var_to_str(r) == var_to_str([1, 2, 1]), "two clean mazes: heat up (%s)" % str(r))
+	r = Story.heat_after(1, 2, 1, 2, "brave")
+	_expect(var_to_str(r) == var_to_str([1, 0, 0]), "one fall ends the streak, keeps the heat (%s)" % str(r))
+	r = Story.heat_after(1, 0, 3, 2, "brave")
+	_expect(var_to_str(r) == var_to_str([0, 0, -1]), "lots of falls cool down (%s)" % str(r))
+	r = Story.heat_after(0, 0, 9, 2, "brave")
+	_expect(int(r[0]) == 0 and int(r[2]) == 0, "never below 0 (%s)" % str(r))
+	r = Story.heat_after(1, 1, 0, 2, "gentle")
+	_expect(int(r[0]) == 1 and int(r[2]) == 0, "gentle stays at its cap (%s)" % str(r))
+	r = Story.heat_after(3, 0, 0, 2, "gentle")
+	_expect(int(r[0]) == 1, "a hard family's heat drops to gentle's cap (%s)" % str(r))
+	r = Story.heat_after(1, 3, 1, 6, "hard")
+	_expect(int(r[0]) == 1 and int(r[1]) == 0, "one fall among six marbles doesn't cool (%s)" % str(r))
+	_expect(Story.heat_line(12).length() <= 40, "heat line short enough for a story card")
+	return n
 
 
 func _expect(ok: bool, what: String) -> void:

@@ -212,6 +212,7 @@ var vr_story: Node3D
 var maze_falls0 := 0
 var run_mazes := 0
 var run_shinies := 0
+var run_streak := 0  # host: clean mazes (no falls) in a row this session (story.gd HOT STREAK)
 var story_queue: Array = []  # host: [delay, beat] story cards still to show
 # SECOND PASS: modes, Bobo's gift marbles, today's world, told events (worlds.gd).
 var picks: PicksScript
@@ -2153,6 +2154,10 @@ func _begin_session() -> void:
 	session["world"] = str(Worlds.world_of(Seeded.today()).id)
 	run_mazes = 0
 	run_shinies = 0
+	run_streak = 0
+	if int(d.get("heat", 0)) > 0:
+		d["heat"] = int(d.heat) - 1  # a new sitting warms up one step gentler (whoever picks up the pad next)
+		save.mark_dirty()
 	_send_town(true)
 	print("Marble Town: lessons %s, daily %s, story maze %d, %d places lit, %d shinies (world %d)" % [
 		session.lessons, session.daily, session.base, int(d.places), (d.jar as Array).size(), int(d.world)])
@@ -2199,6 +2204,9 @@ func desc_for(n: int, plan: Dictionary = {}) -> Dictionary:
 	var world: int = int(save.data.world) if save != null else 0
 	var sd := {"k": "story", "i": int(sess.get("base", 0)) + story_k - 1, "w": world}
 	sd.merge(extra)
+	var heat := mini(int(save.data.get("heat", 0)) if save != null else 0, Story.heat_cap(str(extra.m)))
+	if heat > 0:
+		sd["h"] = heat  # (left out at 0: the same key, and the same maze, as before the HOT STREAK)
 	return sd
 
 
@@ -2278,7 +2286,7 @@ static func _gen_job(desc: Dictionary) -> Callable:
 			def["shiny_color"] = Story.GOLDEN[1]
 		else:
 			var i := int(d.get("i", 0))
-			def = Story.maze(int(d.get("w", 0)), i, m, wd)
+			def = Story.maze(int(d.get("w", 0)), i, m, wd, int(d.get("h", 0)))
 			def["shiny_color"] = Story.shiny_of(i)[1]
 		if m != "":
 			def["events"] = Worlds.events(def, m)
@@ -2460,6 +2468,8 @@ func _progress() -> void:
 	d.events = int(d.events) + maze_events
 	if gift != "" and (k == "story" or k == "daily"):
 		_grow_rack(gift)
+	if k == "story" or k == "daily":
+		_heat_step(falls, int(info.marbles), info)
 	match k:
 		"lesson":
 			if int(level_desc.get("i", 0)) >= LevelsData.SIMPLE_LEVELS.size() and not bool(d.lessons_done):
@@ -2496,6 +2506,37 @@ func _progress() -> void:
 					town.cheer(int(w[0]))
 	save.mark_dirty()
 	Telemetry.run("marble_maze", info)
+
+
+## Host / local, a story or race maze cleared: the HOT STREAK (story.gd heat_after). A clean maze adds to the streak,
+## every second one in a row heats the next story mazes up (saved), lots of falls cool them down; the next maze is
+## made again with the new heat while HOORAY shows.
+func _heat_step(falls: int, marbles: int, info: Dictionary) -> void:
+	var d: Dictionary = save.data
+	var mode := str(level_desc.get("m", _mode_now(session)))
+	var r := Story.heat_after(int(d.get("heat", 0)), run_streak, falls, marbles, mode)
+	run_streak = int(r[1])
+	var was := int(d.get("heat", 0))
+	d["heat"] = int(r[0])
+	var best_s := int(d.get("best_streak", 0))
+	var new_best := run_streak > best_s and run_streak >= 3
+	if run_streak > best_s:
+		d["best_streak"] = run_streak
+	info["heat"] = int(level_desc.get("h", 0))
+	info["streak"] = run_streak
+	match int(r[2]):
+		1:
+			_story({"who": "HOT STREAK", "line": Story.heat_line(run_streak), "pic": "fire", "color": Color(1.0, 0.55, 0.2),
+				"duration": 3.0}, 1.2)
+		-1:
+			_story(_bobo("Phew! A bit easier now."), 1.2)
+		_:
+			if new_best:
+				_story({"who": "BEST STREAK", "line": "%d clean in a row!" % run_streak, "pic": "star", "color": Color(1.0, 0.8, 0.25),
+					"duration": 3.0}, 1.2)
+	if int(d.heat) != was:
+		print("Hot streak: heat %d -> %d (streak %d, falls %d)" % [was, int(d.heat), run_streak, falls])
+		_prefetch_next()  # the next story maze, made again at the new heat
 
 
 # --- Marble callbacks (from whichever machine simulates the marble) -------------------
