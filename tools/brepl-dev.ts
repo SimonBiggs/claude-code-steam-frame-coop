@@ -245,10 +245,15 @@ export async function playstats(o: { since?: string; game?: string; recent?: num
     const g = (games[r.game] ??= { runs: 0, devices: {} as Record<string, number>, ends: {} as Record<string, number>, minutes: 0, last: "" });
     g.runs++; g.devices[r.device] = (g.devices[r.device] || 0) + 1;
     if (r.end) g.ends[r.end] = (g.ends[r.end] || 0) + 1;
-    g.minutes += (Number(r.secs ?? r.seconds ?? r.time ?? 0) || 0) / 60;
+    // per-line secs only; "seconds" is some games' round BUDGET (Paper Planes 100 s for a 37 s flight) and quit lines
+    // repeat the whole time: real sittings + minutes come from play-record (sittings, below), 2026-11-25
+    g.minutes += (Number(r.secs ?? r.played_s ?? 0) || 0) / 60;
     g.last = String(r.date || "").slice(0, 16);
   }
   for (const g of Object.values(games)) g.minutes = Math.round(g.minutes);
+  // A RUN line is a round / maze / wave, not a go at the game: play-record counts sittings (consecutive rounds, gaps <= 5 min)
+  const prs = JSON.parse(await readFile(join(HOME, "GodotProjects/play-record/data/summary.json"), "utf8").catch(() => "{}"));
+  for (const [id, g] of Object.entries<any>(games)) { const a = prs.arcade?.[id]; if (a) { g.sittings = a.sittings; g.sitting_minutes = a.mins; } }
   const byRuns = Object.fromEntries(Object.entries(games).sort((a: any, b: any) => b[1].runs - a[1].runs));
   return { store: TELEMETRY_STORE, total: runs.length, devices, games: byRuns,
     recent: runs.slice(-(o.recent ?? 10)).map(r => `${String(r.date).slice(0, 16)} ${r.device} ${r.game} ${r.mode ?? ""} ${r.end ?? ""}`) };
@@ -434,6 +439,14 @@ export async function debt() {
   const sb = (await sh(`for m in ~/.cache/game-deployed/*.*; do [ -f "$m" ] || continue; c=$(sed -n 1p "$m"); dir=$(sed -n 2p "$m"); t=$(sed -n 3p "$m"); [ -d "$dir/.git" ] || continue; git -C "$dir" diff --quiet "$c" HEAD -- . ':(exclude)tests' ':(exclude)*.md' 2>/dev/null || echo "$(basename "$m")|$dir|$t"; done`)).out.trim();
   for (const l of sb ? sb.split("\n") : []) { const [m, dir, title] = l.split("|"); const deck = m.slice(m.indexOf(".") + 1);
     issues.push({ kind: "standalone-behind", what: `${title} on ${deck} is behind its repo (${dir.replace(HOME, "~")})`, fix: `test it (tests/run.sh), then game-deploy-deck ${dir} "${title}" ${deck}` }); }
+  // Our games in every Steam library (family-games-sync, 2026-11-25): every game project is listed in
+  // ~/.config/family-games/games.tsv (or on a '# skip: ~/GodotProjects/x' line), has Steam art (game-art), and every
+  // TV Steam account that is not logged in right now has its shortcut + art. Lines come from family-games-sync --debt.
+  const fg = (await sh(`~/.local/bin/family-games-sync --debt`)).out.trim();
+  for (const l of fg ? fg.split("\n") : []) { const [k, a, b] = l.split("|");
+    if (k === "unlisted") issues.push({ kind: "family-game-unlisted", what: `${a.replace(HOME, "~")} is not in ~/.config/family-games/games.tsv (not in the TV's Steam libraries)`, fix: "add 'Title<TAB>dir' (or '# skip: dir'), then family-games-sync" });
+    else if (k === "noart") issues.push({ kind: "game-art-missing", what: `${b} has no Steam library art (${a.replace(HOME, "~")}/art)`, fix: `game-art ${a} "${b}", commit art/, then family-games-sync` });
+    else issues.push({ kind: "steam-library-gap", what: `TV Steam account ${a}`, fix: "family-games-sync local (duo-catch-up runs it every 15 min; log ~/.cache/family-games-sync.log)" }); }
   // Staging must run like the TV: addons/boot (services) and project.godot (autoloads) match live (2026-10-31: no Boot in staging).
   const bootDrift = (await sh(`diff -rq --exclude=*.uid --exclude=*.import ${LIVE}/addons/boot ${STAGE}/addons/boot 2>&1 | wc -l; diff <(sed 's|^config/name=.*||' ${LIVE}/project.godot) <(sed 's|^config/name=.*||' ${STAGE}/project.godot) | wc -l`)).out.split("\n").map(Number);
   if (bootDrift.some(n => n > 0)) issues.push({ kind: "stage-boot", what: "staging's addons/boot or project.godot differs from live (bots there run without the TV's services)", fix: "rsync -a ~/GodotProjects/duo-arena/addons/boot/ ~/GodotProjects/.duo-arena-stage/addons/boot/; sed 's|^config/name=\"Duo Arena\"$|config/name=\"Duo Arena Stage\"|' ~/GodotProjects/duo-arena/project.godot > ~/GodotProjects/.duo-arena-stage/project.godot" });
@@ -461,6 +474,19 @@ export async function debt() {
         const [a, b] = await Promise.all([readFile(join(GD, f)).catch(() => null), readFile(join(wt, "addons/gdev", f)).catch(() => null)]);
         if (a && !b) issues.push({ kind: "gdev-addon", what: `${wt.replace(HOME, "~")}/addons/gdev/${f} is missing (installed: ~/.local/share/gdev/${f})`, fix: `cp ~/.local/share/gdev/${f} ${wt}/addons/gdev/ (and commit in the repo)` });
         else if (a && b && !a.equals(b)) issues.push({ kind: "gdev-addon", what: `${wt.replace(HOME, "~")}/addons/gdev/${f} differs from ~/.local/share/gdev/${f}`, fix: `whichever is newer is the real one: cp it over the other (commit the repo copy; land, which installs it)` });
+      }
+    }
+  }
+  // The same for the standalone games (2026-11-25: Sprout Hop, Continents of Power and Portal Explorer still had the
+  // 11-04 gdev without the _exit_tree task waits that stop a quit crash). Only the files a game has.
+  {
+    const GD = join(HOME, ".local/share/gdev");
+    for (const ent of await readdir(GP, { withFileTypes: true }).catch(() => [] as any[])) {
+      const dir = join(GP, ent.name);
+      if (!ent.isDirectory() || dir === LIVE || ent.name.startsWith(".")) continue;
+      for (const f of ["control.gd", "gdev_main.gd"]) {
+        const [a, b] = await Promise.all([readFile(join(GD, f)).catch(() => null), readFile(join(dir, "addons/gdev", f)).catch(() => null)]);
+        if (a && b && !a.equals(b)) issues.push({ kind: "gdev-addon", what: `~/GodotProjects/${ent.name}/addons/gdev/${f} differs from ~/.local/share/gdev/${f}`, fix: `cp ~/.local/share/gdev/${f} ${dir}/addons/gdev/, run its tests/run.sh, commit (and game-deploy-deck it if it is on the Decks)` });
       }
     }
   }

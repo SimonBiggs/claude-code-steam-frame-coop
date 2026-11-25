@@ -18,4 +18,8 @@ done
 # whichever Decks are reachable, arcade telemetry, voice comments -> favourites.md. It limits itself to every 15 min.
 pr=~/GodotProjects/play-record/play-record
 [ -x "$pr" ] && { timeout 150 "$pr" collect --if-due 15 >>~/.cache/play-record.log 2>&1 || echo "play-record failed (see ~/.cache/play-record.log)"; }
+# Our games in every Steam library (TV + Decks, every account): shortcut, library art, "Family Games" collection
+# (family-games-sync, 2026-11-25; never closes Steam; the logged-in account only gets shortcuts while nothing is played)
+fgs=~/.local/bin/family-games-sync
+[ -x "$fgs" ] && { timeout 240 "$fgs" --if-due 15 || echo "family-games-sync failed (see ~/.cache/family-games-sync.log)"; }
 exit 0
