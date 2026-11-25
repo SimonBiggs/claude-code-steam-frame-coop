@@ -192,6 +192,8 @@ func _hot_streak() -> int:
 	r = Story.heat_after(1, 3, 1, 6, "hard")
 	_expect(int(r[0]) == 1 and int(r[1]) == 0, "one fall among six marbles doesn't cool (%s)" % str(r))
 	_expect(Story.heat_line(12).length() <= 40, "heat line short enough for a story card")
+	for x in Story.HotStreak.problems():
+		_fail("hot streak: " + str(x))
 	return n
 
 

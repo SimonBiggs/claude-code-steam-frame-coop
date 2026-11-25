@@ -16,6 +16,7 @@ extends SceneTree
 const G := preload("res://games/sky_bots/levelgen.gd")
 const Seeded := preload("res://core/seeded.gd")
 const TestTime := preload("res://tests/test_time.gd")
+const HotStreak := preload("res://core/hot_streak.gd")
 
 var fails := 0
 
@@ -113,8 +114,37 @@ func _initialize() -> void:
 	_expect(G.daily_desc("brave", "2026-12-01").s != G.daily_desc("brave", "2026-12-02").s, "TODAY'S ISLAND changes every day")
 	print("sky bots gen: %d islands checked, worst %.1f ms per island" % [total, worst_ms])
 	_expect(worst_ms < 60.0, "an island generates + checks in under 60 ms here (%.1f ms)" % worst_ms)
+	_hot_streak(maxi(4, n / 4))
 	print("SKY BOTS GEN: %s" % ("PASS" if fails == 0 else "FAIL (%d)" % fails))
 	quit(1 if fails > 0 else 0)
+
+
+## HOT STREAK (core/hot_streak.gd, levelgen.gd heat_mode): every heat a mode allows makes fair islands on every
+## island (check() with the robots' real jumps), the description keeps the heat (the TV machine builds the same island),
+## heat 0 is the island from before, and heat never makes an island easier (more grumbles / wider gaps, never fewer).
+func _hot_streak(n: int) -> void:
+	for x in HotStreak.problems():
+		_expect(false, "hot streak: " + str(x))
+	var checked := 0
+	for island in range(1, G.ISLANDS + 1):
+		for m in G.MODES:
+			for heat in range(1, HotStreak.cap(m) + 1):
+				var r := Seeded.validate(func(s: int) -> Dictionary: return G.generate({"i": island, "s": s, "m": m, "h": heat}),
+					func(lv: Dictionary) -> Array:
+						var why := G.check(lv)
+						if int((lv.desc as Dictionary).get("h", 0)) != heat:
+							why.append("description lost the heat")
+						return why, n, 77 + island * 1000 + heat, [0, 1], "ISLAND %d %s HEAT %d" % [island, m, heat])
+				checked += int(r.checked)
+				fails += (r.failures as Array).size()
+				var base: Dictionary = G.MODES[m]
+				var hm := G.heat_mode(m, heat)
+				_expect(float(hm.gap) >= float(base.gap) and float(hm.w) <= float(base.w) and int(hm.grumbles) >= int(base.grumbles)
+					and float(hm.speed) > float(base.speed),
+					"heat %d makes %s trickier" % [heat, m])
+			_expect(var_to_str(G.generate({"i": island, "s": 31, "m": m, "h": 0})) == var_to_str(G.generate({"i": island, "s": 31, "m": m})),
+				"heat 0 = the island from before (%d %s)" % [island, m])
+	print("SKY BOTS GEN: hot streak %d heated islands checked" % checked)
 
 
 func _expect(ok: bool, what: String) -> void:

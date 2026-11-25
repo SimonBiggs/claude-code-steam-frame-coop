@@ -2156,7 +2156,7 @@ func _begin_session() -> void:
 	run_shinies = 0
 	run_streak = 0
 	if int(d.get("heat", 0)) > 0:
-		d["heat"] = int(d.heat) - 1  # a new sitting warms up one step gentler (whoever picks up the pad next)
+		d["heat"] = Story.HotStreak.session_start(int(d.heat))  # a new sitting warms up one step gentler
 		save.mark_dirty()
 	_send_town(true)
 	print("Marble Town: lessons %s, daily %s, story maze %d, %d places lit, %d shinies (world %d)" % [
