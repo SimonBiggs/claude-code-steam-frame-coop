@@ -36,13 +36,15 @@ static func game_started() -> void:
 
 
 ## Record one run. data: plain values only (numbers, strings, arrays, dictionaries).
-## A line without "secs" (or "seconds") gets "secs" = time since this game's previous line, or since the arcade
+## A line without "secs" gets "secs" = time since this game's previous line, or since the arcade
 ## started the game, with "secs_auto": true: play-record measures real hours from secs, and games that never sent
 ## it (Sky Bots, Kart Race, Tiny Town...) showed 0 minutes however long they were played (2026-11-19).
+## "seconds" doesn't count as a time played: Paper Planes and Snowman Maker send the round's time BUDGET there
+## (100 s for a 37 s flight, 2026-11-25).
 static func run(game_id: String, data: Dictionary) -> Dictionary:
 	var d := data.duplicate(true)
 	var now := Time.get_ticks_msec()
-	if not d.has("secs") and not d.has("seconds"):
+	if not d.has("secs"):
 		var from := maxi(int(Engine.get_meta(START_META, 0)), int(_last_ms.get(game_id, 0)))
 		if from > 0:
 			d["secs"] = snappedf((now - from) / 1000.0, 0.1)

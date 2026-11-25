@@ -44,3 +44,6 @@ func _auto_secs() -> void:
 		fails.append("Telemetry.run without secs should add secs_auto timing (got %s)" % [a])
 	if b.has("secs_auto") or int(b.secs) != 7:
 		fails.append("Telemetry.run must keep a game's own secs (got %s)" % [b])
+	var c := Telemetry.run("telemetry_coverage_test", {"end": "test", "seconds": 100})
+	if not c.get("secs_auto", false) or float(c.get("secs", 100)) >= 100.0:
+		fails.append("a \"seconds\" field (a round's time budget in Paper Planes / Snowman Maker) must not stop secs_auto timing (got %s)" % [c])
