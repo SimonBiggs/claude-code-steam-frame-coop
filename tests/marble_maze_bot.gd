@@ -420,6 +420,8 @@ func _pick_drive(_delta: float) -> Vector2:
 ## What the second pass showed on this machine (printed at the end).
 func _deep_notes() -> void:
 	var notes: Dictionary = get_meta("deep", {})
+	if not has_meta("deep"):
+		set_meta("deep", notes)  # (was never kept: every note printed every frame and BOT DEEP "seen=" stayed empty)
 	if main.picks != null and main.picks.showing():
 		var st: String = main.picks.orbs.stage
 		if not notes.has("orbs_" + st):
@@ -890,6 +892,8 @@ func _exit_tree() -> void:
 			print("BOT STORY: mode=%s level=%d desc=%s story_i=%d places=%d jar=%d lessons_done=%s town_lit=%d" % [main.net.mode,
 				main.level, str(main.level_desc), int(d.story_i), int(d.places), (d.jar as Array).size(), d.lessons_done,
 				main.town.lit if main.town != null else -1])
+			print("BOT HEAT: mode=%s heat=%d streak=%d best_streak=%d next_h=%d" % [main.net.mode, int(d.get("heat", 0)), main.run_streak,
+				int(d.get("best_streak", 0)), int(main.level_desc.get("h", 0))])
 		for p in main.players:
 			if p.has_meta("cue_done"):
 				print("BOT CUES: P%d done=%s" % [p.index + 1, p.get_meta("cue_done")])

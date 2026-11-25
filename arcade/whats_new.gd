@@ -33,6 +33,7 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "mm-hot-streak", "date": "2026-11-25", "game": "marble_maze", "pic": "kaiju", "line": "No falls? Trickier mazes!"},
 	{"id": "rw-solo-pilot", "date": "2026-11-20", "game": "rocket_workshop", "pic": "engineer", "line": "One pad? You fly the rocket!"},
 	{"id": "pp-all-stars", "date": "2026-11-20", "game": "paper_planes", "pic": "star", "line": "Three stars? Next flight!"},
 	{"id": "mm-light-up", "date": "2026-11-20", "game": "marble_maze", "pic": "kaiju", "line": "Light up Bobo's town!"},
