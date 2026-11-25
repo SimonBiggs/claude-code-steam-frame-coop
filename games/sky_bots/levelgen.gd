@@ -116,6 +116,28 @@ static func mode_of(m: String) -> String:
 	return m if MODES.has(m) else "brave"
 
 
+## HOT STREAK (core/hot_streak.gd): a mode's numbers heated up `heat` steps: narrower floors, wider gaps (still fitted
+## to the robots' real jumps: check() proves it), an extra GRUMBLE every second step, faster movers and foes, one more
+## zap pad from step 2. tests/sky_bots_gen_test.gd proves every heat of every island and mode fair.
+const GAP_HOT := 2.8  ## the widest md.gap a heated island asks for
+
+
+static func heat_mode(m: String, heat: int) -> Dictionary:
+	var md: Dictionary = (MODES[mode_of(m)] as Dictionary).duplicate()
+	var h := clampi(heat, 0, 3)
+	if h == 0:
+		return md
+	# Never narrower than HARD's floors (winding stepping stones must still overlap along Z: Crab Cove, Jungle Jumble)
+	# and never gappier than GAP_HOT (the island must still fit inside the giant's walk).
+	md.w = maxf(float(MODES.hard.w), float(md.w) * (1.0 - 0.06 * h))
+	md.gap = maxf(float(md.gap), minf(GAP_HOT, float(md.gap) + 0.2 * h))
+	md.grumbles = int(md.grumbles) + h / 2
+	md.zaps = int(md.zaps) + (1 if h >= 2 else 0)
+	md.speed = float(md.speed) * (1.0 + 0.1 * h)
+	md.dash = float(md.dash) * (1.0 + 0.06 * h)
+	return md
+
+
 static func island_name(d: Dictionary) -> String:
 	var i := int(d.get("i", 1))
 	return DAILY_NAME if i == 0 else ISLAND_NAMES[clampi(i - 1, 0, ISLANDS - 1)]
@@ -181,10 +203,13 @@ static func generate(d: Dictionary) -> Dictionary:
 	var seed_value := int(d.get("s", 1))
 	var island := int(d.get("i", 1))
 	var m := mode_of(String(d.get("m", "brave")))
+	var heat := clampi(int(d.get("h", 0)), 0, 3)
 	var best: Dictionary = {}
 	for attempt in 12:
-		var lv := _try(Seeded.rng(seed_value, "island %d try %d" % [island, attempt]), island, m, seed_value)
+		var lv := _try(Seeded.rng(seed_value, "island %d try %d" % [island, attempt]), island, m, seed_value, heat)
 		lv["desc"] = {"i": island, "s": seed_value, "m": m}
+		if heat > 0:
+			lv.desc["h"] = heat  # (left out at 0: the same description, and island, as before the HOT STREAK)
 		lv["attempt"] = attempt
 		if check(lv).is_empty():
 			return lv
@@ -193,8 +218,8 @@ static func generate(d: Dictionary) -> Dictionary:
 	return best
 
 
-static func _try(r: RandomNumberGenerator, island: int, m: String, seed_of_rng: int = 1) -> Dictionary:
-	var md: Dictionary = (MODES[m] as Dictionary).duplicate()
+static func _try(r: RandomNumberGenerator, island: int, m: String, seed_of_rng: int = 1, heat: int = 0) -> Dictionary:
+	var md: Dictionary = heat_mode(m, heat)
 	var si := style_isle({"i": island, "s": seed_of_rng})
 	var st: Dictionary = STYLE[si]
 	md.w = float(md.w) * float(st.w)
