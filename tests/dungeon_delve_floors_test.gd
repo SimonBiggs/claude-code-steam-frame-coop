@@ -33,6 +33,7 @@ const Seeded := preload("res://core/seeded.gd")
 
 var fails := 0
 var checks := 0
+var guided := 0  ## floors the "what now?" guide alone led to the stairs / boss
 var collecting := false  ## _fail collects into `collected` instead (the daily validator reports them per date)
 var collected: Array = []
 
@@ -97,7 +98,9 @@ func _initialize() -> void:
 		var src2 := FileAccess.get_file_as_string(path2)
 		if RegEx.create_from_string("\\b(zone|z) [!=]= [0-9]").search(src2) != null:
 			_fail("%s picks looks by a zone number (use the biome id: FloorGen.zone_data(zone)[\"id\"])" % path2)
-	print("FLOORS: %s - %d floors checked, %d failures (%d ms)" % ["PASS" if fails == 0 else "FAIL", checks, fails, Time.get_ticks_msec() - t0])
+	if guided != checks:
+		_fail("the guide was followed on %d of %d floors" % [guided, checks])
+	print("FLOORS: %s - %d floors checked (%d followed by the guide alone), %d failures (%d ms)" % ["PASS" if fails == 0 else "FAIL", checks, guided, fails, Time.get_ticks_msec() - t0])
 	quit(1 if fails > 0 else 0)
 
 
@@ -141,6 +144,7 @@ func _check(seed_value: int, zone: int, fl: int, heroic: bool) -> void:
 	var doors: Array = f["doors"]
 	if rooms.size() < 4:
 		_fail("%s: only %d rooms" % [tag, rooms.size()])
+	_follow_guide(f, tag)
 	# Logic.
 	var reach := FloorGen.solve(f)
 	if reach.size() != rooms.size():
@@ -222,6 +226,78 @@ func _check(seed_value: int, zone: int, fl: int, heroic: bool) -> void:
 			can.call(FloorGen.to_world(f, i, r["stairs"]), "stairs", 0.6)
 		for p in r["pots"]:
 			can.call(FloorGen.to_world(f, i, p), "pot in room %d" % i, 0.7)
+
+
+## WHAT NOW? (FloorGen.way_on, the gold chevrons + pill): a kid who ONLY follows the guide gets from the start to the
+## stairs (or the boss) on every floor: picks up the key it points at, opens the door it points at, presses the
+## switches, bonks the cracked wall, never gets an empty guide and never walks in circles.
+func _follow_guide(f: Dictionary, tag: String) -> void:
+	var open := FloorGen.start_open_bits(f)
+	var pos := FloorGen.room_center(f, 0) + Vector3(0.0, 0.0, 2.6)
+	var keys := 0
+	var seen := 1
+	var keys_at: Array = []
+	for i in (f["rooms"] as Array).size():
+		var r: Dictionary = (f["rooms"] as Array)[i]
+		if bool(r.get("key", false)) and r.has("key_at"):
+			keys_at.append(FloorGen.to_world(f, i, r["key_at"]))
+	var stairs := Vector3.INF
+	if int(f["exit"]) >= 0 and ((f["rooms"] as Array)[int(f["exit"])] as Dictionary).has("stairs"):
+		stairs = FloorGen.to_world(f, int(f["exit"]), ((f["rooms"] as Array)[int(f["exit"])] as Dictionary)["stairs"])
+	var said: Array = []
+	for step in 80:
+		var g := FloorGen.way_on(f, pos, {"walk": open, "open": open, "keys": keys, "seen": seen, "cleared": 1,
+			"keys_at": keys_at, "stairs": stairs, "portal": null})
+		if g.is_empty():
+			_fail("%s: the guide shows nothing in room %d (said %s)" % [tag, FloorGen.room_at(f, pos), str(said)])
+			return
+		var text := String(g["text"])
+		if said.is_empty() or said.back() != text:
+			said.append(text)
+		var goal: Vector3 = g["goal"]
+		var room := FloorGen.room_at(f, pos)
+		var gr := FloorGen.room_at(f, goal)
+		if gr != room and gr >= 0:
+			var rt := FloorGen.route(f, room, gr, open)
+			if rt.is_empty():
+				_fail("%s: the guide points at room %d with no way there (%s)" % [tag, gr, text])
+				return
+			var dd: Dictionary = (f["doors"] as Array)[int(rt[0])]
+			if FloorGen.door_world(f, int(rt[0])).distance_to(g["p"]) > 0.01:
+				_fail("%s: the chevrons don't point at the next doorway (%s)" % [tag, text])
+			pos = FloorGen.door_inside(f, int(rt[0]), FloorGen.other_side(dd, room), 1.0)
+			seen |= 1 << FloorGen.room_at(f, pos)
+			continue
+		pos = goal
+		seen |= 1 << maxi(0, FloorGen.room_at(f, pos))
+		match text:
+			"Down the stairs!", "Beat the boss!":
+				guided += 1
+				return
+			"Grab the key!":
+				keys += 1
+				keys_at = keys_at.filter(func(k: Vector3) -> bool: return Vector3(k.x, 0.0, k.z).distance_to(goal) > 0.01)
+			"Open the gold door!", "Open the boss door!", "Bonk the cracked wall!", "Turn on both switches!":
+				var want: Array = [FloorGen.SECRET] if text.contains("wall") else ([FloorGen.PUZZLE] if text.contains("switch") else [FloorGen.LOCKED, FloorGen.BOSS])
+				var best := -1
+				var bd := INF
+				for di in (f["doors"] as Array).size():
+					var d2: Dictionary = (f["doors"] as Array)[di]
+					if int(d2["type"]) in want and open & (1 << di) == 0:
+						var dist := FloorGen.door_world(f, di).distance_to(goal)
+						if text.contains("switch"):
+							var sw: Dictionary = (f["switches"] as Array)[int((d2["switches"] as Array)[0])]
+							dist = FloorGen.to_world(f, int(sw["room"]), sw["p"]).distance_to(goal)
+						if dist < bd:
+							bd = dist
+							best = di
+				if best < 0:
+					_fail("%s: '%s' but no such door is shut" % [tag, text])
+					return
+				open |= 1 << best
+				if not text.contains("wall") and not text.contains("switch"):
+					keys -= 1
+	_fail("%s: following the guide never reached the stairs (said %s)" % [tag, str(said)])
 
 
 ## Every floor of a run (seeded like a real run: shop camps in between), every biome and two endless laps.

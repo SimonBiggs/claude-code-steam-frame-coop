@@ -17,7 +17,7 @@ extends Node3D
 ##    boss floor). Kept: a heart back for everyone and a gold pile for her hoard; saved as deep.wishes.
 ##  - Hearts: heroes have 4 (HEROIC 3), the knight one more (heart containers: up to 8). At zero you're knocked out; a friend
 ##    standing next to you fills your ring and you pop back up (2 hearts). Everyone out = back to the
-##    first floor of the zone (the checkpoint) with what you had then; HEROIC has no checkpoints: the
+##    first floor of the zone (the checkpoint; in the Slime Caves the start of this floor) with what you had then; HEROIC has no checkpoints: the
 ##    run ends. BRAVE also helps knocked-out heroes up when a room is cleared.
 ##  - Rooms: walk in and the doors shut until every monster is gone (friends left outside are popped
 ##    in). Keys open locked doors (the exit / the boss door); puzzle doors need their two switches on
@@ -72,6 +72,10 @@ const REVIVE_TIME := 3.5  ## seconds a friend must stand by you (a hit on the he
 const REVIVE_R := 1.5
 const IFRAMES := 1.2
 const TOUCH_GRACE := 0.8  ## extra safe seconds after a bump in the first biome on BRAVE
+## BRAVE in the first biomes: everyone knocked out = try THIS floor again (with what you had when you came in), not
+## the biome's first floor. 2026-11-25: the family's only real run wiped on floor 2 and quit at once (back to a
+## 3-minute floor 1). Deeper biomes keep the zone checkpoint.
+const FLOOR_CHECKPOINT_ZONES := 1
 const STAIRS_R := 1.5
 const ATTACK_REACH := 1.05
 const PADS := {"brave": Vector3(-2.2, 0.0, -2.5), "heroic": Vector3(2.2, 0.0, -2.5), "daily": Vector3(-3.5, 0.0, 2.7)}
@@ -755,6 +759,25 @@ func knight_head() -> Vector3:
 	return Vector3.ZERO
 
 
+## WHAT NOW? The way on for someone standing at pos, on every machine (2026-11-25: the family's one real BRAVE run
+## spent 173 s on its first 5-room floor): FloorGen.way_on ({"p": where the gold chevrons point, "goal", "text"}) from
+## the state every machine has. {} while a fight is on, in the camp or between phases.
+func floor_goal(pos: Vector3) -> Dictionary:
+	if not active or f.is_empty() or String(f.get("kind", "")) != "floor" or pos == Vector3.INF:
+		return {}
+	if String(net.state_get("d_phase", "")) != "play" or int(net.state_get("d_lock", -1)) >= 0:
+		return {}
+	var keys_at: Array = []
+	var picks: Dictionary = pickups if is_host() else _mirror_picks
+	for id in picks:
+		if int((picks[id] as Dictionary).get("kind", -1)) == Loot.KEY:
+			keys_at.append((picks[id] as Dictionary)["p"])
+	return FloorGen.way_on(f, pos, {"walk": view.pass_bits, "open": int(net.state_get("d_open", 0)),
+		"keys": int(net.state_get("d_keys", 0)), "seen": int(net.state_get("d_seen", 1)),
+		"cleared": int(net.state_get("d_cleared", 1)), "keys_at": keys_at, "stairs": view.stairs_at,
+		"portal": net.state_get("d_portal", null)})
+
+
 func _feet_of(slot: int) -> Vector3:
 	if _is_knight(slot):
 		var hp: Vector3 = main.vr_rig.head_position()
@@ -981,8 +1004,8 @@ func load_floor(z: int, fl: int, k: String) -> void:
 		for i2 in mini(fl_list.size(), Friends.CAMP_SPOTS.size()):
 			_spawn_pick(Loot.COIN, FloorGen.to_world(f, 0, Friends.CAMP_SPOTS[i2]) + Vector3(0, 0.6, 0), true)
 	else:
-		if fl == 0 and bool(diff()["checkpoints"]) and z < FloorGen.ZONE_COUNT:  # no checkpoints in the endless depths
-			checkpoint = {"zone": z, "stats": stats.duplicate(true), "gold": _gold}
+		if (fl == 0 or z < FLOOR_CHECKPOINT_ZONES) and bool(diff()["checkpoints"]) and z < FloorGen.ZONE_COUNT:  # no checkpoints in the endless depths
+			checkpoint = {"zone": z, "stats": stats.duplicate(true), "gold": _gold, "floor": fl}
 			tally["checkpoints"] = int(tally["checkpoints"]) + 1
 		elif checkpoint.is_empty():
 			checkpoint = {"zone": z, "stats": stats.duplicate(true), "gold": _gold, "floor": fl}
@@ -1058,7 +1081,7 @@ func _after_wipe() -> void:
 		_gold = int(checkpoint["gold"])
 		_keys = 0
 		stats_dirty = true
-		net.event("d_banner", ["BACK TO THE CHECKPOINT", "info"])
+		net.event("d_banner", ["TRY THIS FLOOR AGAIN!" if int(checkpoint.get("floor", 0)) == floor_i and int(checkpoint["zone"]) == zone else "BACK TO THE CHECKPOINT", "info"])
 		load_floor(int(checkpoint["zone"]), int(checkpoint.get("floor", 0)), "floor")
 	else:
 		finish(false)

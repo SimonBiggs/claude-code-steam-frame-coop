@@ -243,10 +243,14 @@ func update(delta: float, deep: Node) -> void:
 		if bool((st[s] as Dictionary).get("down", false)) and not party.is_local(int(s)):
 			helping = true
 			break
+	# WHAT NOW? (deep.floor_goal via main's guide: the key, the gold door, the stairs) above the button prompts.
+	var goal := String(deep.main.guide_text) if "guide_text" in deep.main else ""
 	if helping:
 		want = "help"
 	elif pill_t > 0.0 and not pairs.is_empty():
-		want = var_to_str(pairs)
+		want = goal + "|" + var_to_str(pairs)
+	elif goal != "":
+		want = goal + "|"
 	if want != pill_key:
 		pill_key = want
 		for c in pill.get_children():
@@ -257,7 +261,19 @@ func update(delta: float, deep: Node) -> void:
 			row.add_child(UiKit.label("Stand by a friend to help!", "small", "good"))
 			pill.add_child(row)
 		elif want != "":
-			pill.add_child(UiKit.prompts(pairs))
+			var col := UiKit.vbox(4)
+			col.alignment = BoxContainer.ALIGNMENT_CENTER
+			if goal != "":
+				var grow := UiKit.hbox(8)
+				grow.alignment = BoxContainer.ALIGNMENT_CENTER
+				grow.add_child(UiKit.icon("key" if goal.contains("key") else "arrow_up", "gold", 28.0))
+				grow.add_child(UiKit.label(goal, "small", UiKit.GOLD))
+				col.add_child(grow)
+			if pill_t > 0.0 and not pairs.is_empty():
+				var pr := UiKit.prompts(pairs)
+				pr.alignment = BoxContainer.ALIGNMENT_CENTER
+				col.add_child(pr)
+			pill.add_child(col)
 	pill.visible = want != ""
 	map.here.clear()
 	if not map.f.is_empty():
