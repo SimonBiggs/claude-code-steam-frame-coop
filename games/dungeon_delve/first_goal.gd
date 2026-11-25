@@ -5,6 +5,6 @@ const GOAL := {
 	"you_tv": "a Little Hero",
 	"you_vr": "the Knight",
 	"you": "a Dungeon Hero",
-	"do": {"tv": ["A", "Bonk the glowing pot!"], "vr": ["HANDS", "Swing your sword at the dummy!"]},
+	"do": {"tv": ["A", "Bonk a pot!"], "vr": ["HANDS", "Swing your big sword!"]},
 	"rise": "sum(v('log_bops', {})) + v('bonked', {}).size()",
 }

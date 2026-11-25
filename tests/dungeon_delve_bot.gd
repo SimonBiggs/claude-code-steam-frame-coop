@@ -16,6 +16,7 @@ extends Node
 ## as soon as the first boss is beaten and the next zone is reached (floors 1-4 + shops + the Slime
 ## King); BOT_GOAL=floor after the first floor; DD_FLOOR=3 starts on the first boss floor. BOT_GOAL=guard (with
 ## DD_RELICS=all, BOT_END): plays until BOT_END and checks a long, crowded fight with every relic held (dev.LAND_GUARDS).
+## BOT_GOAL=retry: wipes the party on floor 2 and checks BRAVE tries floor 2 again (not floor 1).
 ## Checks: the floors went by in order, monsters died, keys opened doors, the boss fell (zone goal),
 ## knocked-out heroes got back up (or none were), heroes stayed on walkable ground, the TV machine
 ## built the same kind of floor and mirrored monsters and hearts. Flat host: DUO_FLAT_HOST=1 on the host.
@@ -58,6 +59,10 @@ var floors_seen := {}
 var goal_done := false
 var rumble_fight := 0.0  ## seconds spent fighting in a RUMBLY room (rumble.gd)
 var cage_seen := 0  ## floors this machine built with a caged friend
+var retry_gold := -1  ## BOT_GOAL=retry: gold when the bot wiped the party
+var goal_texts := {}  ## every "what now?" line the guide showed (deep.floor_goal)
+var goal_some := 0.0  ## hero-seconds (sampled) on a quiet floor with a goal to follow
+var goal_none := 0.0  ## ... and with none
 var short := false  ## the run ends before the bot's whole run (solo VR host BOT_END=62, a 60 s local run)
 
 
@@ -115,6 +120,18 @@ func _watch() -> String:
 			if main.net.mode != "client" and Rumble.in_room(dp.f, dp.lock_room):
 				rumble_fight += 0.25
 			max_foes = maxi(max_foes, dp.foes.mons.size())
+			# WHAT NOW? (deep.floor_goal): while nobody fights on a floor, every hero in a room has a way on to follow.
+			if String(dp.f.get("kind", "")) == "floor" and String(main.net.state_get("d_phase", "")) == "play" and int(main.net.state_get("d_lock", -1)) < 0:
+				for s in main.heroes:
+					var hp: Vector3 = (main.heroes[s] as Node3D).position
+					if FloorGen.room_at(dp.f, hp) < 0:
+						continue
+					var gg: Dictionary = dp.floor_goal(hp)
+					if gg.is_empty():
+						goal_none += 0.25
+					else:
+						goal_texts[String(gg["text"])] = true
+						goal_some += 0.25
 			for h in main.heroes.values():
 				if not FloorGen.walkable(dp.view.rects, dp.view.obst, h.position, 0.05) and FloorGen.room_at(dp.f, h.position) >= 0:
 					off_floor += 1
@@ -131,6 +148,12 @@ func _watch() -> String:
 				reached = int(t["bosses"]) >= 1
 			elif goal == "floor":
 				reached = (t["floors"] as Array).size() >= 2
+			elif goal == "retry":  # BRAVE Slime Caves: a wipe on floor 2 tries floor 2 again (deep.FLOOR_CHECKPOINT_ZONES)
+				var fl1: Array = t["floors"]
+				if fl1.size() >= 2 and int(t["wipes"]) == 0 and String(main.net.state_get("d_phase", "")) == "play":
+					retry_gold = int(main.net.state_get("d_gold", 0))
+					dp._wipe()
+				reached = int(t["wipes"]) >= 1 and fl1.size() >= 3 and String(main.net.state_get("d_phase", "")) == "play"
 			if reached:
 				goal_done = true
 				kit.info("GOAL reached: %s" % goal)
@@ -422,6 +445,12 @@ func _checks() -> void:
 func _deep_checks(mode: String) -> void:
 	var dp = main.deep
 	kit.assert_true(off_floor < 8, "%s: heroes stayed on walkable ground (%d)" % [mode, off_floor])
+	# The "what now?" guide: points at the key, the gold door and the stairs, and is (almost) never empty between fights.
+	if not main.heroes.is_empty() and goal_some + goal_none > 0.0:
+		kit.info("%s: guide lines %s (%.1f s with a goal, %.1f s without)" % [mode, str(goal_texts.keys()), goal_some, goal_none])
+		if goal in ["zone", "floor"]:
+			kit.assert_true(goal_texts.has("Down the stairs!") and (goal_texts.has("Grab the key!") or goal_texts.has("Find the key!")), "%s: the guide pointed to the key and the stairs (%s)" % [mode, str(goal_texts.keys())])
+		kit.assert_true(goal_none <= 0.1 * (goal_some + goal_none) + 2.0, "%s: the guide had a way on between fights (%.1f s of %.1f without)" % [mode, goal_none, goal_some + goal_none])
 	if mode != "host":
 		kit.assert_eq(main.party.local_slots().size(), want, "%s: all %d TV players here are seated" % [mode, want])
 	if mode == "client":
@@ -447,6 +476,10 @@ func _deep_checks(mode: String) -> void:
 		for s1 in dp.stats:
 			if not dp._is_knight(int(s1)):
 				kit.assert_true(((dp.stats[s1] as Dictionary).get("relics", []) as Array).size() >= 6, "%s: hero %d holds the relics (%s)" % [mode, int(s1), str((dp.stats[s1] as Dictionary).get("relics", []))])
+	if goal == "retry":
+		var fl2: Array = t["floors"]
+		kit.assert_true(goal_done and fl2.size() >= 3 and int(fl2[fl2.size() - 1]) == int(fl2[fl2.size() - 2]) and int(fl2.back()) >= 1, "%s: a wipe on a Slime Caves floor tries THAT floor again (%s)" % [mode, str(fl2)])
+		kit.assert_true(int(main.net.state_get("d_gold", 0)) <= retry_gold, "%s: the retry starts with the gold from when the floor began (%d <= %d)" % [mode, int(main.net.state_get("d_gold", 0)), retry_gold])
 	if goal.begins_with("depth"):
 		kit.assert_true(goal_done, "%s: got down to depth %s: %s" % [mode, goal.substr(5), str(t)])
 	if goal in ["zone", "floor"]:
