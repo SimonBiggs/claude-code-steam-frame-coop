@@ -7,7 +7,7 @@
 //   await g.ui()                                         // visible buttons/labels + focus
 //   await g.joy("right"); await g.joy("a")              // dpad/buttons/sticks: a b x y lb rb start back up down left right lx ly ...
 //   await g.action("ui_accept"); await g.key("Enter"); await g.click("/root/Arcade/.../Button")
-//   await g.eval("scene.name")                           // GDScript; tree, root, scene, find("*Kart*") in scope
+//   await g.eval("scene.name")                           // GDScript; tree, root, scene, find("*Kart*") in scope; `a(); b(); c` runs all, returns c
 //   await g.shot()                                       // PNG path (Read it), default ~/.cache/gdev-offscreen/<port>/shot.png
 //   await g.log(30); await g.quit()                      // godot.list(), godot.stopAll()
 //   g = await godot.launch({project, scene, vr: true})   // fake VR player (BOT_VR=1): g.vr({head, look, left, right,
@@ -62,6 +62,14 @@ export function safeCwd(dir?: string): string {
 const running = new Map<number, Game>();
 
 /** Copy the bridge + control server into the project and make sure the GDev autoload is there (like `gdev start`). */
+/** True when `rel` is tracked in proj's git and unchanged from HEAD (so not someone's local edit). */
+async function committedCopy(proj: string, rel: string): Promise<boolean> {
+  const p = Bun.spawn(["git", "-C", proj, "ls-files", "--error-unmatch", rel], { stdout: "ignore", stderr: "ignore" });
+  if ((await p.exited) !== 0) return false;
+  const d = Bun.spawn(["git", "-C", proj, "diff", "--quiet", "HEAD", "--", rel], { stdout: "ignore", stderr: "ignore" });
+  return (await d.exited) === 0;
+}
+
 export async function install(proj: string) {
   const dst = join(proj, "addons/gdev");
   await mkdir(dst, { recursive: true });
@@ -71,7 +79,9 @@ export async function install(proj: string) {
     if (!a || (b && a.equals(b))) continue;
     // A project copy that differs AND is newer is someone's edit (2026-11-12: a launch silently undid an agent's
     // addons/gdev fix): never overwrite it quietly. Skip it and say so; put the edit in ~/.local/share/gdev too.
-    if (b && (await stat(join(dst, f))).mtimeMs > (await stat(src)).mtimeMs) {
+    // A copy that is just the repo's committed one (a fresh worktree is "newer" by checkout time) is no edit: take the
+    // installed one (2026-11-26: control.gd's g.eval fix would otherwise never reach new worktrees of 9 repos).
+    if (b && (await stat(join(dst, f))).mtimeMs > (await stat(src)).mtimeMs && !(await committedCopy(proj, `addons/gdev/${f}`))) {
       const msg = `⚠ gdev install: NOT overwriting ${join(dst, f)}: it differs from the installed ${src} and is newer (an edit?). Copy it to ${GDEV} if it's the new version, or delete it to take the installed one.`;
       console.warn(msg);
       (globalThis as any).send?.("godot.ts", msg);
@@ -450,4 +460,69 @@ export async function launchGroup(o: { project: string; scene?: string; clients?
       status: () => Promise.all(games.map(async (g, i) => ({ machine: names[i], port: g.port, ...(await netStatus(g)) }))),
     };
   } catch (e) { await quit(); throw e; }
+}
+
+// --- g.eval regression cases (dev.debt runs them, kind "g.eval") --------------------------------------------------------
+// 2026-11-26: g.eval("a(); b()") ran only a() and silently dropped the rest (control.gd made it `return a(); b()`).
+// control.gd now splits `;` lists into statements (split_statements) and returns the last one's value. Each case runs
+// through control.gd's static run_code in a tiny headless project (godot-test: no controllers, idle priority).
+// code runs first; then check (if any) runs and its value must equal want. want "ERROR" = must come back as {error}.
+export const EVAL_CASES: { code: string; check?: string; want: unknown }[] = [
+  { code: "1 + 2", want: 3 },
+  { code: 'root.set_meta("a", 1); root.set_meta("b", 2)', check: '[root.get_meta("a", 0), root.get_meta("b", 0)]', want: [1, 2] },
+  { code: "var x := 2; x * 5", want: 10 },
+  { code: 'var s := "a;b"; s + \';\'', want: "a;b;" },
+  { code: 'var d := {"k": 1}; d["k"] += 1; d.k', want: 2 },
+  { code: "var a := 1; var b := 2; a + b;", want: 3 },
+  { code: 'root.set_meta("c", 0); if true: root.set_meta("c", 3); root.set_meta("c2", 4)', check: '[root.get_meta("c"), root.get_meta("c2", 0)]', want: [3, 4] },
+  { code: "var t := 0\nfor i in 3:\n\tt += i; t += 10\nt", want: 33 },
+  { code: 'root.set_meta("e", 7)', check: 'root.get_meta("e", 0)', want: 7 },
+  { code: "var n := Node.new(); root.add_child(n); n.name = \"EvalN\"; n.queue_free()", check: 'root.has_node("EvalN")', want: true },
+  { code: "1 + 2 # a; comment", want: 3 },
+  { code: "[1, 2].map(func(v): return v * 2)", want: [2, 4] },
+  { code: "var arr := [1,\n\t2]; arr.size()", want: 2 },
+  { code: "var q := 1\n{\"a\": q,\n\t\"b\": 2}", want: { a: 1, b: 2 } },
+  { code: "var u := 5; [u,\n\tu + 1]", want: [5, 6] },
+  { code: 'root.get_meta("e", 0); root.set_meta("f", 9)', check: 'root.get_meta("f", 0)', want: 9 },
+  { code: "this is not ( gdscript", want: "ERROR" },
+  { code: "   ", want: "ERROR" },
+];
+const EVAL_RUNNER_GD = `extends SceneTree
+
+func _initialize() -> void:
+	_go.call_deferred()
+
+func _go() -> void:
+	var C = load("res://control.gd")
+	var cases = JSON.parse_string(FileAccess.get_file_as_string("res://cases.json"))
+	var out := []
+	for c in cases:
+		var r: Dictionary = await C.run_code(c.code, self)
+		if c.has("check") and not r.has("error"):
+			r = await C.run_code(c.check, self)
+		out.append(r)
+	print("EVAL_RESULTS " + JSON.stringify(out))
+	quit()
+`;
+/** Run EVAL_CASES; returns what fails (empty = all pass). Takes a few seconds (one headless godot-test). */
+export async function evalCaseFailures(control = join(process.env.HOME!, ".local/share/gdev/control.gd")): Promise<string[]> {
+  const dir = join(process.env.HOME!, ".cache/gdev-eval-cases");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, "project.godot"), 'config_version=5\n\n[application]\nconfig/name="gdev eval cases"\n');
+  await copyFile(control, join(dir, "control.gd"));
+  await writeFile(join(dir, "runner.gd"), EVAL_RUNNER_GD);
+  await writeFile(join(dir, "cases.json"), JSON.stringify(EVAL_CASES.map(({ code, check }) => (check ? { code, check } : { code }))));
+  const p = Bun.spawn(["timeout", "90", join(process.env.HOME!, ".local/bin/godot-test"), "--headless", "--audio-driver", "Dummy", "--path", dir, "-s", "res://runner.gd"],
+    { cwd: safeCwd(dir), stdout: "pipe", stderr: "pipe" });
+  const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+  const line = out.split("\n").find(l => l.startsWith("EVAL_RESULTS "));
+  if (!line) return [`the eval case runner printed no EVAL_RESULTS: ${(out + err).trim().split("\n").slice(-6).join(" | ")}`];
+  const got: { value?: unknown; error?: string }[] = JSON.parse(line.slice("EVAL_RESULTS ".length));
+  const bad: string[] = [];
+  EVAL_CASES.forEach((c, i) => {
+    const r = got[i] ?? {};
+    const ok = c.want === "ERROR" ? "error" in r : !("error" in r) && JSON.stringify(r.value) === JSON.stringify(c.want);
+    if (!ok) bad.push(`${JSON.stringify(c.code)}${c.check ? ` then ${JSON.stringify(c.check)}` : ""}: got ${JSON.stringify(r)}, want ${JSON.stringify(c.want)}`);
+  });
+  return bad;
 }

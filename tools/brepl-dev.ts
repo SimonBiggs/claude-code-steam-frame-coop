@@ -303,6 +303,11 @@ export async function debt() {
   try { (globalThis as any).__breplLint?.("(async () => (WT = 1\n))"); issues.push({ kind: "brepl-guard", what: "brepl's shared-globals guard is not refusing generic globals (WT = ...)", fix: "reload dev.ts (loadModule('dev')) and check installGlobalsGuard()" }); } catch {}
   if (!(globalThis as any).__evalGuard) issues.push({ kind: "brepl-guard", what: "brepl's shared-globals guard is not installed", fix: "loadModule('dev')" });
   for (const f of globalsGuardFailures()) issues.push({ kind: "brepl-guard", what: `shared-globals guard test case fails: ${f}`, fix: "fix genericGlobals / declaredNames in dev.ts (tools/brepl-dev.ts) until GLOBALS_GUARD_CASES all pass" });
+  // Bun.$ must run bash, not Bun's own shell (which refuses two redirects / case, and silently mis-runs for loops, $?): installShellFix.
+  for (const f of await shellFixFailures()) issues.push({ kind: "brepl-shell", what: `Bun.$ shell case fails: ${f}`, fix: "fix installShellFix / bashScript in dev.ts (tools/brepl-dev.ts) until SHELL_CASES all pass" });
+  // g.eval must run every statement (control.gd _eval): `a(); b()` used to run only a() (godot.evalCaseFailures).
+  try { const { evalCaseFailures } = (globalThis as any).godot?.evalCaseFailures ? (globalThis as any).godot : await import(`${HOME}/.local/share/gdev/godot.ts?t=${Date.now()}`); for (const f of await evalCaseFailures())issues.push({ kind: "g.eval", what: `g.eval case fails: ${f}`, fix: "fix _eval / _split_statements in ~/.local/share/gdev/control.gd (tools/control.gd) until EVAL_CASES in godot.ts all pass" }); }
+  catch (e: any) { issues.push({ kind: "g.eval", what: `g.eval cases could not run: ${String(e?.message ?? e).split("\n")[0]}`, fix: "see evalCaseFailures in godot.ts" }); }
   // Known bug patterns ("never just one ant"): flag every instance in the staging copy, not just the one we saw.
   const PATTERNS: { kind: string; files: string; bad: string; unless?: string; fix: string; dirs?: string }[] = [
     { kind: "pad-A", files: "grab_focus", bad: "grab_focus", unless: "JOY_BUTTON_A|ui_input.gd|UiInput", fix: "should now work by design (UiKit.ensure_pad_ui_actions at startup); check the menu reaches it" },
@@ -414,7 +419,10 @@ export async function debt() {
       // when nobody works in it (no uncommitted files) and its branch hasn't moved for 12 h (2026-10-29: fresh
       // wt-deep-* worktrees were flagged for removal minutes after their agents started).
       // (A branch with commits of its own that main merged IS stale at once: land() removes those.)
+      // A worktree made in the last 12 h is busy too (its agent may not have edited anything yet, and a reused
+      // branch name keeps an old reflog: 2026-11-26 a fresh .wt/portal-deep2 was listed as stale).
       const busy = merged && ((await sh("git status --porcelain | head -1", path)).out !== ""
+        || Date.now() - (await stat(join(path, ".git")).then((s) => s.mtimeMs, () => 0)) < 12 * 3600 * 1000
         || ((await sh(`git rev-list --first-parent ${main} | grep -qx "$(git rev-parse ${br})" && echo y`, dir)).out === "y"
           && Date.now() / 1000 - +(await sh(`git log -g -1 --format=%ct ${br}`, dir)).out < 12 * 3600));
       if (merged && !busy) issues.push({ kind: "stale-worktree", what: `${r}: worktree ${path} (branch ${br} already merged)`, fix: `dev.removeWorktree(${JSON.stringify(path)}, ${JSON.stringify(br)}) (quits its Godots first)` });
@@ -1511,4 +1519,69 @@ function installGlobalsGuard() {
     g.__evalGuard = true;
   }
 }
-export function start() { (globalThis as any).fs ??= nodeFs; installGlobalsGuard(); }
+// BUN.$ RUNS BASH (2026-11-26): Bun.$ is Bun's own small shell, not bash. Bun 1.2.21's parser throws on things bash
+// runs fine: TWO redirects in one command (`cmd >/dev/null 2>&1`, `cat ~/x 2>/dev/null > ~/y`) -> 'expected a command
+// or assignment but got: "Redirect"', `case ... esac` -> "Unexpected ')'", `$((1+2))`, `f() { ...; }`. Agents read
+// the first as "brepl can't do ~ with a redirect" and fell back to the Bash tool. Worse, it SILENTLY runs some bash
+// differently: a `for` loop prints nothing (exit 1), `$?` and `${HOME:0:5}` stay literal, `1>&2` is ignored, and its
+// builtin ls doesn't sort. So Bun.$`...` now runs the command with real bash (`bash -c`; interpolated values
+// single-quoted, arrays spread as Bun does, {raw: s} kept raw) and returns the same ShellPromise (.text() .nothrow()
+// .quiet() .cwd() .env() .lines() work; a non-zero exit throws ShellError like before). Only a value bash can't take
+// (Bun.file / Response / Buffer / Blob redirects, a ShellPromise) uses Bun's own shell, which is the only one that
+// can; if Bun can't parse that either, its error says so. `import { $ } from "bun"` keeps Bun's own shell (the module
+// binding can't be patched): use Bun.$ or dev.sh(). dev.debt() runs SHELL_CASES (kind brepl-shell).
+const shQuote = (s: string) => (/^[\w@%+=:,./-]+$/.test(s) ? s : `'${s.replace(/'/g, `'\\''`)}'`);
+function bashArg(v: any): string {
+  if (typeof v === "string") return shQuote(v);
+  if (typeof v === "number" || typeof v === "bigint" || typeof v === "boolean") return String(v);
+  if (Array.isArray(v)) return v.map(bashArg).join(" ");
+  if (v && typeof v === "object" && Object.getPrototypeOf(v) === Object.prototype && typeof v.raw === "string" && Object.keys(v).length === 1) return v.raw;
+  throw new Error(`a ${v?.constructor?.name ?? typeof v} can't be passed to bash`);
+}
+/** The bash script a Bun.$ template means: literal parts as written, values quoted. Throws for values only Bun's shell takes. */
+export function bashScript(strings: TemplateStringsArray | string[], values: any[]): string {
+  let s = strings[0];
+  for (let i = 0; i < values.length; i++) s += bashArg(values[i]) + strings[i + 1];
+  return s;
+}
+function installShellFix() {
+  const g: any = globalThis;
+  const orig = (g.__bunShellOrig ??= Bun.$);  // the real Bun.$, kept across reloads so wrappers never nest
+  Bun.$ = new Proxy(orig, {
+    apply(target, self, args) {
+      const [strings, ...values] = args;
+      if (!Array.isArray(strings) || !Array.isArray((strings as any).raw)) return Reflect.apply(target, self, args);  // not a template call
+      let script: string | null = null;
+      try { script = bashScript(strings as any, values); } catch {}
+      if (script !== null) return target`bash -c ${script}`;
+      try { return Reflect.apply(target, self, args); }  // Bun-only values (Bun.file, Response...): Bun's shell
+      catch (e: any) { e.message += " (brepl: Bun's own shell runs this call because it passes a Bun.file/Response/Buffer value, and it can't parse the command: use a file path string instead so it runs in bash, or dev.sh(\"...\"))"; throw e; }
+    },
+  });
+  g.__shellFix = 2;
+}
+/** Bash that Bun's own shell refuses or runs wrong; Bun.$ must run it like bash: [template parts, values, expected stdout]. */
+export const SHELL_CASES: [string[], any[] | (() => any[]), string][] = [
+  [["echo ok >/dev/null 2>&1; echo done"], [], "done"],
+  [["cat ~/.cache/brepl-shell-test.in 2>/dev/null > ~/.cache/brepl-shell-test.out; cat ~/.cache/brepl-shell-test.out"], [], "shell-test"],
+  [["case ", " in a*) echo A;; *) echo other;; esac"], ["ab"], "A"],
+  [["printf '%s|' ", " ", " 2>/dev/null > ~/.cache/brepl-shell-test.out; cat ~/.cache/brepl-shell-test.out"], ["it's; echo $HOME `id` ~", ["x y", "z"]], "it's; echo $HOME `id` ~|x y|z|"],
+  [["echo ", " 2>&1 >/dev/null; echo ", ""], ["a", { raw: "$((1+2))" }], "3"],
+  [["for i in 1 2; do echo -n $i; done"], [], "12"],
+  [["true; echo $? ${HOME:0:1}"], [], "0 /"],
+  [["echo hidden 1>&2; f() { echo fn; }; f"], [], "fn"],
+  [["cat < ", ""], () => [new Response("from-bun-shell")], "from-bun-shell"],  // a Bun-only value still works (Bun's shell)
+];
+export async function shellFixFailures(): Promise<string[]> {
+  const bad: string[] = [];
+  if ((globalThis as any).__shellFix !== 2) bad.push("Bun.$ -> bash is not installed (loadModule('dev'))");
+  await Bun.write(join(HOME, ".cache/brepl-shell-test.in"), "shell-test\n");
+  for (const [parts, values, want] of SHELL_CASES) {
+    const strings: any = Object.assign([...parts], { raw: [...parts] });
+    try {
+      const got = (await (Bun.$ as any)(strings, ...(typeof values === "function" ? values() : values)).nothrow().quiet().text()).trim();
+      if (got !== want) bad.push(`${JSON.stringify(parts.join("${}"))}: printed ${JSON.stringify(got)}, want ${JSON.stringify(want)}`);
+    } catch (e: any) { bad.push(`${JSON.stringify(parts.join("${}"))}: threw ${String(e?.message ?? e).split("\n")[0]}`); }
+  }
+  return bad;
+}export function start() { (globalThis as any).fs ??= nodeFs; installGlobalsGuard(); installShellFix(); }

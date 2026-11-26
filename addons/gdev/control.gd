@@ -2,7 +2,7 @@ extends Node
 ## gdev control server (offscreen test runs only). The bridge adds it when GDEV_CONTROL_PORT is set.
 ## HTTP on 127.0.0.1:<port>: POST a JSON body {"cmd": ..., args...}, get JSON back. Commands:
 ##   ping                          scene, fps, frame, size
-##   eval   {code}                 run GDScript (statements, or one expression whose value is returned);
+##   eval   {code}                 run GDScript: statements (lines or `a(); b()`), the last one's value returned;
 ##                                 `tree`, `root`, `scene` and find(pattern) are in scope, await works
 ##   tree   {path?, depth?}        node tree: name, class, visible, text, rect, focus
 ##   ui     {}                     visible Controls with text or focus, plus which one has focus
@@ -291,35 +291,123 @@ func _run(r: Dictionary) -> Dictionary:
 
 # --- eval ------------------------------------------------------------------------
 
-const _STATEMENT := ["var ", "for ", "if ", "while ", "return", "await ", "pass", "match ", "print"]
+## Lines starting with these are statements, never "return"ed as the value.
+const _STATEMENT := ["var ", "const ", "for ", "if ", "elif ", "else", "while ", "return", "await ", "pass", "match ",
+	"print", "break", "continue", "func ", "@", "#"]
+## Block headers: a `;` after one belongs to its inline body (`if x: a(); b()`), so such lines are never split.
+const _BLOCK := ["if ", "elif ", "else", "for ", "while ", "match ", "func "]
+const _ASSIGN := "^[\\w.\\[\\]\"]+\\s*[-+*/%]?=[^=]"
 
 
 func _eval(code: String) -> Dictionary:
-	var lines := code.strip_edges().split("\n")
-	var single := lines.size() == 1 and not _STATEMENT.any(func(k: String) -> bool: return lines[0].begins_with(k)) \
-		and not RegEx.create_from_string("^[\\w.\\[\\]\"]+\\s*[-+*/]?=[^=]").search(lines[0])
-	# Several lines: the last one is returned too when it's an unindented expression (like the brepl).
-	var last := lines[lines.size() - 1]
-	if not single and not last.begins_with("\t") and not last.begins_with(" ") and not _STATEMENT.any(func(k: String) -> bool: return last.begins_with(k)) \
-			and not RegEx.create_from_string("^[\\w.\\[\\]\"]+\\s*[-+*/]?=[^=]").search(last):
-		lines[lines.size() - 1] = "return " + last
-	var body := "\treturn " + lines[0] if single else "\n".join(Array(lines).map(func(l: String) -> String: return "\t" + l))
-	var src := "extends RefCounted\nvar tree: SceneTree\nvar root: Node\nvar scene: Node\n" \
+	return await run_code(code, get_tree())
+
+
+## Statements -> one per line. A `;`-separated list (`a(); b(); c`) is split at every `;` outside strings, brackets
+## and comments, so EVERY statement runs and the last one's value is returned. (Before 2026-11-26 a one-line
+## `a(); b()` became `return a(); b()`: only a() ran and the rest was silently dropped.)
+static func split_statements(code: String) -> PackedStringArray:
+	return _split(code)[0]
+
+
+## [lines, index of the line the LAST statement starts on] (a statement can run over several lines inside brackets).
+static func _split(code: String) -> Array:
+	var out := PackedStringArray()
+	var last_start := 0
+	var depth := 0
+	var indent := ""  # the indent of the line the current statement started on (a `[1,\n\t2]; b` continuation ends it)
+	for line in code.strip_edges().replace("\r", "").split("\n"):
+		if depth == 0:
+			indent = line.substr(0, line.length() - line.lstrip(" \t").length())
+			last_start = out.size()
+		var block := depth == 0 and _BLOCK.any(func(k: String) -> bool: return line.strip_edges().begins_with(k))
+		var parts := PackedStringArray()
+		var cur := ""
+		var quote := ""
+		var i := 0
+		while i < line.length():
+			var c := line[i]
+			if quote != "":
+				cur += c
+				if c == "\\" and i + 1 < line.length():
+					cur += line[i + 1]
+					i += 1
+				elif c == quote:
+					quote = ""
+			elif c == "\"" or c == "'":
+				quote = c
+				cur += c
+			elif c == "#":
+				cur += line.substr(i)
+				break
+			elif c in "([{":
+				depth += 1
+				cur += c
+			elif c in ")]}":
+				depth = maxi(depth - 1, 0)
+				cur += c
+			elif c == ";" and depth == 0 and not block:
+				parts.append(cur)
+				cur = ""
+			else:
+				cur += c
+			i += 1
+		parts.append(cur)
+		var first := true
+		for p in parts:
+			var t := p.strip_edges()
+			if t == "" and not first:
+				continue  # `a();` or `a();;`: nothing after the `;`
+			if not first:
+				last_start = out.size()
+			out.append(p.rstrip(" \t") if first else indent + t)
+			first = false
+	return [out, last_start]
+
+
+## The GDScript sources an eval tries, in order: the last statement returned as the value when it's an unindented
+## expression (like the brepl; it may run over several lines inside brackets), then the same code without that `return` (a void call such as queue_free() can't
+## be returned, so that source fails to compile and the plain one runs; the value is then null).
+static func eval_sources(code: String) -> PackedStringArray:
+	var split := _split(code)
+	var lines: PackedStringArray = split[0]
+	var at: int = split[1]
+	var head := "extends RefCounted\nvar tree: SceneTree\nvar root: Node\nvar scene: Node\n" \
 		+ "func find(pattern: String) -> Array: return root.find_children(pattern, \"\", true, false)\n" \
-		+ "func run():\n" + body + "\n\treturn null\n"
-	var s := GDScript.new()
-	s.source_code = src
-	if s.reload() != OK:
-		return {"error": "GDScript did not compile (see the game log for the line)", "source": src}
-	var o: Object = s.new()
-	o.tree = get_tree()
-	o.root = get_tree().root
-	o.scene = get_tree().current_scene
-	var v = await o.run()
-	return {"value": _jsonable(v)}
+		+ "func run():\n"
+	var plain := "\n".join(Array(lines).map(func(l: String) -> String: return "\t" + l))
+	var out := PackedStringArray()
+	var last := lines[at]
+	if not last.begins_with("\t") and not last.begins_with(" ") and last.strip_edges() != "" \
+			and not _STATEMENT.any(func(k: String) -> bool: return last.begins_with(k)) \
+			and not RegEx.create_from_string(_ASSIGN).search(last):
+		var ret := lines.duplicate()
+		ret[at] = "return " + last
+		out.append(head + "\n".join(Array(ret).map(func(l: String) -> String: return "\t" + l)) + "\n\treturn null\n")
+	out.append(head + plain + "\n\treturn null\n")
+	return out
 
 
-func _jsonable(v, depth := 0):
+## Run eval code in `tree`: {"value": ...} or {"error": ..., "source": ...}. Static so tests can run it without a server.
+static func run_code(code: String, tree: SceneTree) -> Dictionary:
+	if code.strip_edges() == "":
+		return {"error": "nothing to eval (empty code)"}
+	var srcs := eval_sources(code)
+	for src in srcs:
+		var s := GDScript.new()
+		s.source_code = src
+		if s.reload() != OK:
+			continue
+		var o: Object = s.new()
+		o.tree = tree
+		o.root = tree.root
+		o.scene = tree.current_scene
+		var v = await o.run()
+		return {"value": _jsonable(v)}
+	return {"error": "GDScript did not compile (see the game log for the line)", "source": srcs[srcs.size() - 1]}
+
+
+static func _jsonable(v, depth := 0):
 	if depth > 4:
 		return str(v)
 	match typeof(v):
@@ -349,7 +437,7 @@ func _jsonable(v, depth := 0):
 
 # --- tree / ui -----------------------------------------------------------------------
 
-func _describe(n: Node) -> Dictionary:
+static func _describe(n: Node) -> Dictionary:
 	var d := {"name": str(n.name), "class": n.get_class(), "path": str(n.get_path())}
 	var sc: Script = n.get_script()
 	if sc and sc.resource_path != "":
