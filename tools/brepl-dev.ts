@@ -68,6 +68,20 @@ export const bots = {
     // Pass (docs/GAME_DEV_GUIDE.md "Testing"): multibot.verdict, the one shared rule.
     const allowNoResult = NET_NO_RESULT_OK[id];
     const parse = ({ out, code }: { out: string; code: number }, mode: string) => ({ mode, ...verdict(out, code, { allowNoResult }) });
+    // A bot that changes game files names its own multibot --copies run in its header ("##   tools/multibot.ts --copies
+    // ..."): run exactly that, never a plain run that fails by design (2026-11-26: dev.land(..., ["safe_apply"]) FAILed
+    // "this bot changes game files" although the branch was fine).
+    const header = await Bun.file(join(proj, "tests", id + "_bot.gd")).text().catch(() => "");
+    const own = header.match(/^##\s+tools\/multibot\.ts (--copies[^\n]*res:\/\/tests\/\S+_bot\.tscn)\s*$/m);
+    if (own) {
+      const r = await $`${process.execPath} tools/multibot.ts ${{ raw: own[1] }} --json`.cwd(proj).env({ ...process.env }).nothrow().quiet();
+      const out = r.stdout.toString() + r.stderr.toString();
+      let j: any = null;
+      try { j = JSON.parse(r.stdout.toString().trim().split("\n").filter(l => l.startsWith("{")).pop() ?? ""); } catch {}
+      const runs = j ? j.machines.map((m: any) => ({ mode: `copies:${m.machine}`, ...m })) : [{ mode: "copies", pass: false, result: `multibot --copies gave no JSON (exit ${r.exitCode}): ${out.slice(-300)}`, failed: [], errors: [] }];
+      if (j) for (const [k, a] of Object.entries(j.agree ?? {}) as [string, any][]) if (!a.ok) runs.push({ mode: `agree ${k}`, pass: false, result: a.values.join(" / "), failed: [], errors: [] });
+      return { id, pass: !!j?.pass && runs.every((x: any) => x.pass), secs: Math.round((Date.now() - t0) / 1000), runs };
+    }
     const runs: any[] = [parse(await one({}, "--fixed-fps 60 --quit-after 3600"), "local")];
     if (o.net) {
       const g = await runGroup({ scene, project: proj, joiners: o.joiners ?? 1, seconds: o.seconds ?? 180, quiet: true, allowNoResult });
