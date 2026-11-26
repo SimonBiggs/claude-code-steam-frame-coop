@@ -907,6 +907,12 @@ export async function commitMissingUids(bdir: string, branch: string): Promise<{
 }
 
 export async function land(branch: string, genTests: string[], botId: string, otherBots: string[], msg: string) {
+  // Wrong arguments fail loudly before anything is merged (2026-11-26: dev.land('x', [], null, ...) merged, then
+  // crashed in join(STAGE, "games", null) mid-landing). Tools / core landings pass botId 'arcade_lobby'.
+  if (typeof branch !== "string" || !branch) return { stop: "args", out: "dev.land: branch must be a branch name" };
+  if (typeof botId !== "string" || !botId) return { stop: "args", out: "dev.land: botId must be a game id, or 'arcade_lobby' for a tools / core landing" };
+  genTests ??= []; otherBots ??= []; msg ??= branch;
+  if (!Array.isArray(genTests) || !Array.isArray(otherBots)) return { stop: "args", out: "dev.land: genTests and otherBots must be arrays of test / bot ids" };
   // A landing that stopped leaves its merge in wt-merge (and its files in staging) for a retry. Landing a DIFFERENT
   // branch next must not carry it along (2026-10-31: a tools-only landing nearly deployed saga-deep, whose tests had
   // failed): start again from main, staging included.
@@ -1058,7 +1064,7 @@ export async function land(branch: string, genTests: string[], botId: string, ot
 
 export function help() {
   return `dev — Claude's dev loop (brepl). Image paths returned/shown come back as pictures via the brepl MCP tool.
-  dev.land(branch, genTests, botId, otherBots, msg)  merge a finished branch via wt-merge, test in staging, deploy TV+Decks, merge live main
+  dev.land(branch, genTests, botId, otherBots, msg)  (botId 'arcade_lobby' for tools/core) merge a finished branch via wt-merge, test in staging, deploy TV+Decks, merge live main
   dev.playstats({since?, game?})     how the family really played: RUN lines every machine pushed to the Steam Machine
   dev.playRuns({since?, game?})      those RUN lines as objects ({device, recv, ...run})
   dev.favourites({full?})            who plays what: MEASURED play first (30 days), per person + TV, arcade est vs measured; chatter = talk, not play (play-record)
