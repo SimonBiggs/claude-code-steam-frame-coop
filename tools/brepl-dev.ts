@@ -308,6 +308,11 @@ export async function debt() {
   // g.eval must run every statement (control.gd _eval): `a(); b()` used to run only a() (godot.evalCaseFailures).
   try { const { evalCaseFailures } = (globalThis as any).godot?.evalCaseFailures ? (globalThis as any).godot : await import(`${HOME}/.local/share/gdev/godot.ts?t=${Date.now()}`); for (const f of await evalCaseFailures())issues.push({ kind: "g.eval", what: `g.eval case fails: ${f}`, fix: "fix _eval / _split_statements in ~/.local/share/gdev/control.gd (tools/control.gd) until EVAL_CASES in godot.ts all pass" }); }
   catch (e: any) { issues.push({ kind: "g.eval", what: `g.eval cases could not run: ${String(e?.message ?? e).split("\n")[0]}`, fix: "see evalCaseFailures in godot.ts" }); }
+  // A headless godot-test -s run with a SCRIPT ERROR must exit non-zero within seconds, never hang (godot-test's error
+  // watch, 2026-11-26), and every test runner must cap every Godot it starts with `timeout` (runnerTimeoutFailures).
+  try { const { scriptHangFailures } = (globalThis as any).godot?.scriptHangFailures ? (globalThis as any).godot : await import(`${HOME}/.local/share/gdev/godot.ts?t=${Date.now()}`); for (const f of await scriptHangFailures()) issues.push({ kind: "godot-test-hang", what: `godot-test hang case fails: ${f}`, fix: "fix the SCRIPT ERROR watch in ~/.local/bin/godot-test (tools/godot-test) until HANG_CASES in godot.ts all pass" }); }
+  catch (e: any) { issues.push({ kind: "godot-test-hang", what: `godot-test hang cases could not run: ${String(e?.message ?? e).split("\n")[0]}`, fix: "see scriptHangFailures in godot.ts" }); }
+  for (const f of await runnerTimeoutFailures()) issues.push({ kind: "runner-no-timeout", what: `Godot started without a timeout: ${f}`, fix: "prefix it with `timeout N` (a stuck Godot must never hold a runner forever)" });
   // Known bug patterns ("never just one ant"): flag every instance in the staging copy, not just the one we saw.
   const PATTERNS: { kind: string; files: string; bad: string; unless?: string; fix: string; dirs?: string }[] = [
     { kind: "pad-A", files: "grab_focus", bad: "grab_focus", unless: "JOY_BUTTON_A|ui_input.gd|UiInput", fix: "should now work by design (UiKit.ensure_pad_ui_actions at startup); check the menu reaches it" },
@@ -1585,3 +1590,25 @@ export async function shellFixFailures(): Promise<string[]> {
   }
   return bad;
 }export function start() { (globalThis as any).fs ??= nodeFs; installGlobalsGuard(); installShellFix(); }
+
+
+/** Test runners (~/GodotProjects/<game>/tests/run.sh, merge-game, duo-nightly-tests) must start every Godot under
+ *  `timeout`: a run that never quits (a SCRIPT ERROR before quit(), a stuck import) would hold the runner forever. */
+export async function runnerTimeoutFailures(): Promise<string[]> {
+  const gp = join(HOME, "GodotProjects");
+  const files: string[] = [join(HOME, ".local/bin/merge-game"), join(HOME, ".local/bin/duo-nightly-tests")];
+  for (const d of await readdir(gp).catch(() => [] as string[])) {
+    if (d.startsWith(".") || d.startsWith("wt-")) continue;
+    const f = join(gp, d, "tests/run.sh");
+    if (await stat(f).then(() => true, () => false)) files.push(f);
+  }
+  const out: string[] = [];
+  for (const f of files) {
+    const lines = (await readFile(f, "utf8").catch(() => "")).split("\n");
+    lines.forEach((l, i) => {
+      if (/^\s*#/.test(l) || /^\s*GODOT=/.test(l)) return;
+      if (/("\$GODOT"|\bgodot-test\b|\bgodot\b\s+--)/.test(l.replace(/#.*$/, "")) && !/\btimeout\b/.test(l)) out.push(`${f.replace(HOME, "~")}:${i + 1}: ${l.trim().slice(0, 120)}`);
+    });
+  }
+  return out;
+}

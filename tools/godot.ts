@@ -512,8 +512,9 @@ export async function evalCaseFailures(control = join(process.env.HOME!, ".local
   await copyFile(control, join(dir, "control.gd"));
   await writeFile(join(dir, "runner.gd"), EVAL_RUNNER_GD);
   await writeFile(join(dir, "cases.json"), JSON.stringify(EVAL_CASES.map(({ code, check }) => (check ? { code, check } : { code }))));
+  // GODOT_TEST_ERRORS_OK: the "ERROR" cases compile broken code on purpose (godot-test would kill / fail the run).
   const p = Bun.spawn(["timeout", "90", join(process.env.HOME!, ".local/bin/godot-test"), "--headless", "--audio-driver", "Dummy", "--path", dir, "-s", "res://runner.gd"],
-    { cwd: safeCwd(dir), stdout: "pipe", stderr: "pipe" });
+    { cwd: safeCwd(dir), stdout: "pipe", stderr: "pipe", env: { ...process.env, GODOT_TEST_ERRORS_OK: "1" } });
   const [out, err] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
   const line = out.split("\n").find(l => l.startsWith("EVAL_RESULTS "));
   if (!line) return [`the eval case runner printed no EVAL_RESULTS: ${(out + err).trim().split("\n").slice(-6).join(" | ")}`];
@@ -524,5 +525,44 @@ export async function evalCaseFailures(control = join(process.env.HOME!, ".local
     const ok = c.want === "ERROR" ? "error" in r : !("error" in r) && JSON.stringify(r.value) === JSON.stringify(c.want);
     if (!ok) bad.push(`${JSON.stringify(c.code)}${c.check ? ` then ${JSON.stringify(c.check)}` : ""}: got ${JSON.stringify(r)}, want ${JSON.stringify(c.want)}`);
   });
+  return bad;
+}
+
+/** A headless `godot-test -s` run with a SCRIPT ERROR must exit non-zero quickly and visibly, never hang (2026-11-26:
+ *  a SceneTree script whose _initialize stops on an error never reaches quit(), and Godot idles forever; godot-test
+ *  now kills it GODOT_TEST_ERROR_GRACE s after the first error). Runs a scratch project WITH the gdev bridge autoload
+ *  (like every game). Returns what fails (empty = all pass). dev.debt kind godot-test-hang. */
+export const HANG_CASES: { name: string; src: string; env?: Record<string, string>; want: "ok" | "fail" }[] = [
+  { name: "ok", src: 'extends SceneTree\nfunc _initialize() -> void:\n\tprint("HANG CASE RAN")\n\tquit(0)\n', want: "ok" },
+  { name: "parse-error", src: 'extends SceneTree\nfunc _initialize() -> void:\n\tvar x: int = "no"\n\tquit(0)\n', want: "fail" },
+  { name: "loads-broken-script", src: 'extends SceneTree\nfunc _initialize() -> void:\n\tvar n = load("res://broken_game.gd").new()\n\tprint(n)\n\tquit(0)\n', want: "fail" },
+  { name: "error-then-quit-0", src: 'extends SceneTree\nfunc _initialize() -> void:\n\tvar g := GDScript.new()\n\tg.source_code = "extends Node\\nfunc b(:\\n"\n\tg.reload()\n\tquit(0)\n', want: "fail" },
+  { name: "errors-ok-env", src: 'extends SceneTree\nfunc _initialize() -> void:\n\tvar g := GDScript.new()\n\tg.source_code = "extends Node\\nfunc b(:\\n"\n\tg.reload()\n\tquit(0)\n', env: { GODOT_TEST_ERRORS_OK: "1" }, want: "ok" },
+];
+export async function scriptHangFailures(gt = join(HOME, ".local/bin/godot-test")): Promise<string[]> {
+  const dir = join(HOME, ".cache/godot-test-hang-check");
+  await mkdir(join(dir, "addons/gdev"), { recursive: true });
+  for (const f of ["bridge.gd", "gdev_main.gd", "control.gd", "caption.gd"]) await copyFile(join(HOME, ".local/share/gdev", f), join(dir, "addons/gdev", f));
+  await writeFile(join(dir, "project.godot"), 'config_version=5\n\n[application]\nconfig/name="godot-test hang check"\n\n[autoload]\n\nGDev="*res://addons/gdev/bridge.gd"\n');
+  await writeFile(join(dir, "broken_game.gd"), 'extends Node\nfunc f() -> int:\n\tvar x: int = "oops"\n\treturn x\n');
+  for (const c of HANG_CASES) await writeFile(join(dir, `case_${c.name.replace(/-/g, "_")}.gd`), c.src);
+  const run = async (args: string[], env: Record<string, string> = {}) => {
+    const t0 = Date.now();
+    const p = Bun.spawn(["timeout", "60", gt, "--headless", "--audio-driver", "Dummy", "--path", dir, ...args],
+      { cwd: safeCwd(dir), stdout: "pipe", stderr: "pipe", env: { ...process.env, GODOT_TEST_ERROR_GRACE: "2", ...env } });
+    const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+    return { out: out + err, code, secs: (Date.now() - t0) / 1000 };
+  };
+  await run(["--import"]);
+  const bad: string[] = [];
+  await Promise.all(HANG_CASES.map(async c => {
+    const r = await run(["-s", `res://case_${c.name.replace(/-/g, "_")}.gd`], c.env);
+    const tail = r.out.trim().split("\n").slice(-3).join(" | ").slice(0, 300);
+    if (r.code === 124) bad.push(`${c.name}: HUNG until timeout 60 s (${tail})`);
+    else if (c.want === "ok" && r.code !== 0) bad.push(`${c.name}: exit ${r.code}, want 0 (${tail})`);
+    else if (c.want === "fail" && r.code === 0) bad.push(`${c.name}: exit 0, want non-zero (${tail})`);
+    else if (c.want === "fail" && r.secs > 25) bad.push(`${c.name}: took ${Math.round(r.secs)} s to fail (want < 25 s with grace 2 s)`);
+    else if (c.name === "loads-broken-script" && !/godot-test: ✖/.test(r.out)) bad.push(`${c.name}: no visible "godot-test: ✖" line (${tail})`);
+  }));
   return bad;
 }

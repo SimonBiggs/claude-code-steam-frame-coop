@@ -21,12 +21,14 @@ COMMIT=$(git -C "$LIVE" rev-parse --short HEAD)
 cd "$SRC" || exit 1
 timeout 900 godot-test --headless --path . --import >/dev/null 2>&1
 if [ $# -gt 0 ]; then TESTS=("$@"); else TESTS=(); for f in tests/*_test.gd; do TESTS+=("$(basename "$f" .gd)"); done; fi
-# lan_update_test compiles a deliberately broken script (its "Parse Error" is expected); it decides by exit code.
+# lan_update_test compiles a deliberately broken script (its "Parse Error" is expected); it decides by exit code
+# (GODOT_TEST_ERRORS_OK=1 for it, or godot-test would turn its exit 0 into 1).
 run_one() {
   local t=$1 how t0 code
   if [ -f "tests/$t.tscn" ]; then how="--fixed-fps 60 res://tests/$t.tscn"; else how="-s res://tests/$t.gd"; fi
   t0=$(date +%s)
-  DUO_PORT=$((20000 + RANDOM % 10000)) timeout 1800 godot-test --headless --path . $how >"$OUT/logs/$t.log" 2>&1
+  local ok_env=0; [ "$t" = lan_update_test ] && ok_env=1  # (godot-test exits 1 on any SCRIPT ERROR unless told)
+  GODOT_TEST_ERRORS_OK=$ok_env DUO_PORT=$((20000 + RANDOM % 10000)) timeout 1800 godot-test --headless --path . $how >"$OUT/logs/$t.log" 2>&1
   code=$?
   echo "$t $code $(( $(date +%s) - t0 ))" >>"$OUT/.results"
 }

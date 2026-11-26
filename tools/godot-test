@@ -17,9 +17,55 @@ export SAVE_TEST=1
 # real game, which keeps only 5 logs - so a few bot runs rotated the family's real session logs away (2026-11-19:
 # the evening's VR Kitchen Rush / Rhythm Band logs were gone by 00:45). A --log-file the caller passes wins.
 logs=()
-if [[ " $* " != *" --log-file "* ]]; then
+log=""
+script_run=0
+prev=""
+for a in "$@"; do
+  [ "$a" = "--" ] && break  # game args after --
+  case "$a" in -s|--script) script_run=1 ;; esac
+  [ "$prev" = "--log-file" ] && log="$a"
+  prev="$a"
+done
+if [ -z "$log" ]; then
   ld="${XDG_RUNTIME_DIR:-/tmp}/godot-test-logs"
   mkdir -p "$ld" && find "$ld" -name '*.log' -mmin +720 -delete 2>/dev/null
-  logs=(--log-file "$ld/$(date +%H%M%S)-$$.log")
+  log="$ld/$(date +%H%M%S)-$$.log"
+  logs=(--log-file "$log")
 fi
-exec bwrap "${args[@]}" godot "${logs[@]}" "$@"
+# Script errors in a --script run must never hang or pass silently (2026-11-26, Portal Explorer): when a SceneTree
+# script's _initialize()/_init() stops on a SCRIPT ERROR (a game script it load()s doesn't compile, a null call...),
+# quit() is never reached and Godot runs its empty main loop FOREVER (with or without the gdev bridge: plain
+# Godot does it too). So for -s/--script runs godot-test watches the run's log:
+#  - after the first SCRIPT ERROR, Godot gets GODOT_TEST_ERROR_GRACE seconds (default 15) to quit by itself,
+#    then it is killed and godot-test exits 1 with a "godot-test: ✖" line naming the error;
+#  - a run that quits with 0 but logged a SCRIPT ERROR exits 1 too (same ✖ line).
+# Tests that compile broken scripts ON PURPOSE (lan_update_test, gdev's eval cases) set GODOT_TEST_ERRORS_OK=1.
+# Regression check: godot-test-selfcheck (dev.debt kind godot-test-hang).
+if [ "$script_run" = 0 ] || [ "${GODOT_TEST_ERRORS_OK:-0}" = 1 ]; then
+  exec bwrap "${args[@]}" godot "${logs[@]}" "$@"
+fi
+grace="${GODOT_TEST_ERROR_GRACE:-15}"
+bwrap "${args[@]}" godot "${logs[@]}" "$@" 0<&0 &
+pid=$!
+trap 'kill -TERM $pid 2>/dev/null; wait $pid 2>/dev/null; exit 143' TERM INT HUP
+first_err() { grep -m1 -A1 'SCRIPT ERROR' "$log" 2>/dev/null | tr -s ' \n' ' ' | cut -c1-300; }
+err_at=""
+while kill -0 $pid 2>/dev/null; do
+  if [ -z "$err_at" ] && grep -q 'SCRIPT ERROR' "$log" 2>/dev/null; then err_at=$SECONDS; fi
+  if [ -n "$err_at" ] && [ $((SECONDS - err_at)) -ge "$grace" ]; then
+    echo "godot-test: ✖ SCRIPT ERROR in a --script run and Godot did not quit within ${grace} s: killed it, exit 1 (no silent hang). First error: $(first_err) Log: $log" >&2
+    kill -TERM $pid 2>/dev/null
+    for _ in 1 2 3 4 5 6; do kill -0 $pid 2>/dev/null || break; sleep 0.5; done
+    kill -KILL $pid 2>/dev/null
+    wait $pid 2>/dev/null
+    exit 1
+  fi
+  sleep 0.5 & wait $!
+done
+wait $pid
+code=$?
+if [ "$code" = 0 ] && grep -q 'SCRIPT ERROR' "$log" 2>/dev/null; then
+  echo "godot-test: ✖ the --script run quit with 0 but logged a SCRIPT ERROR: exit 1. First error: $(first_err) Log: $log (GODOT_TEST_ERRORS_OK=1 if the errors are on purpose)" >&2
+  exit 1
+fi
+exit $code
