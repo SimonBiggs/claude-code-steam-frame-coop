@@ -451,6 +451,8 @@ export async function debt() {
   // Deck by itself (2026-11-20: Portal Explorer's launch.sh). Notes (*.md, e.g. FEEDBACK.md) never change the game. Markers ~/.cache/game-deployed/<Slug>.<deck> = commit, dir, title.
   const sb = (await sh(`for m in ~/.cache/game-deployed/*.*; do [ -f "$m" ] || continue; c=$(sed -n 1p "$m"); dir=$(sed -n 2p "$m"); t=$(sed -n 3p "$m"); [ -d "$dir/.git" ] || continue; git -C "$dir" diff --quiet "$c" HEAD -- . ':(exclude)tests' ':(exclude)*.md' 2>/dev/null || echo "$(basename "$m")|$dir|$t"; done`)).out.trim();
   for (const l of sb ? sb.split("\n") : []) { const [m, dir, title] = l.split("|"); const deck = m.slice(m.indexOf(".") + 1);
+    // Already queued for an offline Deck (game-deploy-deck queue -> duo-cmd job, reported as device-behind): not separate debt.
+    if (await stat(join(HOME, ".cache/duo-pending-cmds", `${deck}-game-${m.slice(0, m.indexOf("."))}.sh`)).then(() => true, () => false)) continue;
     issues.push({ kind: "standalone-behind", what: `${title} on ${deck} is behind its repo (${dir.replace(HOME, "~")})`, fix: `test it (tests/run.sh), then game-deploy-deck ${dir} "${title}" ${deck}` }); }
   // Our games in every Steam library (family-games-sync, 2026-11-25): every game project is listed in
   // ~/.config/family-games/games.tsv (or on a '# skip: ~/GodotProjects/x' line), has Steam art (game-art), and every
