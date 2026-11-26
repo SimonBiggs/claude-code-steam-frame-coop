@@ -34,6 +34,10 @@ extends Node3D
 ##    His hearts sit on the blade. Touch pickups, chests, levers and shop items with either hand.
 ##  - Scaling: more monster health and extra monsters with more players; deeper = tougher; HEROIC =
 ##    tougher, faster, more elites, no checkpoints, no free potion.
+##  - CINDER'S TOOLS (floorgen.gd TOOLS): the HOOK ROPE, MIGHTY MITT and BREEZE JAR lie on floors 2, 3 and 5 (the party's
+##    for the run). Bonk a GATE (a chasm, a big block, brambles) while you hold its tool and it opens onto a little vault
+##    with a HEART PIECE; 4 pieces = +1 heart for every hero. Each camp's shop has a heart piece on a gold stand that costs
+##    more than a floor's gold (save up!) and a TOP TIP sign. Mimics are rare now (a surprise) and drop more gold.
 ##  - Persistence (main.save "deep"): best depth, bosses beaten, unlocked hats (the hat stand in the
 ##    practice room: bonk it to swap hats) and starting perks (a potion, +1 heart, bombs).
 ## The host runs everything; other machines build the same floor from the seed and mirror the state
@@ -90,7 +94,13 @@ const HOARD_SPOT := Vector3(-3.2, 0.0, 1.05)
 const ALTAR_SPOTS: Array[Vector2] = [Vector2(2.3, 4.2), Vector2(3.6, 3.3), Vector2(4.3, 1.9)]  ## relic stones at the camp
 const BOSS_HOARD := 40  ## a boss adds this (x biome) to Cinder's hoard
 const WISH_HOARD := 15  ## a kept wish adds this (x biome) to Cinder's hoard
-const SHOP_SPOTS: Array[Vector2] = [Vector2(-3.0, 0.2), Vector2(-1.0, 0.2), Vector2(1.0, 0.2), Vector2(3.0, 0.2)]
+const SHOP_SPOTS: Array[Vector2] = [Vector2(-3.0, 0.2), Vector2(-1.0, 0.2), Vector2(1.0, 0.2), Vector2(3.0, 0.2), Vector2(1.8, 2.5)]  ## [4]: the big one (Loot.BIG_SPOT)
+const TIP_SPOT := Vector2(3.6, -3.6)  ## the camp's TOP TIP sign
+## TOP TIPS at the camp (one brother teaching the other): Cinder's tools first once you have them, then these.
+const TOP_TIPS: Array[String] = ["4 heart pieces make a new heart!", "A chest that breathes is a MIMIC. Bonk it first!",
+	"Save your gold for the heart piece on the gold stand!", "Bonk a cracked wall three times to find a secret!",
+	"Stand on the switches together, or run quick!", "A friend standing by you helps you back up!",
+	"Gates on the map? Come back with the right tool!", "Spikes go down: count, then run across!"]
 
 var main: Node
 var net: Node
@@ -151,6 +161,9 @@ var soot_node: Node3D
 var heal_t := {}  ## Host: slot -> seconds since a HEALER's last heal ring
 var _gold := 0
 var _keys := 0
+var tools := 0  ## Host: Cinder's tools the party holds (bits, floorgen.gd TOOLS); every machine: d_tools[0]
+var pieces := 0  ## Host: heart pieces found this run (every 4th = +1 heart for everyone)
+var tip_node: Label3D
 var tally := {"kills": 0, "floors": [], "bosses": 0, "wipes": 0, "revives": 0, "keys": 0, "doors": 0, "secrets": 0,
 	"puzzles": 0, "bought": 0, "potions": 0, "hurts": 0, "blocks": 0, "reflects": 0, "rooms": 0, "downs": 0,
 	"pickups": 0, "checkpoints": 0, "zones": {}, "bombs": 0, "abilities": 0, "traps": 0, "chests": 0, "by": {}, "wishes": 0,
@@ -768,14 +781,21 @@ func floor_goal(pos: Vector3) -> Dictionary:
 	if String(net.state_get("d_phase", "")) != "play" or int(net.state_get("d_lock", -1)) >= 0:
 		return {}
 	var keys_at: Array = []
+	var grabs: Array = []
 	var picks: Dictionary = pickups if is_host() else _mirror_picks
 	for id in picks:
-		if int((picks[id] as Dictionary).get("kind", -1)) == Loot.KEY:
+		var pk_kind := int((picks[id] as Dictionary).get("kind", -1))
+		if pk_kind == Loot.KEY:
 			keys_at.append((picks[id] as Dictionary)["p"])
+		elif pk_kind == Loot.PIECE:
+			grabs.append([(picks[id] as Dictionary)["p"], "Grab the heart piece!"])
+		elif Loot.tool_of_kind(pk_kind) >= 0:
+			grabs.append([(picks[id] as Dictionary)["p"], "Grab the %s!" % String(Loot.NAMES[pk_kind])])
+	var tl: Array = net.state_get("d_tools", [0, 0])
 	return FloorGen.way_on(f, pos, {"walk": view.pass_bits, "open": int(net.state_get("d_open", 0)),
 		"keys": int(net.state_get("d_keys", 0)), "seen": int(net.state_get("d_seen", 1)),
 		"cleared": int(net.state_get("d_cleared", 1)), "keys_at": keys_at, "stairs": view.stairs_at,
-		"portal": net.state_get("d_portal", null)})
+		"portal": net.state_get("d_portal", null), "tools": int(tl[0]) if tl.size() > 0 else 0, "grabs": grabs})
 
 
 func _feet_of(slot: int) -> Vector3:
@@ -902,6 +922,9 @@ func start_run(m: String) -> void:
 	stats.clear()
 	_gold = 0
 	_keys = 0
+	pieces = 0
+	tools = FloorGen.tools_by(FloorGen.global_floor(zone, floor_i))  # (DD_FLOOR starts: the tools a run has by then)
+	_sync_tools()
 	_ensure_stats()
 	start_gear_g = FloorGen.global_floor(zone, floor_i)
 	if start_gear_g > 0:
@@ -949,7 +972,7 @@ func load_floor(z: int, fl: int, k: String) -> void:
 	zone = z
 	floor_i = fl
 	kind = k
-	f = FloorGen.generate(seed_v, z, fl, mode == "heroic", k)
+	f = FloorGen.generate(seed_v, z, fl, mode == "heroic", k, tools)
 	_wish_start()
 	rumble_t = -1.0
 	net.state_set("d_friend", 0)
@@ -979,6 +1002,10 @@ func load_floor(z: int, fl: int, k: String) -> void:
 		var r: Dictionary = rooms[i]
 		if r.has("key_at"):
 			_spawn_pick(Loot.KEY, FloorGen.to_world(f, i, r["key_at"]), false)
+		if r.has("piece_at"):
+			_spawn_pick(Loot.PIECE, FloorGen.to_world(f, i, r["piece_at"]) + Vector3(0, 0.3, 0), false)
+		if r.has("tool_at") and int(f.get("tool", -1)) >= 0:
+			_spawn_pick(Loot.tool_kind(int(f["tool"])), FloorGen.to_world(f, i, r["tool_at"]) + Vector3(0, 0.3, 0), false)
 	for mm in FloorGen.mimic_list(f):
 		foes.spawn(FloorGen.F_MIMIC, FloorGen.to_world(f, int((mm as Array)[0]), (mm as Array)[1]), int((mm as Array)[0]))
 	if k == "shop":
@@ -1005,10 +1032,10 @@ func load_floor(z: int, fl: int, k: String) -> void:
 			_spawn_pick(Loot.COIN, FloorGen.to_world(f, 0, Friends.CAMP_SPOTS[i2]) + Vector3(0, 0.6, 0), true)
 	else:
 		if (fl == 0 or z < FLOOR_CHECKPOINT_ZONES) and bool(diff()["checkpoints"]) and z < FloorGen.ZONE_COUNT:  # no checkpoints in the endless depths
-			checkpoint = {"zone": z, "stats": stats.duplicate(true), "gold": _gold, "floor": fl}
+			checkpoint = {"zone": z, "stats": stats.duplicate(true), "gold": _gold, "floor": fl, "tools": tools, "pieces": pieces}
 			tally["checkpoints"] = int(tally["checkpoints"]) + 1
 		elif checkpoint.is_empty():
-			checkpoint = {"zone": z, "stats": stats.duplicate(true), "gold": _gold, "floor": fl}
+			checkpoint = {"zone": z, "stats": stats.duplicate(true), "gold": _gold, "floor": fl, "tools": tools, "pieces": pieces}
 		if not runrec.is_empty() and not (tally["floors"] as Array).is_empty():
 			(runrec["floor_times"] as Array).append([int((tally["floors"] as Array).back()), snappedf(float(runrec.get("clock", 0.0)) - float(runrec["floor_t0"]), 0.1)])
 			runrec["floor_t0"] = float(runrec.get("clock", 0.0))
@@ -1022,7 +1049,7 @@ func load_floor(z: int, fl: int, k: String) -> void:
 		_record_depth()
 		if not Friends.pick(f).is_empty():
 			tally["friend_floors"] = int(tally["friend_floors"]) + 1
-	net.state_set("d_floor", [seed_v, z, fl, k, mode == "heroic"])
+	net.state_set("d_floor", [seed_v, z, fl, k, mode == "heroic", tools])
 	_sync_doors()
 	net.state_set("d_chests", 0)
 	net.state_set("d_pots", 0)
@@ -1061,6 +1088,10 @@ func _sync_money() -> void:
 	net.state_set("d_keys", _keys)
 
 
+func _sync_tools() -> void:
+	net.state_set("d_tools", [tools, pieces])
+
+
 ## Host: everyone was knocked out.
 func _wipe() -> void:
 	tally["wipes"] = int(tally["wipes"]) + 1
@@ -1080,6 +1111,9 @@ func _after_wipe() -> void:
 		_ensure_stats()
 		_gold = int(checkpoint["gold"])
 		_keys = 0
+		tools = int(checkpoint.get("tools", tools))
+		pieces = int(checkpoint.get("pieces", pieces))
+		_sync_tools()
 		stats_dirty = true
 		net.event("d_banner", ["TRY THIS FLOOR AGAIN!" if int(checkpoint.get("floor", 0)) == floor_i and int(checkpoint["zone"]) == zone else "BACK TO THE CHECKPOINT", "info"])
 		load_floor(int(checkpoint["zone"]), int(checkpoint.get("floor", 0)), "floor")
@@ -1108,7 +1142,7 @@ func _telemetry(end: String) -> void:
 	r["secs"] = snappedf(float(runrec.get("clock", 0.0)), 0.1)
 	if lock_room >= 0 and String(((f["rooms"] as Array)[lock_room] as Dictionary)["role"]) == "boss":
 		r["boss_phase_reached"] = int(runrec["boss_phase"])
-	for k2 in ["kills", "wipes", "revives", "downs", "potions", "bombs", "secrets", "puzzles", "keys", "chests", "bought", "hurts", "blocks", "reflects", "traps", "falls", "heals"]:
+	for k2 in ["kills", "wipes", "revives", "downs", "potions", "bombs", "secrets", "puzzles", "keys", "chests", "bought", "hurts", "blocks", "reflects", "traps", "falls", "heals", "gates", "pieces", "tools", "mimics"]:
 		r[k2] = tally.get(k2, 0)
 	r["dmg_by"] = (tally["by"] as Dictionary).duplicate()
 	r["fall_tells"] = tally.get("fall_tells", 0)
@@ -1248,7 +1282,7 @@ func music_mood(m: String) -> void:
 # --- Building the floor (every machine) -------------------------------------------------------------
 
 func _build_floor(fl: Dictionary) -> void:
-	var key := "%d/%d/%d/%s" % [int(fl["seed"]), int(fl["zone"]), int(fl["floor"]), String(fl["kind"])]
+	var key := "%d/%d/%d/%s/%d" % [int(fl["seed"]), int(fl["zone"]), int(fl["floor"]), String(fl["kind"]), int(fl.get("tools_in", 0))]
 	if key == built_key:
 		return
 	built_key = key
@@ -1327,6 +1361,7 @@ func _build_shop_props() -> void:
 		smu.scale = Vector3.ONE * 1.25
 		add_child(smu)
 		shop_nodes.append(smu)
+	_build_tip_sign()
 	if Relics.altar_after(int(f.get("floor", 0))):
 		# The relic altar: three glowing stones in the corner (relics sit on them; deep._build_altar).
 		var ab := MeshKit.Builder.new()
@@ -1355,9 +1390,16 @@ func _refresh_shop(stock: Array) -> void:
 		n.position = FloorGen.to_world(f, 0, SHOP_SPOTS[i])
 		add_child(n)
 		shop_nodes.append(n)
+		var big := i == Loot.BIG_SPOT
 		var b := MeshKit.Builder.new()
-		b.cylinder(0.3, 0.36, 0.8, MeshKit.at(Vector3(0, 0.4, 0)), Color(0.45, 0.42, 0.5), 10)
-		b.cylinder(0.38, 0.38, 0.06, MeshKit.at(Vector3(0, 0.83, 0)), Color(1.0, 0.8, 0.3))
+		if big:
+			# The thing worth saving for: a gold stand.
+			b.cylinder(0.34, 0.44, 0.8, MeshKit.at(Vector3(0, 0.4, 0)), Color(0.85, 0.65, 0.25), 12)
+			b.cylinder(0.46, 0.46, 0.08, MeshKit.at(Vector3(0, 0.84, 0)), Color(1.0, 0.85, 0.35), 14, true)
+			b.torus(0.5, 0.03, MeshKit.at(Vector3(0, 0.04, 0)), Color(1.0, 0.85, 0.35), 18, 4, true)
+		else:
+			b.cylinder(0.3, 0.36, 0.8, MeshKit.at(Vector3(0, 0.4, 0)), Color(0.45, 0.42, 0.5), 10)
+			b.cylinder(0.38, 0.38, 0.06, MeshKit.at(Vector3(0, 0.83, 0)), Color(1.0, 0.8, 0.3))
 		n.add_child(MeshKit.instance(b.build(), false))
 		var sold := int(it[2]) != 0
 		if not sold:
@@ -1376,6 +1418,21 @@ func _refresh_shop(stock: Array) -> void:
 		l.position = Vector3(0.0, 1.85, 0.0)
 		l.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y if main.vr_rig == null else BaseMaterial3D.BILLBOARD_DISABLED
 		n.add_child(l)
+		if not sold:
+			n.set_meta("price", int(it[1]))
+			n.set_meta("price_label", l)
+			if big:
+				var save := Label3D.new()
+				save.text = "SAVE UP!"
+				save.font_size = 40
+				save.pixel_size = 0.004
+				save.outline_size = 14
+				save.outline_modulate = Color(0, 0, 0, 0.95)
+				save.modulate = Color(1.0, 0.6, 0.65)
+				save.position = Vector3(0.0, 2.15, 0.0)
+				save.billboard = l.billboard
+				n.add_child(save)
+				n.set_meta("save_label", save)
 		var nm := Label3D.new()
 		nm.text = String(Loot.NAMES[int(it[0])])
 		nm.font_size = 40
@@ -1384,6 +1441,64 @@ func _refresh_shop(stock: Array) -> void:
 		nm.outline_modulate = Color(0, 0, 0, 0.95)
 		nm.position = Vector3(0.0, 0.5, 0.42)
 		n.add_child(nm)
+	_shop_afford()
+
+
+## Prices you can't pay yet go red; the big one says SAVE UP! until the party has the gold (every machine, on d_gold).
+func _shop_afford() -> void:
+	var gold := int(net.state_get("d_gold", 0))
+	for n in shop_nodes:
+		if not is_instance_valid(n) or not n.has_meta("price"):
+			continue
+		var short := gold < int(n.get_meta("price"))
+		(n.get_meta("price_label") as Label3D).modulate = Color(1.0, 0.45, 0.45) if short else UiKit.GOLD
+		if n.has_meta("save_label"):
+			(n.get_meta("save_label") as Label3D).text = "SAVE UP! %d MORE" % (int(n.get_meta("price")) - gold) if short else "YOU CAN BUY IT!"
+
+
+## The camp's TOP TIP sign: a tip for the newest tool the party holds, else one of TOP_TIPS (seeded by the camp).
+func _build_tip_sign() -> void:
+	var tl: Array = net.state_get("d_tools", [0, 0])
+	var held := int(tl[0]) if tl.size() > 0 else 0
+	var text := ""
+	var h := absi(hash([int(f.get("seed", 0)), int(f.get("zone", 0)), int(f.get("floor", 0)), "tip"]))
+	for i in range(FloorGen.TOOLS.size() - 1, -1, -1):
+		if held & (1 << i) != 0 and h % 2 == 0:
+			text = String(FloorGen.TOOLS[i]["tip"])
+			break
+	if text == "":
+		text = TOP_TIPS[h % TOP_TIPS.size()]
+	var b := MeshKit.Builder.new()
+	b.cylinder(0.06, 0.07, 1.3, MeshKit.at(Vector3(0, 0.65, 0)), Color(0.5, 0.35, 0.22), 6)
+	b.rounded_box(Vector3(1.5, 0.75, 0.08), 0.04, MeshKit.at(Vector3(0, 1.4, 0)), Color(0.62, 0.45, 0.28))
+	var sign_n := MeshKit.instance(b.build(), false)
+	sign_n.position = FloorGen.to_world(f, 0, TIP_SPOT)
+	add_child(sign_n)
+	shop_nodes.append(sign_n)
+	tip_node = Label3D.new()
+	tip_node.text = "TOP TIP\n" + _wrap(text, 18)
+	tip_node.font_size = 40
+	tip_node.pixel_size = 0.0042
+	tip_node.outline_size = 14
+	tip_node.outline_modulate = Color(0, 0, 0, 0.95)
+	tip_node.modulate = Color(1.0, 0.95, 0.75)
+	tip_node.position = Vector3(0.0, 1.45, 0.06)
+	tip_node.billboard = BaseMaterial3D.BILLBOARD_FIXED_Y if main.vr_rig == null else BaseMaterial3D.BILLBOARD_DISABLED
+	sign_n.add_child(tip_node)
+
+
+static func _wrap(text: String, width: int) -> String:
+	var lines: Array[String] = []
+	var cur := ""
+	for w in text.split(" "):
+		if cur != "" and cur.length() + 1 + w.length() > width:
+			lines.append(cur)
+			cur = w
+		else:
+			cur = w if cur == "" else cur + " " + w
+	if cur != "":
+		lines.append(cur)
+	return "\n".join(lines)
 
 
 # --- Host: every frame -----------------------------------------------------------------------------
@@ -1709,6 +1824,8 @@ func _foe_died(id: int, m: Dictionary, slot: int) -> void:
 	var boss := Foes.is_boss(kind)
 	foes.remove(id)
 	tally["kills"] = int(tally["kills"]) + 1
+	if kind == FloorGen.F_MIMIC:
+		tally["mimics"] = int(tally.get("mimics", 0)) + 1
 	main.awards.add(maxi(slot, 0), "bops")
 	poof(c, (FloorGen.zone_data(zone)["glow"] as Color).lightened(0.2), 90 if boss else 32)
 	shake(0.9 if boss else 0.12)  # (TV / Deck camera only: the VR view never shakes)
@@ -2420,6 +2537,39 @@ func _hit_secret(at: Vector3) -> bool:
 	return false
 
 
+## Host: a bonk near `at`: a shut GATE there opens if the party holds its tool (Cinder's tools, floorgen.gd TOOLS);
+## without it the gate says which tool it wants.
+func _hit_gate(at: Vector3, slot: int) -> bool:
+	if f.is_empty() or kind != "floor":
+		return false
+	var dl: Array = f["doors"]
+	for di in dl.size():
+		var d: Dictionary = dl[di]
+		if int(d["type"]) != FloorGen.GATE or open_bits & (1 << di) != 0:
+			continue
+		var m := FloorGen.door_world(f, di)
+		if Vector2(at.x - m.x, at.z - m.z).length() > 1.6:
+			continue
+		var t := int(d.get("tool", 0))
+		var ti: Dictionary = FloorGen.tool_info(t)
+		if tools & (1 << t) == 0:
+			if not _poke_cd.has("g%d" % di):
+				_poke_cd["g%d" % di] = 2.5
+				main.sound_at("ui_error", m, -8.0)
+				net_popup(m + Vector3(0, 1.6, 0), "NEEDS THE %s" % String(ti.get("name", "")), "bad")
+			return true
+		open_bits |= 1 << di
+		_sync_doors()
+		tally["gates"] = int(tally.get("gates", 0)) + 1
+		main.sound_at({"chasm": "whoosh", "block": "crash", "bramble": "whoosh"}.get(String(ti.get("gate", "")), "door"), m, 0.0, 0.8)
+		main.sound_at("reveal", m, -3.0)
+		poof(m + Vector3(0, 0.8, 0), ti.get("color", Color.WHITE), 40)
+		net_popup(m + Vector3(0, 1.8, 0), String(ti.get("name", "")), "crit")
+		if slot >= 0:
+			return true
+	return false
+
+
 func _break_pot(pid: int) -> void:
 	var bits := int(net.state_get("d_pots", 0))
 	if bits & (1 << pid) != 0:
@@ -2615,6 +2765,39 @@ func _collect(slot: int, k: int, p: Vector3) -> bool:
 		Loot.CHARM:
 			st["charm"] = 1
 			text = "LUCKY!"
+		Loot.HOOK, Loot.MITT, Loot.JAR:
+			var ti := Loot.tool_of_kind(k)
+			if tools & (1 << ti) != 0:
+				return false
+			tools |= 1 << ti
+			_sync_tools()
+			tally["tools"] = int(tally.get("tools", 0)) + 1
+			main.sound_at("level_up", p, 0.0)
+			main.sound_at("sparkle", p, -4.0)
+			poof(p + Vector3(0, 0.5, 0), FloorGen.TOOLS[ti]["color"], 40)
+			net.event("d_banner", [String(Loot.NAMES[k]) + "!", "level"])
+			text = String(FloorGen.TOOLS[ti]["tip"])
+		Loot.PIECE:
+			pieces += 1
+			tally["pieces"] = int(tally.get("pieces", 0)) + 1
+			var have := pieces % FloorGen.PIECES_PER_HEART
+			if have == 0:
+				# A whole heart: +1 heart for every hero (up to 8).
+				for s3 in stats:
+					var st3: Dictionary = stats[s3]
+					if int(st3["max"]) < 8:
+						st3["max"] = int(st3["max"]) + 1
+					st3["hp"] = mini(int(st3["max"]), int(st3["hp"]) + 1)
+				main.sound_at("level_up", p, 0.0)
+				poof(p + Vector3(0, 0.6, 0), Color(1.0, 0.35, 0.5), 60)
+				net.event("d_banner", ["NEW HEART!", "level"])
+				text = "+1 HEART FOR EVERYONE!"
+			else:
+				main.sound_at("sparkle", p, -2.0)
+				poof(p + Vector3(0, 0.6, 0), Color(1.0, 0.45, 0.6), 24)
+				net.event("d_banner", ["HEART PIECE %d/%d" % [have, FloorGen.PIECES_PER_HEART], "level"])
+				text = "%d/%d" % [have, FloorGen.PIECES_PER_HEART]
+			_sync_tools()
 		_:
 			if not Relics.is_relic_kind(k):
 				return false
@@ -2875,6 +3058,8 @@ func _attack(slot: int, pos: Vector3, yaw: float, dmg: float, reach: float, bash
 				hit = true
 	if _hit_secret(at + fwd * 0.3):
 		hit = true
+	if _hit_gate(at + fwd * 0.3, slot):
+		hit = true
 	if _try_cage(slot, at, 1.0):
 		hit = true
 	if not hit and not props_only:
@@ -2971,7 +3156,7 @@ func _knight_step(delta: float) -> void:
 				break
 	if swinging:
 		for q in [tip, (base + tip) * 0.5]:
-			if _hit_secret(q):
+			if _hit_secret(q) or _hit_gate(q, 0):
 				rig.pulse(VrRig.RIGHT, 0.6, 0.08)
 				break
 	if kind == "shop":
@@ -3303,7 +3488,7 @@ func on_state(key: String, value: Variant) -> void:
 					zone = int(a[1])
 					floor_i = int(a[2])
 					kind = String(a[3])
-					_build_floor(FloorGen.generate(int(a[0]), int(a[1]), int(a[2]), bool(a[4]), String(a[3])))
+					_build_floor(FloorGen.generate(int(a[0]), int(a[1]), int(a[2]), bool(a[4]), String(a[3]), int(a[5]) if a.size() >= 6 else -1))
 					_apply_all()
 			elif not is_host() and active:
 				stop()
@@ -3318,6 +3503,8 @@ func on_state(key: String, value: Variant) -> void:
 			view.set_pots(int(value))
 		"d_shop":
 			_refresh_shop(value if value is Array else [])
+		"d_gold":
+			_shop_afford()
 		"d_portal":
 			if value is Vector3:
 				view.stairs_at = value

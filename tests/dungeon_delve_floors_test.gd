@@ -7,7 +7,9 @@ extends SceneTree
 ##  - geometry: with every door open, a body the size of a hero can walk (0.25 m grid flood fill)
 ##    from the start to every doorway, switch, key, chest, stairs and monster spawn, and nothing spawns
 ##    inside a pillar; boss floors have exactly one boss room with the boss in it;
-##  - determinism: the same seed builds the same floor.
+##  - determinism: the same seed builds the same floor;
+##  - Cinder's tools: every gate opens with a tool held at the start or found first on the floor (FloorGen.gate_problem;
+##    tests/dungeon_delve_tools_test.gd tries every set of tools), and the tool and heart pieces can be walked to.
 ## And the run as a whole (fast logic checks, timed: they must stay well under 100 ms on a Deck):
 ##  - every floor of a run can be reached: start -> stairs (or the boss) on every floor of every biome;
 ##  - every boss room is fair (FloorGen.boss_room_problem: open arena, one boss of the biome, starting away
@@ -146,6 +148,9 @@ func _check(seed_value: int, zone: int, fl: int, heroic: bool) -> void:
 		_fail("%s: only %d rooms" % [tag, rooms.size()])
 	_follow_guide(f, tag)
 	# Logic.
+	var gp := FloorGen.gate_problem(f)
+	if gp != "":
+		_fail("%s: %s" % [tag, gp])
 	var reach := FloorGen.solve(f)
 	if reach.size() != rooms.size():
 		_fail("%s: %d of %d rooms reachable" % [tag, reach.size(), rooms.size()])
@@ -222,6 +227,10 @@ func _check(seed_value: int, zone: int, fl: int, heroic: bool) -> void:
 			can.call(FloorGen.to_world(f, i, (ch as Array)[0]), "chest in room %d" % i, 0.9)
 		if r.has("key_at"):
 			can.call(FloorGen.to_world(f, i, r["key_at"]), "key in room %d" % i, 0.5)
+		if r.has("tool_at"):
+			can.call(FloorGen.to_world(f, i, r["tool_at"]), "the tool in room %d" % i, 0.5)
+		if r.has("piece_at"):
+			can.call(FloorGen.to_world(f, i, r["piece_at"]), "the heart piece in room %d" % i, 0.5)
 		if r.has("stairs"):
 			can.call(FloorGen.to_world(f, i, r["stairs"]), "stairs", 0.6)
 		for p in r["pots"]:
@@ -241,13 +250,21 @@ func _follow_guide(f: Dictionary, tag: String) -> void:
 		var r: Dictionary = (f["rooms"] as Array)[i]
 		if bool(r.get("key", false)) and r.has("key_at"):
 			keys_at.append(FloorGen.to_world(f, i, r["key_at"]))
+	var tools := int(f.get("tools_in", 0))
+	var grabs: Array = []  # [world, text, tool or -1]
+	for i2 in (f["rooms"] as Array).size():
+		var r2: Dictionary = (f["rooms"] as Array)[i2]
+		if r2.has("piece_at"):
+			grabs.append([FloorGen.to_world(f, i2, r2["piece_at"]), "Grab the heart piece!", -1])
+		if r2.has("tool_at") and int(f.get("tool", -1)) >= 0:
+			grabs.append([FloorGen.to_world(f, i2, r2["tool_at"]), "Grab the %s!" % String(FloorGen.TOOLS[int(f["tool"])]["name"]), int(f["tool"])])
 	var stairs := Vector3.INF
 	if int(f["exit"]) >= 0 and ((f["rooms"] as Array)[int(f["exit"])] as Dictionary).has("stairs"):
 		stairs = FloorGen.to_world(f, int(f["exit"]), ((f["rooms"] as Array)[int(f["exit"])] as Dictionary)["stairs"])
 	var said: Array = []
 	for step in 80:
 		var g := FloorGen.way_on(f, pos, {"walk": open, "open": open, "keys": keys, "seen": seen, "cleared": 1,
-			"keys_at": keys_at, "stairs": stairs, "portal": null})
+			"keys_at": keys_at, "stairs": stairs, "portal": null, "tools": tools, "grabs": grabs})
 		if g.is_empty():
 			_fail("%s: the guide shows nothing in room %d (said %s)" % [tag, FloorGen.room_at(f, pos), str(said)])
 			return
@@ -270,6 +287,26 @@ func _follow_guide(f: Dictionary, tag: String) -> void:
 			continue
 		pos = goal
 		seen |= 1 << maxi(0, FloorGen.room_at(f, pos))
+		if String(g.get("what", "")) == "grab":
+			var left: Array = []
+			for grb in grabs:
+				if Vector3((grb as Array)[0].x, 0.0, (grb as Array)[0].z).distance_to(goal) < 0.01:
+					if int((grb as Array)[2]) >= 0:
+						tools |= 1 << int((grb as Array)[2])
+				else:
+					left.append(grb)
+			if left.size() == grabs.size():
+				_fail("%s: '%s' but nothing lies there" % [tag, text])
+				return
+			grabs = left
+			continue
+		if String(g.get("what", "")) == "gate":
+			var gd: Dictionary = (f["doors"] as Array)[int(g["door"])]
+			if int(gd["type"]) != FloorGen.GATE or tools & (1 << int(gd["tool"])) == 0 or open & (1 << int(g["door"])) != 0:
+				_fail("%s: '%s' points at a gate the party can't open" % [tag, text])
+				return
+			open |= 1 << int(g["door"])
+			continue
 		match text:
 			"Down the stairs!", "Beat the boss!":
 				guided += 1
@@ -326,6 +363,9 @@ func _run_floor_logic(f: Dictionary, tag: String) -> void:
 			_fail("%s: unfair boss room: %s" % [tag, why])
 	elif not reach.has(int(f["exit"])):
 		_fail("%s: the stairs can't be reached" % tag)
+	var gp := FloorGen.gate_problem(f)
+	if gp != "":
+		_fail("%s: %s" % [tag, gp])
 	_check_features(f, tag)
 
 

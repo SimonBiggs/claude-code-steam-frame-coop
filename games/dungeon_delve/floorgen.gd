@@ -8,7 +8,12 @@ extends RefCounted
 ##  - one door may be a PUZZLE door: two switches (floor plates or wall levers) in the room before it
 ##    must be on at the same time (a friend helps; alone, a switch stays on long enough to run);
 ##  - a SECRET room hides behind a cracked wall (hit it three times, or one bomb);
-##  - floor 4 of each zone ends in the BOSS room, behind the locked boss door.
+##  - floor 4 of each zone ends in the BOSS room, behind the locked boss door;
+##  - CINDER'S TOOLS (Soot hid them down here): the HOOK ROPE (floor 2), the MIGHTY MITT (floor 3) and the BREEZE
+##    JAR (floor 5) each open one kind of GATE (a chasm, a big stone block, a wall of brambles). Behind every gate
+##    is a little VAULT with a HEART PIECE (4 make a new heart). A floor only ever has gates for tools the party
+##    holds when it starts (generate's `tools`) or the tool lying on that floor, never behind its own gate
+##    (gate_problem() proves it; tests/dungeon_delve_tools_test.gd checks every floor with every set of tools).
 ## Rooms may have pillars (obstacles); walkable() and clamp() keep bodies out of walls and pillars.
 
 const CELL := 12.0  ## room pitch (11 m rooms + 1 m walls)
@@ -21,12 +26,24 @@ const ORIGIN := Vector3(80.0, 0.0, 0.0)  ## far away from the GENTLE dungeon
 const FLOORS_PER_ZONE := 4
 const ZONE_COUNT := 4  ## biomes: Slime Caves, Bone Crypt, Crystal Caves, Lava Forge (then the endless depths)
 
-enum { OPEN, LOCKED, SECRET, PUZZLE, BOSS }
+enum { OPEN, LOCKED, SECRET, PUZZLE, BOSS, GATE }
 const DIRS: Array[Vector2i] = [Vector2i(0, -1), Vector2i(1, 0), Vector2i(0, 1), Vector2i(-1, 0)]  ## N E S W
 
 ## Foe kinds (games/dungeon_delve/foes.gd uses the same numbers).
 enum { F_SLIME, F_SPITTER, F_SHIELD, F_SWARM, F_HEALER, F_MIMIC, F_CHARGER, F_BOMBER,
 	B_SLIME, B_BONE, B_FORGE, B_CRYSTAL }
+## CINDER'S TOOLS, in the order a run finds them ("floor": the first floor (global, 0-based) it can lie on; a party
+## that missed it finds it again on the next floor). Tool i is bit 1 << i of a party's `tools`. Each one opens a
+## GATE (door type GATE, door["tool"] = i): bonk the gate while the party holds the tool.
+const TOOLS: Array[Dictionary] = [
+	{"id": "hook", "name": "HOOK ROPE", "gate": "chasm", "floor": 1, "verb": "Hook over the gap!", "icon": "arrow_right",
+		"color": Color(0.9, 0.7, 0.45), "tip": "Bonk a gap in the floor to hook across!"},
+	{"id": "mitt", "name": "MIGHTY MITT", "gate": "block", "floor": 2, "verb": "Push the big block!", "icon": "shield",
+		"color": Color(1.0, 0.55, 0.35), "tip": "Big blocks: it's easier to PUSH than pull!"},
+	{"id": "jar", "name": "BREEZE JAR", "gate": "bramble", "floor": 4, "verb": "Suck up the brambles!", "icon": "drop",
+		"color": Color(0.55, 0.9, 1.0), "tip": "Bonk brambles with the jar to suck them up!"},
+]
+const PIECES_PER_HEART := 4  ## heart pieces (behind the gates, one in each camp's shop) that make a new heart
 const FOE_COST := {F_SLIME: 1.0, F_SPITTER: 2.0, F_SHIELD: 2.5, F_SWARM: 2.0, F_HEALER: 2.0, F_CHARGER: 3.0, F_BOMBER: 2.0}
 
 ## The biomes, top to bottom. "id" picks looks (foes.gd, floor_view.gd); "feature" is the biome's own
@@ -111,11 +128,13 @@ static func cell_center(cell: Vector2i) -> Vector3:
 
 
 ## A whole floor. kind "floor" or "shop" (the little camp between floors: one room).
-static func generate(seed_value: int, zone: int, floor_i: int, heroic: bool, kind: String = "floor") -> Dictionary:
+## tools: the party's tool bits when the floor starts (-1: what a run that grabbed every tool has by now, tools_by).
+static func generate(seed_value: int, zone: int, floor_i: int, heroic: bool, kind: String = "floor", tools: int = -1) -> Dictionary:
 	var rng := RandomNumberGenerator.new()
 	rng.seed = hash([seed_value, zone, floor_i, kind])
 	var f := {"seed": seed_value, "zone": zone, "floor": floor_i, "kind": kind, "rooms": [], "doors": [],
-		"switches": [], "traps": [], "start": 0, "exit": -1, "boss": -1, "key_rooms": [], "secret": -1}
+		"switches": [], "traps": [], "start": 0, "exit": -1, "boss": -1, "key_rooms": [], "secret": -1,
+		"tools_in": 0, "tool": -1, "tool_room": -1, "vaults": []}
 	if kind == "shop":
 		f["rooms"] = [_room(Vector2i(2, 2), "shop", 0)]
 		f["exit"] = 0
@@ -277,12 +296,180 @@ static func generate(seed_value: int, zone: int, floor_i: int, heroic: bool, kin
 			break
 	for i in rooms.size():
 		_fill_room(f, i, rng, zd, g, heroic, mod)
+	# Cinder's tools and their gates (their own rng: the rest of the floor is the same whatever tools you hold).
+	_add_gates(f, at, g, tools if tools >= 0 else tools_by(g), zd, heroic, mod)
 	return f
+
+
+## The tools a run that picked up every one has on arriving at global floor g.
+static func tools_by(g: int) -> int:
+	var bits := 0
+	for i in TOOLS.size():
+		if int(TOOLS[i]["floor"]) < g:
+			bits |= 1 << i
+	return bits
+
+
+## The tool lying on global floor g for a party holding `tools` (the first one due that they don't have), -1 none.
+static func tool_for_floor(g: int, tools: int) -> int:
+	for i in TOOLS.size():
+		if int(TOOLS[i]["floor"]) <= g and tools & (1 << i) == 0:
+			return i
+	return -1
+
+
+static func tool_info(i: int) -> Dictionary:
+	return TOOLS[i] if i >= 0 and i < TOOLS.size() else {}
+
+
+## The tool on this floor (in a room you can reach without any gate) and 0-2 gates, each into a new VAULT room (a
+## dead end) holding a HEART PIECE. Gates only ever need a tool held at the start or the one lying on this floor.
+static func _add_gates(f: Dictionary, at: Dictionary, g: int, tools: int, zd: Dictionary, heroic: bool, mod: String) -> void:
+	if String(f["kind"]) != "floor":
+		return
+	var rng := RandomNumberGenerator.new()
+	rng.seed = hash([int(f["seed"]), int(f["zone"]), int(f["floor"]), "gates", tools])
+	var rooms: Array = f["rooms"]
+	var doors: Array = f["doors"]
+	f["tools_in"] = tools
+	var here := tool_for_floor(g, tools)
+	f["tool"] = here
+	if here >= 0:
+		var cands: Array = []
+		for i in range(1, rooms.size()):
+			if String((rooms[i] as Dictionary)["role"]) in ["fight", "trap", "treasure"]:
+				cands.append(i)
+		if cands.is_empty():
+			for i2 in range(1, rooms.size()):
+				if String((rooms[i2] as Dictionary)["role"]) in ["exit"]:
+					cands.append(i2)
+		var tr := 0 if cands.is_empty() else int(cands[rng.randi_range(0, cands.size() - 1)])
+		var taken := _taken_of(f, tr)
+		var tr_d: Dictionary = rooms[tr]
+		tr_d["tool_at"] = free_spot(f, tr, rng, taken, 0.8, 3.0) if tr != 0 else Vector2(-2.0, 0.5)
+		f["tool_room"] = tr
+	var usable := tools | ((1 << here) if here >= 0 else 0)
+	if usable == 0:
+		return
+	var n := 1 if g < 6 else 1 + (1 if rng.randf() < 0.5 else 0)
+	var usable_list: Array = []
+	for i3 in TOOLS.size():
+		if usable & (1 << i3) != 0:
+			usable_list.append(i3)
+	for k in n:
+		var tool: int = here if k == 0 and here >= 0 else int(usable_list[rng.randi_range(0, usable_list.size() - 1)])
+		var order: Array = range(rooms.size())
+		_shuffle(order, rng)
+		var made := false
+		for ri in order:
+			var r: Dictionary = rooms[ri]
+			if String(r["role"]) in ["boss", "secret", "vault"]:
+				continue
+			var dirs: Array = [0, 1, 3, 2]
+			_shuffle(dirs, rng)
+			for d in dirs:
+				var nc: Vector2i = (r["cell"] as Vector2i) + DIRS[d]
+				if not _in_grid(nc) or at.has(nc) or not _wall_free(f, int(ri), int(d)):
+					continue
+				var vi := rooms.size()
+				rooms.append(_room(nc, "vault", int(r["depth"]) + 1))
+				(rooms[vi] as Dictionary)["parent"] = int(ri)
+				at[nc] = vi
+				var di := _add_door(rooms, doors, int(ri), vi, d, GATE)
+				(doors[di] as Dictionary)["tool"] = tool
+				_fill_room(f, vi, rng, zd, g, heroic, mod)
+				var vr: Dictionary = rooms[vi]
+				vr["piece"] = true
+				vr["piece_at"] = Vector2(0.0, 0.0)
+				(f["vaults"] as Array).append(vi)
+				made = true
+				break
+			if made:
+				break
+
+
+## Can a new doorway go in room ri's wall d? Nothing already in the room (monsters, chests, pots, switches, the key,
+## stairs, the tool, crystal clusters, lava vents) may stand within 2.2 m of it (the floors test checks the same).
+static func _wall_free(f: Dictionary, ri: int, d: int) -> bool:
+	var dp := door_local(d)
+	for p in _taken_of(f, ri):
+		if (p as Vector2).distance_to(dp) < 2.2:
+			return false
+	for sid in ((f["rooms"] as Array)[ri] as Dictionary)["switches"]:
+		if int(((f["switches"] as Array)[sid] as Dictionary)["wall"]) == d:
+			return false
+	return true
+
+
+## Spots already used in room ri (for placing one more thing).
+static func _taken_of(f: Dictionary, ri: int) -> Array:
+	var r: Dictionary = (f["rooms"] as Array)[ri]
+	var out: Array = [Vector2.ZERO] if ri == 0 else []
+	for fo in r["foes"]:
+		out.append((fo as Array)[1])
+	for ch in r["chests"]:
+		out.append((ch as Array)[0])
+	for p in r["pots"]:
+		out.append(p)
+	for sid in r["switches"]:
+		out.append(((f["switches"] as Array)[sid] as Dictionary)["p"])
+	for fe in (r.get("features", []) as Array):
+		out.append((fe as Dictionary)["p"])
+		out.append((fe as Dictionary)["p"] + Vector2(0.6, 0.0))
+		out.append((fe as Dictionary)["p"] - Vector2(0.6, 0.0))
+	for k in ["key_at", "stairs", "tool_at"]:
+		if r.has(k):
+			out.append(r[k])
+	return out
+
+
+## "" if every gate on floor f can be opened with the tools a party has (f["tools_in"]) or finds first on the floor,
+## else what's wrong. (tests/dungeon_delve_tools_test.gd, dungeon_delve_floors_test.gd.)
+static func gate_problem(f: Dictionary) -> String:
+	var rooms: Array = f["rooms"]
+	var doors: Array = f["doors"]
+	var tin := int(f.get("tools_in", 0))
+	var here := int(f.get("tool", -1))
+	var g := global_floor(int(f["zone"]), int(f["floor"]))
+	if String(f["kind"]) == "floor" and here != tool_for_floor(g, tin):
+		return "the wrong tool lies on this floor"
+	if here >= 0:
+		var tr := int(f.get("tool_room", -1))
+		if tr < 0 or not (rooms[tr] as Dictionary).has("tool_at"):
+			return "the %s isn't anywhere" % String(TOOLS[here]["name"])
+		# Reachable without the tool it brings (never behind its own gate) and without any gate at all.
+		if not solve(f, tin, false).has(tr):
+			return "the %s is behind a gate" % String(TOOLS[here]["name"])
+	for di in doors.size():
+		var d: Dictionary = doors[di]
+		if int(d["type"]) != GATE:
+			continue
+		var t := int(d.get("tool", -1))
+		if t < 0 or t >= TOOLS.size():
+			return "gate %d needs no tool" % di
+		if tin & (1 << t) == 0 and t != here:
+			return "gate %d needs the %s (not held, not on this floor)" % [di, String(TOOLS[t]["name"])]
+		var vr: Dictionary = rooms[int(d["b"])]
+		if String(vr["role"]) != "vault" or (vr["doors"] as Dictionary).size() != 1:
+			return "gate %d doesn't lead into a dead-end vault" % di
+		if not bool(vr.get("piece", false)) or not vr.has("piece_at"):
+			return "the vault behind gate %d has no heart piece" % di
+	for i in rooms.size():
+		if String((rooms[i] as Dictionary)["role"]) == "vault":
+			var ok := false
+			for di2 in ((rooms[i] as Dictionary)["doors"] as Dictionary).values():
+				if int((doors[int(di2)] as Dictionary)["type"]) == GATE:
+					ok = true
+			if not ok:
+				return "vault %d has no gate" % i
+	if solve(f).size() != rooms.size():
+		return "%d of %d rooms can be reached with the tools" % [solve(f).size(), rooms.size()]
+	return ""
 
 
 static func _room(cell: Vector2i, role: String, depth: int) -> Dictionary:
 	return {"cell": cell, "role": role, "depth": depth, "doors": {}, "parent": -1, "layout": 0, "foes": [],
-		"chests": [], "pots": [], "key": false, "traps": [], "switches": []}
+		"chests": [], "pots": [], "key": false, "traps": [], "switches": [], "features": []}
 
 
 static func _pick_dir(rng: RandomNumberGenerator) -> int:
@@ -542,10 +729,10 @@ static func _fill_room(f: Dictionary, i: int, rng: RandomNumberGenerator, zd: Di
 		"secret":
 			chest_p = 1.0
 	if rng.randf() < chest_p:
-		var mimic := g >= 2 and role != "secret" and rng.randf() < 0.3 + (0.15 if heroic else 0.0)
+		var mimic := g >= 2 and role != "secret" and rng.randf() < 0.1 + (0.06 if heroic else 0.0)  # rare: a surprise, not a rule
 		(r["chests"] as Array).append([free_spot(f, i, rng, taken, 0.9, 3.6), mimic])
 	if role in ["treasure", "secret"]:
-		(r["chests"] as Array).append([free_spot(f, i, rng, taken, 0.9, 3.6), role == "treasure" and g >= 3 and rng.randf() < 0.35])
+		(r["chests"] as Array).append([free_spot(f, i, rng, taken, 0.9, 3.6), role == "treasure" and g >= 3 and rng.randf() < 0.15])
 	if role == "secret":
 		r["heart"] = true  # a heart container (more hearts for the finder)
 	var pots := rng.randi_range(1, 3) if role != "boss" else 0
@@ -773,9 +960,11 @@ static func route(f: Dictionary, a: int, b: int, open_bits: int) -> Array:
 
 ## WHAT NOW? (deep.floor_goal, the gold chevrons + the pill): the way on from pos. st: "walk" (doors you can pass
 ## now), "open" (doors open), "keys" (held), "seen" / "cleared" (room bits), "keys_at" (keys lying about, world),
-## "stairs" (world or INF), "portal" (world or null). Returns {"p": where to head now (the next doorway on the way, or
+## "stairs" (world or INF), "portal" (world or null), "tools" (the party's tool bits), "grabs" ([[world, text]]: a tool or
+## heart piece lying about). Returns {"p": where to head now (the next doorway on the way, or
 ## the thing itself in this room), "goal": the thing, "text": the line}, {} for nothing / outside the rooms. In order:
-## the portal, the stairs once they can be reached, the boss, a locked door when you hold a key, a key, the nearest
+## the portal, a tool / heart piece to grab ("what": "grab"), a gate you hold the tool for ("what": "gate", "door"),
+## the stairs once they can be reached, the boss, a locked door when you hold a key, a key, the nearest
 ## unseen room, a shut puzzle door's switch, a cracked wall. tests/dungeon_delve_floors_test.gd follows it alone
 ## through every floor (it must reach the stairs / boss).
 static func way_on(f: Dictionary, pos: Vector3, st: Dictionary) -> Dictionary:
@@ -802,9 +991,36 @@ static func way_on(f: Dictionary, pos: Vector3, st: Dictionary) -> Dictionary:
 	var portal: Variant = st.get("portal", null)
 	var stairs: Vector3 = st.get("stairs", Vector3.INF)
 	var boss := int(f.get("boss", -1))
+	var what := ""
+	var door := -1
+	var tools := int(st.get("tools", 0))
 	if portal is Vector3 and reach.has(room_at(f, portal)):
 		goal = portal
 		text = "Jump in the portal!"
+	if goal == Vector3.INF:
+		# Cinder's tool / a heart piece lying where you can get to it (st "grabs": [[world, text], ...]).
+		var gd := INF
+		for gr0 in (st.get("grabs", []) as Array):
+			var gp: Vector3 = (gr0 as Array)[0]
+			if reach.has(room_at(f, gp)) and pos.distance_to(gp) < gd:
+				gd = pos.distance_to(gp)
+				goal = Vector3(gp.x, 0.0, gp.z)
+				text = String((gr0 as Array)[1])
+				what = "grab"
+	if goal == Vector3.INF:
+		# A gate you hold the tool for (the heart piece behind it).
+		var ob0 := int(st.get("open", 0))
+		var dl0: Array = f["doors"]
+		for di0 in dl0.size():
+			var d0: Dictionary = dl0[di0]
+			if int(d0["type"]) == GATE and ob0 & (1 << di0) == 0 and tools & (1 << int(d0.get("tool", 0))) != 0 and reach.has(int(d0["a"])):
+				goal = door_inside(f, di0, int(d0["a"]), 0.8)
+				text = String(TOOLS[int(d0["tool"])]["verb"])
+				what = "gate"
+				door = di0
+				break
+	if goal != Vector3.INF:
+		pass
 	elif stairs != Vector3.INF and reach.has(room_at(f, stairs)):
 		goal = stairs
 		text = "Down the stairs!"
@@ -862,13 +1078,14 @@ static func way_on(f: Dictionary, pos: Vector3, st: Dictionary) -> Dictionary:
 		var rt: Array = route(f, room, gr, walk)
 		if not rt.is_empty():
 			at = door_world(f, int(rt[0]))
-	return {"p": Vector3(at.x, 0.0, at.z), "goal": goal, "text": text}
+	return {"p": Vector3(at.x, 0.0, at.z), "goal": goal, "text": text, "what": what, "door": door}
 
 
 ## Logical solvability: starting with no keys, walking only through doors you can open (locked doors
-## take a key found on the way, puzzle doors need their switches' room, secret walls get broken),
+## take a key found on the way, puzzle doors need their switches' room, secret walls get broken, gates need
+## their tool: held at the start (`tools`, -1: f["tools_in"]) or picked up on the way when pick_tools),
 ## which rooms can be reached? Returns the set (Dictionary room -> true).
-static func solve(f: Dictionary) -> Dictionary:
+static func solve(f: Dictionary, tools: int = -1, pick_tools: bool = true) -> Dictionary:
 	var doors: Array = f["doors"]
 	var rooms: Array = f["rooms"]
 	var have := {0: true}
@@ -876,12 +1093,17 @@ static func solve(f: Dictionary) -> Dictionary:
 	var used := {}
 	var changed := true
 	var got_key := {}
+	var held := tools if tools >= 0 else int(f.get("tools_in", 0))
+	var tool_room := int(f.get("tool_room", -1))
 	while changed:
 		changed = false
 		for ri in have.keys():
 			if bool((rooms[ri] as Dictionary)["key"]) and not got_key.has(ri):
 				got_key[ri] = true
 				keys += 1
+				changed = true
+			if pick_tools and int(ri) == tool_room and int(f.get("tool", -1)) >= 0 and held & (1 << int(f["tool"])) == 0:
+				held |= 1 << int(f["tool"])
 				changed = true
 		for di in doors.size():
 			var d: Dictionary = doors[di]
@@ -894,6 +1116,8 @@ static func solve(f: Dictionary) -> Dictionary:
 			match t:
 				OPEN, SECRET:
 					ok = true
+				GATE:
+					ok = held & (1 << int(d.get("tool", 0))) != 0
 				PUZZLE:
 					ok = true
 					for sid in d["switches"]:

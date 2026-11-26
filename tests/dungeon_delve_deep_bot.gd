@@ -4,7 +4,7 @@ extends Node
 ##  - fights: healers first, else the nearest monster; goes round the back of shield bearers (and the
 ##    Bone Lord's shield phase); uses its ability (bow / dash / bash) and bombs on bosses;
 ##  - between fights: picks up loot, opens chests, stands on puzzle plates / bonks levers (bot k takes
-##    switch k), breaks cracked walls, takes keys to locked doors, explores unseen rooms, then stairs;
+##    switch k), breaks cracked walls, opens gates with Cinder's tools, takes keys to locked doors, explores unseen rooms, then stairs;
 ##  - in the shop buys what it can afford, then the stairs.
 ## The fake VR knight walks to monsters and swings the sword, holds the blade up to swat orbs, and
 ## follows the heroes otherwise. Navigation: room routes through open doors (floorgen.route), door
@@ -544,6 +544,13 @@ func _goal(slot: int, pos: Vector3, room: int, index: int) -> Dictionary:
 		if int(dd2["type"]) == FloorGen.SECRET and ob & (1 << di) == 0 and int(dd2["a"]) in reach_rooms:
 			var inside := FloorGen.door_inside(f, di, int(dd2["a"]), 0.75)
 			return {"p": inside, "near": 0.3, "bonk": true, "at": FloorGen.door_world(f, di)}
+	# Gates (Cinder's tools): bonk the ones we hold the tool for (a heart piece waits behind each).
+	var tl: Array = main.net.state_get("d_tools", [0, 0])
+	var held := int(tl[0]) if tl.size() > 0 else 0
+	for di in doors.size():
+		var dg: Dictionary = doors[di]
+		if int(dg["type"]) == FloorGen.GATE and ob & (1 << di) == 0 and held & (1 << int(dg.get("tool", 0))) != 0 and int(dg["a"]) in reach_rooms:
+			return {"p": FloorGen.door_inside(f, di, int(dg["a"]), 0.75), "near": 0.3, "bonk": true, "at": FloorGen.door_world(f, di)}
 	# Keys to locked doors.
 	if int(main.net.state_get("d_keys", 0)) > 0:
 		for di in doors.size():

@@ -5,7 +5,9 @@ extends Node3D
 ##    for the pits under crumbly tiles), so a whole floor costs a handful of draw calls.
 ##  - Doors: an iron portcullis per doorway that drops into the floor when the door can be walked
 ##    through (a gold lock plate on locked doors, glowing runes on puzzle doors, a big crowned door
-##    for the boss); secret doors are a cracked bit of wall that crumbles when broken.
+##    for the boss); secret doors are a cracked bit of wall that crumbles when broken; GATES (Cinder's tools,
+##    floorgen.gd TOOLS) are a chasm (a rope bridge drops over it when hooked), a big stone block (slides away
+##    when pushed) or a wall of brambles (whirls into the jar).
 ##  - Chests, pots, switches (floor plates, wall levers), traps (spikes, boulders, crumbly tiles) and
 ##    the stairs down, all driven by the host's replicated state (deep.gd).
 ##  - Walls running east-west are kept low so the TV camera (looking north) sees over them.
@@ -23,6 +25,7 @@ var rects: Array = []
 var obst: Array = []
 var pass_bits := 0
 var open_bits := 0
+var open_bits_seen := -1  ## the open bits set_pass saw last (-1 = a fresh floor: gates open without a show)
 var zone := 0
 var doors: Array[Dictionary] = []  ## door id -> {"bars": Node3D, "plug": Node3D, "want": float}
 var chests: Array[Dictionary] = []  ## chest id -> {"node", "lid", "room", "p": Vector3}
@@ -50,6 +53,7 @@ func clear() -> void:
 	traps.clear()
 	rects = []
 	obst = []
+	open_bits_seen = -1
 	stairs_ring = null
 	stairs_at = Vector3.INF
 	light = null
@@ -71,6 +75,7 @@ func build(fl: Dictionary) -> void:
 	traps.clear()
 	stairs_ring = null
 	stairs_at = Vector3.INF
+	open_bits_seen = -1
 	_chest_bits = 0
 	_pot_bits = 0
 	var zd: Dictionary = FloorGen.zone_data(zone)
@@ -248,7 +253,9 @@ func _build_doors(zd: Dictionary) -> void:
 			node.rotation.y = PI * 0.5
 		add_child(node)
 		var entry := {"bars": null, "plug": null, "y": 0.0, "type": t}
-		if t == FloorGen.SECRET:
+		if t == FloorGen.GATE:
+			_build_gate(node, entry, int(d.get("tool", 0)), ns, zd)
+		elif t == FloorGen.SECRET:
 			var pb := MeshKit.Builder.new()
 			var wall: Color = zd["wall"]
 			var hgt := WALL_NS if ns else WALL_EW
@@ -283,6 +290,87 @@ func _build_doors(zd: Dictionary) -> void:
 			node.add_child(bars)
 			entry["bars"] = bars
 		doors.append(entry)
+
+
+## A GATE in a doorway (node: at the doorway's middle, turned so local x runs along the wall; local -z / +z are the
+## two rooms). The obstacle is entry["plug"] (hidden / animated away once open); a chasm also gets a rope bridge.
+func _build_gate(node: Node3D, entry: Dictionary, tool: int, _ns: bool, zd: Dictionary) -> void:
+	var gate := String(FloorGen.tool_info(tool).get("gate", ""))
+	var tc: Color = FloorGen.tool_info(tool).get("color", Color.WHITE)
+	var pb := MeshKit.Builder.new()
+	var w := 2.0 * FloorGen.DOOR
+	match gate:
+		"chasm":
+			# A dark gap across the doorway, a glowing hook ring on a post at each side (the clue).
+			pb.box(Vector3(w + 0.1, 0.12, 1.4), MeshKit.at(Vector3(0.0, 0.02, 0.0)), Color(0.02, 0.02, 0.03))
+			pb.box(Vector3(w + 0.1, 0.05, 0.08), MeshKit.at(Vector3(0.0, 0.06, 0.72)), (zd["wall"] as Color).darkened(0.2))
+			pb.box(Vector3(w + 0.1, 0.05, 0.08), MeshKit.at(Vector3(0.0, 0.06, -0.72)), (zd["wall"] as Color).darkened(0.2))
+			for sz in [-1.0, 1.0]:
+				pb.cylinder(0.07, 0.09, 1.1, MeshKit.at(Vector3(FloorGen.DOOR - 0.15, 0.55, sz * 0.95)), Color(0.45, 0.32, 0.2), 8)
+				pb.torus(0.13, 0.03, MeshKit.at(Vector3(FloorGen.DOOR - 0.15, 1.2, sz * 0.95), Vector3.ONE, Vector3(PI * 0.5, 0, 0)), tc, 14, 4, true)
+			var bb := MeshKit.Builder.new()
+			for k in 6:
+				bb.box(Vector3(w - 0.3, 0.06, 0.2), MeshKit.at(Vector3(0.0, 0.1, -0.62 + k * 0.25)), Color(0.55, 0.38, 0.22))
+			for sx in [-1.0, 1.0]:
+				bb.box(Vector3(0.04, 0.04, 1.6), MeshKit.at(Vector3(sx * (FloorGen.DOOR - 0.2), 0.45, 0.0)), tc)
+			var bridge := MeshKit.instance(bb.build(), false)
+			bridge.visible = false
+			node.add_child(bridge)
+			entry["bridge"] = bridge
+		"block":
+			# A carved stone block filling the doorway, a glowing hand print on both faces.
+			var stone := (zd["wall"] as Color).lightened(0.12)
+			pb.rounded_box(Vector3(w - 0.1, 1.5, 1.2), 0.1, MeshKit.at(Vector3(0.0, 0.75, 0.0)), stone)
+			pb.box(Vector3(w - 0.3, 0.06, 1.25), MeshKit.at(Vector3(0.0, 1.2, 0.0)), stone.darkened(0.25))
+			for sz in [-1.0, 1.0]:
+				pb.sphere(0.17, MeshKit.at(Vector3(0.0, 0.72, sz * 0.61), Vector3(1.0, 1.0, 0.2)), tc, 10, true)
+				for k in 4:
+					pb.box(Vector3(0.06, 0.18, 0.03), MeshKit.at(Vector3(-0.15 + k * 0.1, 0.95, sz * 0.61)), tc, true)
+		_:
+			# A wall of thorny brambles (purple vines, pale thorns) with a faint swirl of wind on it.
+			var vine := Color(0.42, 0.25, 0.5)
+			for k in 9:
+				var x := -FloorGen.DOOR + 0.2 + (k % 5) * (w - 0.4) / 4.0
+				var y := 0.35 + (k / 5) * 0.7 + (k % 2) * 0.15
+				pb.sphere(0.36, MeshKit.at(Vector3(x, y, 0.0), Vector3(1.0, 0.9, 0.8)), vine.lightened(0.08 * (k % 3)), 8)
+				for j in 3:
+					var a := TAU * (j + k * 0.3) / 3.0
+					pb.cone(0.04, 0.18, MeshKit.at(Vector3(x + cos(a) * 0.32, y + sin(a) * 0.3, 0.3 if j % 2 == 0 else -0.3), Vector3.ONE, Vector3(PI * 0.5 if j % 2 == 0 else -PI * 0.5, 0, a)), Color(0.95, 0.9, 0.75), 5)
+			pb.torus(0.32, 0.02, MeshKit.at(Vector3(0.0, 1.0, 0.42), Vector3.ONE, Vector3(PI * 0.5, 0, 0)), tc, 16, 4, true)
+			pb.torus(0.32, 0.02, MeshKit.at(Vector3(0.0, 1.0, -0.42), Vector3.ONE, Vector3(PI * 0.5, 0, 0)), tc, 16, 4, true)
+	var plug := MeshKit.instance(pb.build(), false)
+	node.add_child(plug)
+	entry["plug"] = plug
+	entry["gate"] = gate
+
+
+## A gate was just opened (every machine sees it in d_open): the bridge drops, the block slides into the vault,
+## the brambles whirl away.
+func _open_gate_fx(di: int) -> void:
+	var e: Dictionary = doors[di]
+	var plug: Node3D = e["plug"]
+	var d: Dictionary = (f["doors"] as Array)[di]
+	var away := Vector3(FloorGen.DIRS[int(d["dir"])].x, 0.0, FloorGen.DIRS[int(d["dir"])].y)
+	plug.visible = true
+	match String(e.get("gate", "")):
+		"chasm":
+			var br: Node3D = e["bridge"]
+			br.visible = true
+			br.scale = Vector3(1.0, 1.0, 0.05)
+			br.create_tween().tween_property(br, "scale", Vector3.ONE, 0.5).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_OUT)
+		"block":
+			var from := plug.position
+			var local_away := (plug.get_parent() as Node3D).global_transform.basis.inverse() * away
+			var tw := plug.create_tween()
+			tw.tween_property(plug, "position", from + local_away * 2.2, 0.7).set_trans(Tween.TRANS_QUAD).set_ease(Tween.EASE_OUT)
+			tw.tween_property(plug, "position", from + local_away * 2.6 + Vector3(0.0, -1.6, 0.0), 0.4)
+			tw.tween_callback(plug.hide)
+		_:
+			var tw2 := plug.create_tween()
+			tw2.set_parallel(true)
+			tw2.tween_property(plug, "scale", Vector3.ONE * 0.05, 0.6).set_trans(Tween.TRANS_BACK).set_ease(Tween.EASE_IN)
+			tw2.tween_property(plug, "rotation:z", TAU, 0.6)
+			tw2.chain().tween_callback(plug.hide)
 
 
 func _build_props() -> void:
@@ -440,10 +528,23 @@ func set_pass(walk_bits: int, opened: int) -> void:
 		return
 	rects = FloorGen.walk_rects(f, walk_bits)
 	obst = FloorGen.obstacle_rects(f)
+	var was := open_bits_seen
+	open_bits_seen = opened
 	for di in doors.size():
 		var e: Dictionary = doors[di]
-		if e["plug"] != null:
-			(e["plug"] as Node3D).visible = opened & (1 << di) == 0
+		if e["plug"] == null:
+			continue
+		var now_open := opened & (1 << di) != 0
+		if e.has("gate"):
+			if now_open and was >= 0 and was & (1 << di) == 0:
+				_open_gate_fx(di)  # opened just now: show it happen
+			elif not (now_open and was >= 0):
+				# A fresh floor / a late joiner: as it is (an opened chasm keeps its gap, with the bridge over it).
+				(e["plug"] as Node3D).visible = not now_open or String(e["gate"]) == "chasm"
+				if e.has("bridge"):
+					(e["bridge"] as Node3D).visible = now_open
+			continue
+		(e["plug"] as Node3D).visible = not now_open
 
 
 func set_chests(bits: int) -> void:
