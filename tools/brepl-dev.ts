@@ -259,9 +259,11 @@ export async function playstats(o: { since?: string; game?: string; recent?: num
     recent: runs.slice(-(o.recent ?? 10)).map(r => `${String(r.date).slice(0, 16)} ${r.device} ${r.game} ${r.mode ?? ""} ${r.end ?? ""}`) };
 }
 
-/** Who plays what (~/GodotProjects/play-record, refreshed every 15 min by duo-catch-up): per person + the TV, most
- *  played 7/30 days, games they keep coming back to, Steam's last-2-weeks playtime, and the arcade's estimated vs
- *  measured hours (IN-DEPTH candidates). dev.favourites({full: true}) = the whole favourites.md. */
+/** Who plays what (~/GodotProjects/play-record, refreshed every 15 min by duo-catch-up): MEASURED play first (last 30
+ *  days, all machines + our games: Steam sessions, arcade sittings, standalone reports), then per person + the TV, the
+ *  arcade's estimated vs measured hours. `chatter` = voice-log lines about games: talk, NOT play evidence, and only
+ *  lines with evidence (title said, or that game running in earshot) are counted; keyword-only lines (2026-11-26:
+ *  "snake", Babe's "sheepdog", Valve's "portal") are not. dev.favourites({full: true}) = the whole favourites.md. */
 export async function favourites(o: { full?: boolean } = {}) {
   const dir = join(HOME, "GodotProjects/play-record");
   if (o.full) return await readFile(join(dir, "favourites.md"), "utf8").catch(() => "no favourites.md yet: run play-record collect");
@@ -274,7 +276,10 @@ export async function favourites(o: { full?: boolean } = {}) {
   const arcade: Record<string, string> = {};
   for (const d of Object.values<any>(s.arcade_depth || {}))
     arcade[d.title] = `est ${d.estimate[0]}-${d.estimate[1]} h, projected ${d.projection ? d.projection.toFixed(1) + " h" : "-"}: ${d.verdict}`;
-  return { updated: s.updated ? new Date(s.updated * 1000).toISOString().slice(0, 16) : "never", report: join(dir, "favourites.md"), people, arcade, voice: s.voice || {} };
+  const m30 = s.measured_30d || {};
+  return { updated: s.updated ? new Date(s.updated * 1000).toISOString().slice(0, 16) : "never", report: join(dir, "favourites.md"),
+    measured_30d: { all_machines: list(m30.all), our_games: list(m30.ours) }, people, arcade,
+    chatter: { note: s.voice_note || "voice-log talk, not play evidence", confirmed: s.voice || {}, unconfirmed_not_counted: s.voice_unconfirmed ?? 0 } };
 }
 
 /** Everything that needs tidying: unmerged finished branches, stale worktrees, uncommitted work, staging drift,
@@ -1056,7 +1061,7 @@ export function help() {
   dev.land(branch, genTests, botId, otherBots, msg)  merge a finished branch via wt-merge, test in staging, deploy TV+Decks, merge live main
   dev.playstats({since?, game?})     how the family really played: RUN lines every machine pushed to the Steam Machine
   dev.playRuns({since?, game?})      those RUN lines as objects ({device, recv, ...run})
-  dev.favourites({full?})            who plays what: favourites per person + TV, arcade estimated vs measured hours (play-record)
+  dev.favourites({full?})            who plays what: MEASURED play first (30 days), per person + TV, arcade est vs measured; chatter = talk, not play (play-record)
   dev.lone(ids?) / dev.loneRun(id, project?)  lone flat player check (one Deck player, no VR, nobody else): rounds advance, never frozen (dev.land runs it)
   dev.guard(game)                    a game's long guard bots (LAND_GUARDS; dev.land runs them when a branch touches the game)
   dev.nightly(tests?)                full sweep of every test (every seed/date; landings run GEN_QUICK samples); nightly at 03:30
