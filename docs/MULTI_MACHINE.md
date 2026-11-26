@@ -160,7 +160,11 @@ safe point**, so a deploy never changes a game someone is playing:
 - **Starting a game** applies everything first. The lobby host holds a start while a machine's files are still
   arriving or waiting to switch on (15 s at most), so nobody plays a mixed-version game. A machine whose code
   differs permanently (it missed a deploy) doesn't block a start: LAN updates bring it up to date.
-- The menu rebuilds in place: same tab, same highlighted game, same lobby connection, no blank frame.
+- The menu rebuilds in place: same tab (kept by its id, even an empty one), same highlighted game, same lobby
+  connection, no blank frame.
+- The lobby sends RPCs through core/lobby_send.gd (`LobbySend.all` / `LobbySend.one`), never `.rpc()`: only machines
+  still connected get them (a machine leaving for a game stays in the peer list for a moment, and ENet errors "max
+  channels: 0" on a send to it). tests/lobby_send_test.gd checks the arcade and core/safe_apply.gd.
 - Your game can mark its own safe moment (between levels): `get_tree().current_scene.set_meta("safe_to_apply",
   true)`. It only counts when the game isn't networked.
 - Switch on at once: `DUO_APPLY_NOW=1 duo-deploy "msg"`, or `touch <game>/.dev/apply_now` on one machine.

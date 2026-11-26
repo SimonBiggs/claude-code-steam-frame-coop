@@ -17,6 +17,10 @@ extends Node
 const PROBE := "res://core/zz_safe_apply_probe.gd"
 const ARCADE_GD := "res://arcade/arcade.gd"
 const SafeApply := preload("res://core/safe_apply.gd")
+## Seconds each machine stays after the final checks (all check at the same moment): nobody quits before every other
+## machine has checked its lobby connection, and the host leaves last.
+const LINGER := 1.5
+const HOST_LINGER := 3.0
 
 var me := int(OS.get_environment("BOT_MACHINE")) if OS.has_environment("BOT_MACHINE") else 0
 var count := int(OS.get_environment("BOT_MACHINES")) if OS.has_environment("BOT_MACHINES") else 1
@@ -112,6 +116,16 @@ func _lobby_ok() -> bool:
 		and multiplayer.multiplayer_peer != null and multiplayer.multiplayer_peer.get_connection_status() == MultiplayerPeer.CONNECTION_CONNECTED
 
 
+## A tab other than the one on screen whose first game isn't the highlighted one (tab 1 was the empty IN-DEPTH tab:
+## no card to highlight, so "a different game" never happened; the arcade keeps an empty tab too, arcade_bot checks it).
+func _other_tab() -> int:
+	for k in arcade.tabs().size():
+		var g: Array = arcade._games_in(k)
+		if k != arcade.cat and not g.is_empty() and int(g[0]) != arcade.selected:
+			return k
+	return 1
+
+
 func _game_index() -> int:
 	var games: Array = preload("res://arcade/arcade.gd").GAMES
 	for i in games.size():
@@ -140,7 +154,7 @@ func _process(_delta: float) -> void:
 				phase = "a"
 		"a":
 			if me == 0 and _once("tab", 0.5):
-				arcade._show_category(1, true)  # a different tab + game than the first, chosen on the host
+				arcade._show_category(_other_tab(), true)  # a different tab + game than the first, chosen on the host
 			if _once("before", 2.0):
 				before = {"cat": arcade.cat, "selected": arcade.selected, "mode": arcade.mode}
 			if _once("deploy2", 3.0 + 1.5 * me):
@@ -195,6 +209,9 @@ func _process(_delta: float) -> void:
 			if _once("check_end", t_r + 7.0):
 				_check_end(v)
 				print("BOT AGREE end_ver=%d" % v)
+			# Quitting in the same frame as the others' checks closed their lobby connection first ("the lobby didn't
+			# form again": mode local on a joiner whose host had just quit, a host missing a joiner that had just quit).
+			if done.has("check_end") and _once("finish", t_r + 7.0 + (0.0 if count < 2 else (HOST_LINGER if me == 0 else LINGER))):
 				_finish()
 
 
@@ -228,7 +245,9 @@ func _check_a() -> void:
 		_fail("lobby connection lost across the switch (mode %s)" % arcade.mode)
 	if blank_frames > 0:
 		_fail("the menu was missing for %d frame(s) (a blank flash)" % blank_frames)
-	print("BOT AGREE menu_after_switch=%d/%d" % [arcade.cat, arcade.selected])
+	# Only the highlighted game is shared by the lobby; each machine keeps its own tab (a joiner on NEW! that already
+	# shows the game stays there), so the tab is checked per machine above, not agreed.
+	print("BOT AGREE menu_after_switch=%d" % arcade.selected)
 
 
 func _check_end(v: int) -> void:

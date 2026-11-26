@@ -129,6 +129,7 @@ const VrText := preload("res://core/vr_text.gd")
 const SafeApply := preload("res://core/safe_apply.gd")
 const Machine := preload("res://core/machine.gd")
 const Who := preload("res://core/who.gd")
+const LobbySend := preload("res://core/lobby_send.gd")  # RPCs only to machines still connected (never .rpc() in the lobby)
 const Hall := preload("res://arcade/hall.gd")
 const Progress := preload("res://core/progress.gd")
 const WhatsNew := preload("res://arcade/whats_new.gd")
@@ -145,6 +146,7 @@ var status: Label
 var buttons: Array[Button] = []  # (old menu; kept so a hot reload of an older arcade still works)
 var cards: Dictionary = {}  # game index -> Button, for the category on screen
 var cat := 0  # index into tabs()
+var cat_id := ""  # CATEGORIES id of the tab on screen: what a rebuild keeps (tabs() indices shift when NEW! comes or goes)
 var tab_bar: HBoxContainer
 var grid: GridContainer
 var vr_stick_x_ready := true
@@ -280,9 +282,9 @@ func _on_lobby_peer_joined(id: int) -> void:
 		ip = (multiplayer.multiplayer_peer as ENetMultiplayerPeer).get_peer(id).get_remote_address()
 	machines[id] = {"kind": "tv", "ip": ip}
 	_lobby_status()
-	_sync_selection.rpc_id(id, selected, 1, 0)  # the newcomer shows what everyone has chosen
-	_hall_data.rpc_id(id, Progress.pack(hall_rows()))  # and the family's Trophy Hall
-	_news_seen_rpc.rpc_id(id, WhatsNew.pack(news_seen()))  # and which news the family has opened
+	LobbySend.one(self, id, &"_sync_selection", [selected, 1, 0])  # the newcomer shows what everyone has chosen
+	LobbySend.one(self, id, &"_hall_data", [Progress.pack(hall_rows())])  # and the family's Trophy Hall
+	LobbySend.one(self, id, &"_news_seen_rpc", [WhatsNew.pack(news_seen())])  # and which news the family has opened
 
 
 func _on_lobby_peer_left(id: int) -> void:
@@ -311,7 +313,7 @@ func _lobby_status() -> void:
 	print("Arcade: " + line)
 	_set_status(line)
 	if mode == "host" and not machines.is_empty():
-		_lobby_who.rpc(line)
+		LobbySend.all(self, &"_lobby_who", [line])  # (not to a machine that is leaving too)
 
 
 ## Lobby host -> every machine: the same "who is here" line on every screen.
@@ -416,7 +418,7 @@ func _close_peer() -> void:
 func _exit_tree() -> void:
 	_close_peer()
 	# Back in the menu (after a game, or the menu scene reloaded by a deploy): the same tab and game highlighted.
-	get_tree().root.set_meta("arcade_menu_state", {"selected": selected, "cat": cat})
+	get_tree().root.set_meta("arcade_menu_state", {"selected": selected, "cat": cat, "cat_id": cat_id})
 
 
 func _restore_menu_state() -> void:
@@ -424,6 +426,7 @@ func _restore_menu_state() -> void:
 	if st is Dictionary:
 		selected = clampi(int(st.get("selected", 0)), 0, GAMES.size() - 1)
 		cat = int(st.get("cat", 0))
+		cat_id = str(st.get("cat_id", ""))
 	elif OS.has_environment("DUO_RESUME_GAME"):
 		# Restarted by core/vr_watch.gd (VR stopped / rejoined): the game they were playing is picked again.
 		var id := OS.get_environment("DUO_RESUME_GAME")
@@ -488,7 +491,7 @@ func _sync_selection(index: int, origin: int = 0, seq: int = 0) -> void:
 	if mode == "host":
 		_select(index, false)
 		stats.relay += 1
-		_sync_selection.rpc(selected, origin if origin != 0 else multiplayer.get_remote_sender_id(), seq)
+		LobbySend.all(self, &"_sync_selection", [selected, origin if origin != 0 else multiplayer.get_remote_sender_id(), seq])
 		return
 	if multiplayer.get_remote_sender_id() != 1:
 		return  # only the lobby host's order counts
@@ -510,7 +513,7 @@ func _start_everywhere(index: int) -> void:
 		# Each client needs the chosen host's address; a machine that is itself the chosen host sees its own
 		# address there (lobby_ip = its address as the lobby sees it).
 		for id in machines:
-			_start.rpc_id(id, index, game_host, machines[id].ip)
+			LobbySend.one(self, id, &"_start", [index, game_host, machines[id].ip])
 		_start(index, game_host, "")
 	elif mode == "client":
 		if _lobby_connected():  # (still connecting: the lobby can't hear us yet)
@@ -683,7 +686,11 @@ func _build_tv_menu() -> void:
 			_hall_auto = selected
 	# Keep the tab on screen when it shows the selected game (rebuilt after a deploy or a resize, or back from a game);
 	# a game can be in two tabs (1 PLAYER and its own), so don't jump to its own tab.
-	if cat < 0 or cat >= tabs().size() or not _games_in(cat).has(selected):
+	# The tab is kept by its id, not its place (the NEW! tab comes and goes, shifting every index after it), and a tab
+	# someone chose stays even with no game of its own on it (the empty IN-DEPTH tab: a deploy jumped them to ACTION).
+	if cat >= 0 and cat_id != "" and _tab_of(cat_id) >= 0:
+		cat = _tab_of(cat_id)
+	if cat < 0 or cat >= tabs().size() or (not _games_in(cat).has(selected) and not (cat_id != "" and _games_in(cat).is_empty())):
 		cat = maxi(0, tabs().find(_cat_index_of(selected)))
 	_show_category(cat, false)
 	set_meta("built_for", get_viewport().get_visible_rect().size)
@@ -766,6 +773,7 @@ func _show_category(tab: int, focus_first: bool) -> void:
 		return
 	stats.show_category += 1
 	cat = wrapi(tab, 0, t.size())
+	cat_id = str(CATEGORIES[t[cat]].id)
 	for child in tab_bar.get_children():
 		tab_bar.remove_child(child)  # (out at once: a tab refresh later this frame counts tabs by their place)
 		child.queue_free()
@@ -915,7 +923,7 @@ func _open_news(i: int) -> void:
 	if WhatsNew.merge(news_seen(), ids):
 		WhatsNew.store_seen(news_seen())
 	if mode == "host" and not machines.is_empty():
-		_news_seen_rpc.rpc(ids, id, env)
+		LobbySend.all(self, &"_news_seen_rpc", [ids, id, env])
 	elif mode == "client" and _lobby_connected():
 		_news_seen_rpc.rpc_id(1, ids, id, env)  # (sent before the start request: the host hears it first)
 	_start_everywhere(i)
@@ -933,7 +941,7 @@ func _news_seen_rpc(ids: Array, try_game: String = "", try_env: Dictionary = {})
 	if grew:
 		WhatsNew.store_seen(news_seen())
 	if mode == "host" and not machines.is_empty() and (grew or try_game != ""):
-		_news_seen_rpc.rpc(WhatsNew.pack(news_seen()) if grew else ids, try_game, try_env)
+		LobbySend.all(self, &"_news_seen_rpc", [WhatsNew.pack(news_seen()) if grew else ids, try_game, try_env])
 	if grew and not starting:
 		_news_changed()
 
@@ -986,7 +994,7 @@ func _hall_load_step() -> void:
 	hall_ms = (Time.get_ticks_usec() - t0) / 1000.0
 	print("Arcade: Family Trophy Hall: %d games (found in %.1f ms, loaded over a few frames in %.1f ms, saves read in %.1f ms)" % [hall_mine.size(), Progress.scan_ms, Progress.load_ms, hall_ms])
 	if mode == "host" and not machines.is_empty():
-		_hall_data.rpc(Progress.pack(hall_rows()))
+		LobbySend.all(self, &"_hall_data", [Progress.pack(hall_rows())])
 	elif mode == "client" and _lobby_connected():
 		_hall_data.rpc_id(1, Progress.pack(hall_mine))
 	var pick := -1
@@ -1015,7 +1023,7 @@ func _hall_data(packed: Array) -> void:
 	if hall_rows() == before:
 		return  # nothing new: no redraw, no traffic
 	if mode == "host" and not machines.is_empty():
-		_hall_data.rpc(Progress.pack(hall_rows()))
+		LobbySend.all(self, &"_hall_data", [Progress.pack(hall_rows())])
 	_hall_changed()
 
 
@@ -1256,7 +1264,7 @@ func _select(index: int, broadcast: bool) -> void:
 		stats.sync_out += 1
 		_sel_seq += 1
 		if mode == "host":
-			_sync_selection.rpc(selected, 1, _sel_seq)
+			LobbySend.all(self, &"_sync_selection", [selected, 1, _sel_seq])
 		else:
 			_sync_selection.rpc_id(1, selected, multiplayer.get_unique_id(), _sel_seq)
 	_refresh_vr()

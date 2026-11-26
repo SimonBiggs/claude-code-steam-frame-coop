@@ -194,6 +194,18 @@ class Runner extends Node:
 		check(arcade.cat == 1, "RB opens the next tab")
 		await tap(JOY_BUTTON_LEFT_SHOULDER)
 		check(arcade.cat == 0, "LB goes back")
+		# A deploy rebuilds the menu (_rebuild_tv_menu): the tab on screen stays, even one with no game of its own (the
+		# empty IN-DEPTH tab jumped to ACTION, tests/safe_apply_bot 2026-11-26), kept by its id (not its place in tabs()).
+		for k in tabs.size():
+			arcade._show_category(k, true)
+			await frames(2)
+			var want_id: String = arcade.cat_id
+			var want_sel: int = arcade.selected
+			arcade._rebuild_tv_menu()
+			await frames(2)
+			check(arcade.cat_id == want_id and arcade.selected == want_sel, "a rebuild keeps tab %s and game %d (now %s / %d)" % [want_id, want_sel, arcade.cat_id, arcade.selected])
+		arcade._show_category(0, true)
+		await frames(2)
 
 		# Biggest tab: walk the highlight to the last card with the d-pad; the card must be fully on screen.
 		arcade._show_category(biggest, true)
