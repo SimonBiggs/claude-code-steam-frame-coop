@@ -7,7 +7,8 @@
 # via godot-test (no controllers, SCHED_IDLE through test-throttle), 2 at a time. Writes
 #   ~/.cache/duo-arena/nightly/latest.json (partial.json for named tests), fail-logs/<date>-<commit>-<test>.log (60 days)  {"date", "commit", "secs", "tests": {name: {"pass", "secs", "tail"}}}
 # and posts a one-line summary to the brepl channel. dev.debt() reports failures and a missing/old run.
-#   duo-nightly-tests [TEST ...]     (names without .gd; default every tests/*_test.gd)
+#   duo-nightly-tests [TEST ...]     (names without .gd, or standalone_<game>; default every tests/*_test.gd + every
+#                                     standalone game's full tests/run.sh)
 set -u
 LIVE=~/GodotProjects/duo-arena
 SRC=~/.cache/duo-nightly/src
@@ -20,7 +21,7 @@ sed -i 's|^config/name="Duo Arena"$|config/name="Duo Arena Nightly"|' "$SRC/proj
 COMMIT=$(git -C "$LIVE" rev-parse --short HEAD)
 cd "$SRC" || exit 1
 timeout 900 godot-test --headless --path . --import >/dev/null 2>&1
-if [ $# -gt 0 ]; then TESTS=("$@"); else TESTS=(); for f in tests/*_test.gd; do TESTS+=("$(basename "$f" .gd)"); done; fi
+if [ $# -gt 0 ]; then TESTS=(); for a in "$@"; do [[ $a == standalone_* ]] || TESTS+=("$a"); done; else TESTS=(); for f in tests/*_test.gd; do TESTS+=("$(basename "$f" .gd)"); done; fi
 # lan_update_test compiles a deliberately broken script (its "Parse Error" is expected); it decides by exit code
 # (GODOT_TEST_ERRORS_OK=1 for it, or godot-test would turn its exit 0 into 1).
 run_one() {
@@ -35,7 +36,22 @@ run_one() {
 export -f run_one; export OUT
 rm -f "$OUT/.results"
 T0=$(date +%s)
-printf '%s\n' "${TESTS[@]}" | xargs -P 2 -I{} bash -c 'run_one {}'
+[ ${#TESTS[@]} -gt 0 ] && printf '%s\n' "${TESTS[@]}" | xargs -P 2 -I{} bash -c 'run_one {}'
+# The standalone games (~/GodotProjects/<game>/tests/run.sh, e.g. Sheepdog Scramble, Sprout Hop) get their FULL run here
+# too (no GEN_QUICK): landings run them quick, and nothing else ran the full sweeps (2026-11-26: Sheepdog's full field
+# sweep outgrew its runner's 600 s timeout unnoticed). Each runs on its own snapshot of the game's repo;
+# results are "standalone_<game>" in the same json (pass = run.sh exit 0). Whole sweeps only, or `standalone_<game>`.
+for rs in ~/GodotProjects/*/tests/run.sh; do
+  g=$(basename "$(dirname "$(dirname "$rs")")"); [ "$g" = duo-arena ] && continue
+  t="standalone_$g"
+  if [ $# -gt 0 ]; then printf '%s\n' "$@" | grep -qx "$t" || continue; fi
+  snap=~/.cache/duo-nightly/standalone/$g
+  mkdir -p "$snap"
+  rsync -a --delete --exclude .git --exclude .godot "$(dirname "$(dirname "$rs")")"/ "$snap"/
+  t0=$(date +%s)
+  (cd "$snap" && timeout 5400 sh tests/run.sh) >"$OUT/logs/$t.log" 2>&1
+  echo "$t $? $(( $(date +%s) - t0 ))" >>"$OUT/.results"
+done
 # A run of named tests (dev.nightly(["x"])) writes partial.json: only a whole sweep is "the nightly" dev.debt reads.
 NAME=latest.json; [ $# -gt 0 ] && NAME=partial.json
 python3 - "$OUT" "$COMMIT" "$(( $(date +%s) - T0 ))" "$NAME" <<'PY'
@@ -50,6 +66,9 @@ for line in open(os.path.join(out, ".results")):
     ok = code == "0" and any("PASS" in l for l in verdict) and not any(re.search(r"\bFAIL\b|SCRIPT ERROR", l) for l in verdict)
     if t == "lan_update_test":
         ok = code == "0" and any("PASS" in l for l in verdict)
+    if t.startswith("standalone_"):  # a game's tests/run.sh decides by its exit code
+        ok = code == "0"
+        verdict = [l for l in lines if re.search(r"passed|FAIL", l)]
     tests[t] = {"pass": ok, "secs": int(s), "code": int(code), "tail": "\n".join(verdict[-3:])[:600]}
 res = {"date": datetime.datetime.now().isoformat(timespec="minutes"), "commit": commit, "secs": secs, "tests": tests}
 json.dump(res, open(os.path.join(out, sys.argv[4]), "w"), indent=1)
