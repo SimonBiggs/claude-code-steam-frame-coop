@@ -28,6 +28,7 @@ extends Node
 signal applied(paths: Array)
 
 const SELF := "res://core/safe_apply.gd"
+const LobbySend := preload("res://core/lobby_send.gd")
 const ARCADE_SCENE := "res://arcade.tscn"
 const NODE_NAME := "SafeApply"
 const MANAGED := ["res://core/", "res://games/", "res://arcade/", "res://tests/", "res://arcade.tscn"]
@@ -410,7 +411,7 @@ func _apply_lobby() -> void:
 	var a := _arcade()
 	if _connected():
 		for id in a.get("machines"):
-			_sa_apply.rpc_id(id, v)
+			LobbySend.one(self, id, &"_sa_apply", [v])
 			if members.has(id):
 				members[id].held = 0  # it switches on this message (reliable, and before any game start that follows)
 	if not held.is_empty():
