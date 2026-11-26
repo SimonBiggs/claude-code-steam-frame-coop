@@ -42,7 +42,7 @@ import { access, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/p
 import { dirname, join, resolve } from "node:path";
 
 export type MachineResult = { machine: string; pass: boolean; code: number; result: string; failed: string[]; errors: string[];
-  agree: Record<string, string>; log: string };
+  agree: Record<string, string>; log: string; endedMs?: number };
 export type GroupResult = { pass: boolean; port: number; scene: string; machines: MachineResult[]; agree: Record<string, { ok: boolean; values: string[] }>;
   table: string };
 
@@ -195,6 +195,7 @@ export async function runGroup(o: GroupOpts): Promise<GroupResult> {
       p.stdout.on("data", d => { out += d; });
       p.stderr.on("data", d => { out += d; });
       p.on("close", async code => {
+        const endedMs = Date.now();
         await writeFile(file, out);
         const v = verdict(out, code ?? 1, { allowNoResult: o.allowNoResult });
         if (isLate) {
@@ -205,11 +206,19 @@ export async function runGroup(o: GroupOpts): Promise<GroupResult> {
         const agree: Record<string, string> = {};
         for (const m of out.matchAll(/^BOT AGREE (\S+?)=(.*)$/gm)) agree[m[1]] = m[2].trim();
         log(`multibot: ${names[k]} ${v.pass ? "ok" : "FAIL"} (${v.result})`);
-        res({ machine: names[k], code: code ?? 1, ...v, agree, log: file });
+        res({ machine: names[k], code: code ?? 1, ...v, agree, log: file, endedMs });
       });
     }));
   }
   const machines = await Promise.all(runs);
+  // Nobody may quit while another machine still checks its connection, and the host leaves last: a machine that FAILed
+  // after another had already quit was probably checking a lobby that machine's exit had just broken
+  // (safe_apply_bot's "the lobby didn't form again", both ways round, 2026-11-26). Say so on the failed machine.
+  for (const m of machines) {
+    if (m.pass || !m.endedMs || !m.failed.length) continue;  // (a bot's own failed checks, not engine errors)
+    const gone = machines.filter(o => o !== m && o.endedMs && o.endedMs < m.endedMs! - 200);
+    if (gone.length) m.failed.push(`(${gone.map(o => o.machine).join(", ")} had already quit before this machine ended: a check racing their exit? every machine stays until all have checked, the host leaves last)`);
+  }
   const keys = new Set(machines.flatMap(m => Object.keys(m.agree)));
   const agree: GroupResult["agree"] = {};
   for (const key of keys) {
