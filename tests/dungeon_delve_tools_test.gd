@@ -8,7 +8,7 @@ extends SceneTree
 ##  - the floor without its tools is the same floor (the gates have their own rng) and the same seed builds the same floor.
 ## A whole run, floor by floor, picking up each tool as it comes AND a run that never picks one up: every floor solvable.
 ## And: all three gates show up; a BRAVE run's first two biomes hide enough heart pieces for 2+ new hearts; the shop's
-## heart piece costs more than a floor's chests hold (save up!) but not more than ~4 floors'; mimics are rare (5-20 %
+## heart piece costs more than a floor's gold (chests + monsters: save up!) but not more than ~4 floors'; mimics are rare (5-20 %
 ## of chests from floor 3 on); both the bonk (_attack) and the VR knight's sword open gates; tips are short.
 ## Prints "SCRIPT ERROR: TOOLS ..." for each failure.
 
@@ -16,6 +16,7 @@ const FloorGen := preload("res://games/dungeon_delve/floorgen.gd")
 const Loot := preload("res://games/dungeon_delve/loot.gd")
 const Deep := preload("res://games/dungeon_delve/deep.gd")
 const Seeded := preload("res://core/seeded.gd")
+const Foes := preload("res://games/dungeon_delve/foes.gd")
 
 var fails := 0
 var checks := 0
@@ -121,7 +122,7 @@ func _check_pieces(seeds: int) -> void:
 		_fail("only %.1f heart pieces behind gates in two biomes" % per_run)
 
 
-## The shop's big item: a heart piece at Loot.BIG_SPOT, dearer than a floor's chest gold, never more than ~4 floors'.
+## The shop's big item: a heart piece at Loot.BIG_SPOT, dearer than a floor's gold, never more than ~4 floors'.
 func _check_shop() -> void:
 	if Deep.SHOP_SPOTS.size() != 5:
 		_fail("the shop needs 5 spots (4 + the big one)")
@@ -134,17 +135,22 @@ func _check_shop() -> void:
 				_fail("zone %d: the heart piece isn't on the big stand" % (z + 1))
 				continue
 			var price := int((stock[Loot.BIG_SPOT] as Array)[1])
-			# A floor's reachable chest gold (what deep._open_chest pays: 2 piles of 5 + 1 more every 6 floors), averaged.
+			# A floor's gold: its chests (what deep._open_chest pays: 2 piles of 5 + 1 more every 6 floors) and its monsters
+			# (Foes.GOLD, x3 for elites), averaged. (A 2-bot Slime Caves run that took everything: ~95 a floor, 2026-11-26.)
 			var gold := 0.0
 			for sd in 20:
 				for fl in FloorGen.FLOORS_PER_ZONE - 1:
 					var f := FloorGen.generate(500 + sd * 13, z, fl, heroic)
 					gold += FloorGen.chest_list(f).size() * 5.0 * (2.0 + FloorGen.global_floor(z, fl) / 6)
+					for r in f["rooms"]:
+						for fo in (r as Dictionary)["foes"]:
+							gold += float(Foes.GOLD.get(int((fo as Array)[0]), 0)) * (3.0 if bool((fo as Array)[2]) else 1.0)
 			gold /= 20.0 * (FloorGen.FLOORS_PER_ZONE - 1)
+			print("TOOLS: zone %d %s: heart piece %d gold, a floor holds ~%.0f" % [z + 1, "heroic" if heroic else "brave", price, gold])
 			if float(price) <= gold:
-				_fail("zone %d %s: the heart piece (%d) costs no more than a floor's chests (%.0f): nothing to save up for" % [z + 1, "heroic" if heroic else "brave", price, gold])
+				_fail("zone %d %s: the heart piece (%d) costs no more than a floor's gold (%.0f): nothing to save up for" % [z + 1, "heroic" if heroic else "brave", price, gold])
 			if float(price) > gold * 4.0:
-				_fail("zone %d %s: the heart piece (%d) costs more than 4 floors of chests (%.0f each)" % [z + 1, "heroic" if heroic else "brave", price, gold])
+				_fail("zone %d %s: the heart piece (%d) costs more than 4 floors of gold (%.0f each)" % [z + 1, "heroic" if heroic else "brave", price, gold])
 
 
 ## Mimics are rare: 5-20 % of the chests from floor 3 down (they used to be 30 %+).

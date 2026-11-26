@@ -23,7 +23,7 @@ const ICONS := {COIN: "coin", COIN5: "coin", POTION: "potion", HEART: "heart", K
 	DASH: "bolt", BASH: "shield", BOW: "arrow_right", MAXHEART: "heart", SWORD: "sword", CHARM: "star",
 	HOOK: "arrow_right", MITT: "shield", JAR: "drop", PIECE: "heart"}
 const ABILITY_NAMES := {"dash": DASH, "bash": BASH, "bow": BOW}
-const PRICES := {POTION: 12, HEART: 6, BOMBS: 12, DASH: 25, BASH: 25, BOW: 30, MAXHEART: 45, SWORD: 30, CHARM: 60, KEY: 20, PIECE: 40}
+const PRICES := {POTION: 12, HEART: 6, BOMBS: 12, DASH: 25, BASH: 25, BOW: 30, MAXHEART: 45, SWORD: 30, CHARM: 60, KEY: 20, PIECE: 60}
 const BIG_SPOT := 4  ## the shop's 5th spot: the HEART PIECE on its gold stand, dearer than a floor's gold (save up!)
 
 
@@ -83,6 +83,9 @@ static func shop_stock(rng: RandomNumberGenerator, zone: int, heroic: bool) -> A
 	for o in out:
 		var a: Array = o
 		var price := float(PRICES[int(a[0])]) * 1.5 * (1.0 + 0.5 * zone) * (1.25 if heroic else 1.0)  # balance-2: bots ended runs with 1200+ gold unspent
+		if int(a[0]) == PIECE:
+			# The big one grows with a floor's gold (x1.75 a biome: elites and more monsters), ~1.4 floors' worth: save up.
+			price = float(PRICES[PIECE]) * 1.5 * pow(1.75, minf(float(zone), 6.0)) * (1.25 if heroic else 1.0)
 		a[1] = int(round(price))
 	return out
 

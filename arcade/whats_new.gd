@@ -33,6 +33,7 @@ const MAX_PICS := 4  # pictures on a tile
 
 ## Newest first; within a day, the biggest first.
 const ENTRIES := [
+	{"id": "delve-tools", "date": "2026-11-26", "game": "dungeon_delve", "pic": "cinder", "line": "Find tools! Heart pieces!", "try": {"DD_TRY": "brave"}},
 	{"id": "sb-hot-streak", "date": "2026-11-25", "game": "sky_bots", "pic": "grumble", "line": "No falls? Trickier islands!"},
 	{"id": "mm-hot-streak", "date": "2026-11-25", "game": "marble_maze", "pic": "kaiju", "line": "No falls? Trickier mazes!"},
 	{"id": "delve-way", "date": "2026-11-25", "game": "dungeon_delve", "pic": "cinder", "line": "Follow the gold arrows!", "try": {"DD_TRY": "brave"}},

@@ -457,6 +457,9 @@ func _deep_checks(mode: String) -> void:
 		kit.assert_true(floors_seen.size() >= 1, "client built the deep floors (%d)" % floors_seen.size())
 		kit.assert_true(max_foes >= 1, "client mirrors the monsters (%d)" % max_foes)
 		kit.assert_true(not (main.net.state_get("d_stats", {}) as Dictionary).is_empty(), "client sees everyone's hearts")
+		var ctl: Array = main.net.state_get("d_tools", [0, 0])
+		if not main.deep.f.is_empty() and ctl.size() >= 1:
+			kit.assert_eq(int(main.deep.f.get("tools_in", 0)) & ~int(ctl[0]), 0, "client built the floor with the tools the party held")
 		if kit.seen("d_friend", 1) > 0:
 			kit.assert_true(cage_seen >= 1, "client built the friend's cage it saw freed (%d)" % cage_seen)
 		return
@@ -506,6 +509,13 @@ func _deep_checks(mode: String) -> void:
 		kit.assert_true((pd.get("friends", []) as Array).size() >= 1 and (main.net.state_get("d_friends", []) as Array).size() >= 1, "%s: the freed friend was saved and moved to the camp (%s)" % [mode, str(pd.get("friends", []))])
 	if int(t["friends"]) > 0:
 		kit.info("friends freed %d (saved %s)" % [int(t["friends"]), str(pd.get("friends", []))])
+	# Cinder's tools (floorgen.gd TOOLS): a full biome passes the HOOK ROPE (floor 2) and the MIGHTY MITT (floor 3);
+	# the bots pick them up, open the gates they hold the tool for and grab the heart pieces behind them.
+	if goal == "zone":
+		kit.assert_true(int(t.get("tools", 0)) >= 2 and dp.tools & 3 == 3, "%s: the bots found the hook rope and the mitt (%d tools, bits %d)" % [mode, int(t.get("tools", 0)), dp.tools])
+		kit.assert_true(int(t.get("gates", 0)) >= 1 and int(t.get("pieces", 0)) >= 1, "%s: a gate opened and its heart piece was taken (%d gates, %d pieces)" % [mode, int(t.get("gates", 0)), int(t.get("pieces", 0))])
+	if int(t.get("gates", 0)) > 0:
+		kit.info("tools %d, gates opened %d, heart pieces %d, mimics %d" % [dp.tools, int(t.get("gates", 0)), int(t.get("pieces", 0)), int(t.get("mimics", 0))])
 	# Rumbly floors (rumble.gd): fights there got falls, and every fall was told on the floor first.
 	if rumble_fight > 2.0 * Rumble.PERIOD.y:
 		kit.assert_true(int(t["falls"]) >= 1, "%s: a rumbly fight dropped things (%.0f s fighting, %d falls)" % [mode, rumble_fight, int(t["falls"])])
