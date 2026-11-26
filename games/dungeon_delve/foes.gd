@@ -51,7 +51,7 @@ const BASE_HP := {FloorGen.F_SLIME: 2.0, FloorGen.F_SPITTER: 2.0, FloorGen.F_SHI
 	FloorGen.F_HEALER: 3.0, FloorGen.F_MIMIC: 6.0, FloorGen.F_CHARGER: 4.0, FloorGen.F_BOMBER: 3.0,
 	FloorGen.B_SLIME: 55.0, FloorGen.B_BONE: 80.0, FloorGen.B_CRYSTAL: 95.0, FloorGen.B_FORGE: 110.0}  # boss fights last about a minute or two
 const GOLD := {FloorGen.F_SLIME: 1, FloorGen.F_SPITTER: 2, FloorGen.F_SHIELD: 3, FloorGen.F_SWARM: 1,
-	FloorGen.F_HEALER: 3, FloorGen.F_MIMIC: 15, FloorGen.F_CHARGER: 4, FloorGen.F_BOMBER: 3,
+	FloorGen.F_HEALER: 3, FloorGen.F_MIMIC: 25, FloorGen.F_CHARGER: 4, FloorGen.F_BOMBER: 3,
 	FloorGen.B_SLIME: 40, FloorGen.B_BONE: 60, FloorGen.B_CRYSTAL: 70, FloorGen.B_FORGE: 80}
 
 var deep: Node  ## host: the rules (deep.gd); null on mirrors

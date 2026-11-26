@@ -1,6 +1,7 @@
 extends Control
 ## DUNGEON DELVE deep HUD (TV / Deck screens): icons first, few words.
-##  top left: zone + floor, gold, keys      top right: the map of rooms you've seen
+##  top left: zone + floor, gold, keys, Cinder's tools, heart pieces (n/4)
+##  top right: the map of rooms you've seen (a gate shows in its tool's colour, a "?" heart behind it)
 ##  top middle: the boss's name and health  bottom: one card per hero: hearts, potions, bombs, ability
 ##  a prompt pill (A attack, X ability, B bomb, Y potion) when something new can be done.
 
@@ -15,6 +16,9 @@ var party: Node
 var zone_label: Label
 var gold_label: Label
 var key_label: Label
+var tool_box: HBoxContainer  ## Cinder's tools the party holds (icons in their colours) + the heart pieces
+var piece_label: Label
+var _tools_key := ""
 var wish_box: HBoxContainer  ## Cinder's wish: its picture, how far along, a tick when kept
 var wish_icon: Control
 var wish_label: Label
@@ -54,6 +58,8 @@ func setup(root: Control, p_party: Node) -> void:
 	row.add_child(UiKit.icon("key", "gold", 28.0))
 	key_label = UiKit.label("0", "small", "gold")
 	row.add_child(key_label)
+	tool_box = UiKit.hbox(4)
+	row.add_child(tool_box)
 	wish_box = UiKit.hbox(6)
 	row.add_child(wish_box)
 	wish_box.add_child(UiKit.spacer(8.0))
@@ -137,6 +143,8 @@ func on_state(key: String, value: Variant, deep: Node) -> void:
 			UiKit.pulse(gold_label, 1.15, 0.15)
 		"d_keys":
 			key_label.text = str(int(value))
+		"d_tools":
+			_show_tools(value if value is Array else [])
 		"d_wish":
 			_show_wish(value if value is Array else [])
 		"d_boss":
@@ -152,6 +160,32 @@ func on_state(key: String, value: Variant, deep: Node) -> void:
 			map.queue_redraw()
 		"d_stats":
 			_rebuild_cards(value if value is Dictionary else {}, deep)
+
+
+## [tools bits, heart pieces]: one icon per tool held, then a heart with "2/4" once a piece has been found.
+func _show_tools(a: Array) -> void:
+	var k := var_to_str(a)
+	if k == _tools_key:
+		return
+	_tools_key = k
+	for c in tool_box.get_children():
+		c.queue_free()
+	var bits := int(a[0]) if a.size() > 0 else 0
+	var pc := int(a[1]) if a.size() > 1 else 0
+	map.tools = bits
+	map.queue_redraw()
+	if bits == 0 and pc == 0:
+		return
+	tool_box.add_child(UiKit.spacer(8.0))
+	for i in FloorGen.TOOLS.size():
+		if bits & (1 << i) != 0:
+			tool_box.add_child(UiKit.icon(String(FloorGen.TOOLS[i]["icon"]), FloorGen.TOOLS[i]["color"], 26.0))
+	if pc > 0:
+		tool_box.add_child(UiKit.spacer(6.0))
+		tool_box.add_child(UiKit.icon("heart", Color(1.0, 0.4, 0.55), 24.0))
+		piece_label = UiKit.label("%d/%d" % [pc % FloorGen.PIECES_PER_HEART, FloorGen.PIECES_PER_HEART], "small", Color(1.0, 0.6, 0.7))
+		tool_box.add_child(piece_label)
+	UiKit.pulse(tool_box, 1.15, 0.2)
 
 
 func _rebuild_cards(st: Dictionary, deep: Node) -> void:
@@ -294,6 +328,7 @@ class MiniMap extends Control:
 	var cleared := 1
 	var open := 0
 	var lock := -1
+	var tools := 0
 	var here := {}
 	var _s := 1.0
 
@@ -325,6 +360,16 @@ class MiniMap extends Control:
 			var t := int(d["type"])
 			if t == FloorGen.SECRET and open & (1 << di) == 0:
 				continue
+			if t == FloorGen.GATE and open & (1 << di) == 0:
+				# A shut gate: a stub in its tool's colour and a "?" heart where the vault is (something to come back for).
+				var ga: Vector2i = (rooms[a] as Dictionary)["cell"]
+				var gb: Vector2i = (rooms[b] as Dictionary)["cell"]
+				var gpa := off + (Vector2(ga) + Vector2(0.5, 0.5)) * cs
+				var gpb := off + (Vector2(gb) + Vector2(0.5, 0.5)) * cs
+				var tc: Color = FloorGen.tool_info(int(d.get("tool", 0))).get("color", Color.WHITE)
+				draw_line(gpa, gpa.lerp(gpb, 0.55), tc, 4.0 * _s)
+				draw_circle(gpb, 5.0 * _s, Color(1.0, 0.4, 0.55, 0.85))
+				continue
 			var ca: Vector2i = (rooms[a] as Dictionary)["cell"]
 			var cb: Vector2i = (rooms[b] as Dictionary)["cell"]
 			var pa := off + (Vector2(ca) + Vector2(0.5, 0.5)) * cs
@@ -354,3 +399,5 @@ class MiniMap extends Control:
 				draw_circle(mid, 6.0 * _s, Color(0.85, 0.45, 1.0))
 			elif role == "secret":
 				draw_circle(mid, 4.0 * _s, UiKit.GOLD)
+			elif role == "vault":
+				draw_circle(mid, 4.5 * _s, Color(1.0, 0.4, 0.55))
