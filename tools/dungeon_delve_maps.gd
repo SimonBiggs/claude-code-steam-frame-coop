@@ -14,7 +14,7 @@ const FloorGen := preload("res://games/dungeon_delve/floorgen.gd")
 const Friends := preload("res://games/dungeon_delve/friends.gd")
 const Deep := preload("res://games/dungeon_delve/deep.gd")
 
-const ROLE_RIM := {"start": Color(0.4, 1.0, 0.5), "exit": Color(1, 1, 1), "boss": Color(1.0, 0.3, 0.3), "secret": Color(0.75, 0.45, 1.0), "shop": Color(1.0, 0.85, 0.3)}
+const ROLE_RIM := {"start": Color(0.4, 1.0, 0.5), "exit": Color(1, 1, 1), "boss": Color(1.0, 0.3, 0.3), "secret": Color(0.75, 0.45, 1.0), "shop": Color(1.0, 0.85, 0.3), "vault": Color(1.0, 0.4, 0.6)}
 const DOOR_COL := [Color(0.75, 0.75, 0.8), Color(1.0, 0.82, 0.25), Color(0.75, 0.45, 1.0), Color(0.3, 0.95, 1.0), Color(1.0, 0.3, 0.3)]
 const GLYPHS := {"0": "111101101101111", "1": "010110010010111", "2": "111001111100111", "3": "111001111001111", "4": "101101111001001",
 	"5": "111100111001111", "6": "111100111101111", "7": "111001001001001", "8": "111101111101111", "9": "111101111001111",
@@ -115,6 +115,10 @@ func _draw_floor(img: Image, f: Dictionary, ox: int, oy: int, cell_px: int) -> v
 		if r.has("key_at"):
 			var kp: Vector2i = w.call(r["key_at"])
 			_diamond(img, kp, 4, Color(1.0, 1.0, 0.3))
+		if r.has("piece_at"):  # a heart piece (behind a gate)
+			_disc(img, w.call(r["piece_at"]), 5, Color(1.0, 0.4, 0.6))
+		if r.has("tool_at") and int(f.get("tool", -1)) >= 0:  # Cinder's tool lying here
+			_diamond(img, w.call(r["tool_at"]), 6, FloorGen.TOOLS[int(f["tool"])]["color"])
 		if r.has("stairs"):
 			var sp: Vector2i = w.call(r["stairs"])
 			for k in 3:
@@ -133,6 +137,8 @@ func _draw_floor(img: Image, f: Dictionary, ox: int, oy: int, cell_px: int) -> v
 		var my := oy + (a.y + b.y) * cell_px / 2 + cell_px / 2
 		var horiz := a.y == b.y
 		var col: Color = DOOR_COL[clampi(int(dd["type"]), 0, DOOR_COL.size() - 1)]
+		if int(dd["type"]) == FloorGen.GATE:  # a gate: its tool's colour
+			col = FloorGen.tool_info(int(dd.get("tool", 0))).get("color", Color.WHITE)
 		if horiz:
 			img.fill_rect(Rect2i(mx - 5, my - 5, 10, 10), col)
 		else:
