@@ -927,7 +927,7 @@ func _selftest_main() -> void:
 		await tree.process_frame
 		_stop_sounds(tree.root)
 		OS.delay_msec(100)
-	tree.quit(0 if r.pass else 1)
+	preload("res://core/vr_watch.gd").quit_on_purpose(tree, 0 if r.pass else 1)  # (a bare quit() makes the arcade restart itself)
 
 
 func _stop_sounds(n: Node) -> void:
