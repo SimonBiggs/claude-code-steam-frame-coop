@@ -367,7 +367,24 @@ func _load_registered() -> void:
 
 
 static func mentions(text: String, word: String) -> bool:
-	return RegEx.create_from_string("\\b%s\\b" % word).search(text) != null
+	return RegEx.create_from_string("\\b%s\\b" % word).search(code_only(text)) != null
+
+
+## A script's code without its strings and comments: a class name in a story line ("Herd them home!") or a comment
+## is not a use of that class (2026-11-26: the reload lint blamed Sheepdog's story.gd for herd.gd that way).
+static var _code_cache := {}
+static var _strip_re: RegEx
+static func code_only(text: String) -> String:
+	var k := text.hash()
+	if _code_cache.has(k):
+		return _code_cache[k]
+	if _strip_re == null:
+		_strip_re = RegEx.create_from_string("\"\"\"[\\s\\S]*?\"\"\"|\"(?:[^\"\\\\\\n]|\\\\.)*\"|'(?:[^'\\\\\\n]|\\\\.)*'|#[^\\n]*")
+	if _code_cache.size() > 4000:
+		_code_cache.clear()
+	var out := _strip_re.sub(text, "\"\"", true)
+	_code_cache[k] = out
+	return out
 
 
 ## Remember a script's class_name; true when the set of classes the engine doesn't know changed.
