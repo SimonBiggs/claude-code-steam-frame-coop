@@ -503,7 +503,21 @@ export async function debt() {
         const [a, b] = await Promise.all([readFile(join(GD, f)).catch(() => null), readFile(join(dir, "addons/gdev", f)).catch(() => null)]);
         if (a && b && !a.equals(b)) issues.push({ kind: "gdev-addon", what: `~/GodotProjects/${ent.name}/addons/gdev/${f} differs from ~/.local/share/gdev/${f}`, fix: `cp ~/.local/share/gdev/${f} ${dir}/addons/gdev/, run its tests/run.sh, commit (and game-deploy-deck it if it is on the Decks)` });
       }
+      // Hot reload is checked in every game (2026-11-26: Sprout Hop's new class_name journey.gd and Continents of Power's
+      // daily jobs needed a relaunch): its tests/run.sh runs the bridge's reload_selftest (GDEV_RELOAD_TEST=1 on main.tscn).
+      const runSh = await readFile(join(dir, "tests/run.sh"), "utf8").catch(() => null);
+      const hasGdev = await stat(join(dir, "addons/gdev/gdev_main.gd")).then(() => true, () => false);
+      if (hasGdev && runSh !== null && !runSh.includes("GDEV_RELOAD_TEST=1"))
+        issues.push({ kind: "hot-reload-untested", what: `~/GodotProjects/${ent.name}/tests/run.sh does not run the hot reload self-test`, fix: `add the GDEV_RELOAD_TEST=1 "GDEV RELOAD TEST: PASS" run on res://main.tscn (copy it from ~/GodotProjects/jump-platformer/tests/run.sh), fix what it finds, commit` });
     }
+  }
+  // duo-arena's own bridge logic (core/dev/gdev_main.gd = the shared gdev_main.gd + the TV-screen / run additions) has
+  // every function of the shared copy: a copy that fell behind would miss hot reload fixes (new classes, setup hooks).
+  {
+    const shared = await readFile(join(HOME, ".local/share/gdev/gdev_main.gd"), "utf8").catch(() => "");
+    const own = await readFile(join(LIVE, "core/dev/gdev_main.gd"), "utf8").catch(() => "");
+    const missing = [...shared.matchAll(/^(?:static )?func (\w+)\(/gm)].map(m => m[1]).filter(fn => own && !new RegExp(`^(?:static )?func ${fn}\\(`, "m").test(own));
+    if (own && missing.length) issues.push({ kind: "gdev-main-behind", what: `duo-arena core/dev/gdev_main.gd lacks ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? "..." : ""} from ~/.local/share/gdev/gdev_main.gd`, fix: "port the shared gdev_main.gd changes into core/dev/gdev_main.gd (keep its tv_screen / run additions), run tests/gdev_reload_test.tscn, land" });
   }
   // Real-play telemetry (2026-11-11: no family RUN lines reached the Steam Machine for 2 weeks and nobody noticed):
   // every machine pushes its RUN lines to duo-telemetry-recv; warn when nothing real has arrived for 7 days, or a
@@ -789,7 +803,7 @@ export async function guard(game: string, project = STAGE) {
 /** Repo-wide guard tests every landing runs (2026-11-11: gen_budget_test failed on main unnoticed because no landing
  *  ran it; each of these took < 45 s on all of main then). lan_update_test stays out: it compiles a deliberately broken
  *  script, whose expected "Parse Error" would read as a SCRIPT ERROR here. */
-export const REPO_GUARDS = ["vr_watch_test", "gen_budget_test", "who_test", "who_net_test", "classic_seats_test", "menu_test", "party_stale_press_test", "bg_gen_test", "engine_sys_test", "engine_ui_test", "pause_banner_test", "contrast_test", "vr_wrist_menu_test", "bot_phase_watch_test", "season_override_test", "vertex_color_srgb_test", "net_mode_sync_test", "forced_mode_test", "thread_quit_test", "telemetry_coverage_test", "see_through_prio_test", "shared_scripts_test", "story_queue_test", "arcade_frame_time_test", "pick_pull_test", "first_goal_test"];
+export const REPO_GUARDS = ["vr_watch_test", "gen_budget_test", "who_test", "who_net_test", "classic_seats_test", "menu_test", "party_stale_press_test", "bg_gen_test", "engine_sys_test", "engine_ui_test", "pause_banner_test", "contrast_test", "vr_wrist_menu_test", "bot_phase_watch_test", "season_override_test", "vertex_color_srgb_test", "net_mode_sync_test", "forced_mode_test", "thread_quit_test", "telemetry_coverage_test", "see_through_prio_test", "shared_scripts_test", "story_queue_test", "arcade_frame_time_test", "pick_pull_test", "first_goal_test", "gdev_reload_test"];
 
 /** Lone flat player (2026-11-11, cove-deep2: a lone Deck gunner ran out of cannonballs, a solo VR host stayed in
  *  practice forever): ONE Deck player, no VR, nobody else (DUO_SOLO=1 DUO_MACHINE_KIND=deck BOT_PLAYERS=1), the

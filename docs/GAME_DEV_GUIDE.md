@@ -152,9 +152,11 @@ score and game over. Use visual-only "ghost" copies of host objects on the clien
 - No `class_name`: use `const Foo := preload("res://games/<id>/foo.gd")` and `Foo.new()`.
 - The scripts hot-reload while the game runs, so prefer lazily created nodes. Setup that only runs in `_ready`
   goes stale after a reload: define `func _on_hot_reload()` on that node to redo it (gdev calls it after reloading
-  the node's script), or check it lazily in `_process`. Static vars keep
-  stale values across reloads (use `Engine` metadata for caches). An error in `_process` skips the
-  rest of that frame.
+  the node's script OR any script it uses, directly or through others: a generator edit rebuilds the data made from
+  it), or check it lazily in `_process`. Static vars keep stale values across reloads, except ones whose name
+  contains `cache` (emptied when their script or code it uses reloads). A node that builds things from a generator
+  (a data script with a RandomNumberGenerator, seed() or the date) needs `_on_hot_reload` or a `# hot-reload: <why>`
+  comment (tests/gdev_reload_test.tscn). An error in `_process` skips the rest of that frame.
 - `WorkerThreadPool` tasks must be waited on, or their memory leaks.
 - After `add_child`, `set_anchors_preset(P)` keeps the old offsets, so a centred / right / bottom
   HUD panel lands half off screen. Use `set_anchors_and_offsets_preset(P, Control.PRESET_MODE_KEEP_SIZE)`
